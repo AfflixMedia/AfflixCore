@@ -16,9 +16,14 @@ export default function Sidebar() {
       </div>
       <nav className="ac-nav">
         {isApc ? (
-          <NavLink to="/brands">
-            <i className="bi bi-shop" /> Brands
-          </NavLink>
+          <>
+            <NavLink to="/brands">
+              <i className="bi bi-shop" /> Brands
+            </NavLink>
+            <NavLink to="/resources">
+              <i className="bi bi-folder2" /> Resources
+            </NavLink>
+          </>
         ) : (
           <>
             <NavLink to="/dashboard">
@@ -37,6 +42,9 @@ export default function Sidebar() {
                 </NavLink>
                 <NavLink to="/client-access">
                   <i className="bi bi-link-45deg" /> Client Access
+                </NavLink>
+                <NavLink to="/resources">
+                  <i className="bi bi-folder2" /> Resources
                 </NavLink>
               </>
             )}

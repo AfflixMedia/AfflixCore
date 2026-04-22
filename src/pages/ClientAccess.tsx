@@ -2,18 +2,21 @@ import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { Button, Card, Modal, Form, Table, Spinner, Alert, Badge, InputGroup } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/AuthContext';
+import { resourceIcon } from '../lib/resourceIcon';
 
 interface Client { id: string; name: string; }
 interface Brand  { id: string; name: string; client_id: string | null; }
+interface Resource { id: string; name: string; url: string; scope: 'general' | 'brand'; brand_id: string | null; }
 interface Link {
   id: string; token: string; label: string | null; client_id: string;
-  brand_ids: string[]; created_at: string; revoked_at: string | null;
+  brand_ids: string[]; resource_ids: string[]; created_at: string; revoked_at: string | null;
 }
 
 export default function ClientAccess() {
   const { user } = useAuth();
   const [clients, setClients] = useState<Client[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
+  const [resources, setResources] = useState<Resource[]>([]);
   const [links, setLinks] = useState<Link[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -21,20 +24,23 @@ export default function ClientAccess() {
   const [show, setShow] = useState(false);
   const [clientId, setClientId] = useState('');
   const [brandIds, setBrandIds] = useState<string[]>([]);
+  const [resourceIds, setResourceIds] = useState<string[]>([]);
   const [label, setLabel] = useState('');
   const [saving, setSaving] = useState(false);
 
   const load = async () => {
     setLoading(true); setErr(null);
-    const [c, b, l] = await Promise.all([
+    const [c, b, r, l] = await Promise.all([
       supabase.from('clients').select('id,name').order('name'),
       supabase.from('brands').select('id,name,client_id').order('name'),
+      supabase.from('resources').select('id,name,url,scope,brand_id').order('name'),
       supabase.from('report_share_links').select('*').order('created_at', { ascending: false }),
     ]);
-    const e = c.error ?? b.error ?? l.error;
+    const e = c.error ?? b.error ?? r.error ?? l.error;
     if (e) { setErr(e.message); setLoading(false); return; }
     setClients(c.data ?? []);
     setBrands(b.data ?? []);
+    setResources((r.data as Resource[]) ?? []);
     setLinks((l.data as Link[]) ?? []);
     setLoading(false);
   };
@@ -48,12 +54,22 @@ export default function ClientAccess() {
     [brands, clientId],
   );
 
+  // resources tied to any of the selected brands + general
+  const relevantResources = useMemo(() => {
+    return resources.filter(r =>
+      r.scope === 'general' || (r.brand_id && brandIds.includes(r.brand_id))
+    );
+  }, [resources, brandIds]);
+
   const openAdd = () => {
-    setClientId(''); setBrandIds([]); setLabel(''); setErr(null); setShow(true);
+    setClientId(''); setBrandIds([]); setResourceIds([]); setLabel(''); setErr(null); setShow(true);
   };
 
   const toggle = (id: string) => {
     setBrandIds(arr => arr.includes(id) ? arr.filter(x => x !== id) : [...arr, id]);
+  };
+  const toggleResource = (id: string) => {
+    setResourceIds(arr => arr.includes(id) ? arr.filter(x => x !== id) : [...arr, id]);
   };
 
   const submit = async (e: FormEvent) => {
@@ -62,7 +78,9 @@ export default function ClientAccess() {
     if (brandIds.length === 0) { setErr('Pick at least one brand'); setSaving(false); return; }
     const token = generateToken();
     const { error } = await supabase.from('report_share_links').insert({
-      token, label: label.trim() || null, client_id: clientId, brand_ids: brandIds, created_by: user?.id,
+      token, label: label.trim() || null, client_id: clientId,
+      brand_ids: brandIds, resource_ids: resourceIds,
+      created_by: user?.id,
     });
     setSaving(false);
     if (error) { setErr(error.message); return; }
@@ -167,19 +185,50 @@ export default function ClientAccess() {
               </Form.Select>
             </Form.Group>
             {clientId && (
-              <Form.Group>
-                <Form.Label>Brands to share</Form.Label>
-                {brandsForClient.length === 0 ? (
-                  <p className="text-muted small mb-0">No brands linked to this client yet. Edit a brand and assign this client first.</p>
-                ) : (
-                  <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid #dee2e6', borderRadius: 6, padding: 10 }}>
-                    {brandsForClient.map(b => (
-                      <Form.Check key={b.id} type="checkbox" id={`b-${b.id}`} label={b.name}
-                        checked={brandIds.includes(b.id)} onChange={() => toggle(b.id)} />
-                    ))}
-                  </div>
+              <>
+                <Form.Group className="mb-3">
+                  <Form.Label>Brands to share</Form.Label>
+                  {brandsForClient.length === 0 ? (
+                    <p className="text-muted small mb-0">No brands linked to this client yet. Edit a brand and assign this client first.</p>
+                  ) : (
+                    <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid #dee2e6', borderRadius: 6, padding: 10 }}>
+                      {brandsForClient.map(b => (
+                        <Form.Check key={b.id} type="checkbox" id={`b-${b.id}`} label={b.name}
+                          checked={brandIds.includes(b.id)} onChange={() => toggle(b.id)} />
+                      ))}
+                    </div>
+                  )}
+                </Form.Group>
+
+                {brandIds.length > 0 && (
+                  <Form.Group>
+                    <Form.Label>Resources to share <small className="text-muted fw-normal">(optional)</small></Form.Label>
+                    {relevantResources.length === 0 ? (
+                      <p className="text-muted small mb-0">No resources available for selected brands. Add resources from the Resources menu.</p>
+                    ) : (
+                      <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #dee2e6', borderRadius: 6, padding: 10 }}>
+                        {relevantResources.map(r => {
+                          const ic = resourceIcon(r.url);
+                          return (
+                            <div key={r.id} className="d-flex align-items-center py-1">
+                              <Form.Check type="checkbox" id={`r-${r.id}`}
+                                checked={resourceIds.includes(r.id)} onChange={() => toggleResource(r.id)}
+                                className="me-2" />
+                              <i className={`bi ${ic.icon} me-2`} style={{ color: ic.color }} />
+                              <label htmlFor={`r-${r.id}`} style={{ cursor: 'pointer', flex: 1 }}>
+                                <span className="fw-semibold">{r.name}</span>
+                                <span className="text-muted small ms-2">
+                                  {r.scope === 'general' ? 'General' : brands.find(b => b.id === r.brand_id)?.name}
+                                </span>
+                              </label>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </Form.Group>
                 )}
-              </Form.Group>
+              </>
             )}
           </Modal.Body>
           <Modal.Footer>

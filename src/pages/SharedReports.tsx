@@ -5,18 +5,21 @@ import { supabase } from '../lib/supabase';
 import { addDays, formatRange, formatHuman, fromISO } from '../lib/dates';
 import { WeeklyReportContent, emptyContent } from '../lib/reportSchema';
 import ReportDashboard, { TrendPoint } from '../components/ReportDashboard';
+import { resourceIcon } from '../lib/resourceIcon';
 
 interface Brand { id: string; name: string; client: string | null; client_id: string | null; }
 interface Report {
   id: string; brand_id: string; week_start: string; week_end: string;
   week_number: number; status: string; content: WeeklyReportContent;
 }
+interface SharedResource { id: string; name: string; url: string; description: string | null; scope: string; brand_id: string | null; }
 
 export default function SharedReports() {
   const { token } = useParams<{ token: string }>();
   const [client, setClient] = useState<{ id: string; name: string } | null>(null);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [reports, setReports] = useState<Report[]>([]);
+  const [resources, setResources] = useState<SharedResource[]>([]);
   const [label, setLabel] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -37,6 +40,7 @@ export default function SharedReports() {
         setClient(data.client);
         setBrands(data.brands);
         setReports(data.reports);
+        setResources(data.resources ?? []);
         setLabel(data.label);
         if (data.brands?.length === 1) setBrandId(data.brands[0].id);
       } catch (e: any) {
@@ -116,6 +120,38 @@ export default function SharedReports() {
               </div>
             </div>
           </div>
+
+          {resources.length > 0 && (
+            <Card className="mb-4">
+              <Card.Header className="fw-semibold bg-white">
+                <i className="bi bi-folder2-open me-2" />Resources
+              </Card.Header>
+              <Card.Body>
+                <Row className="g-2">
+                  {resources.map(r => {
+                    const ic = resourceIcon(r.url);
+                    return (
+                      <Col md={6} lg={4} key={r.id}>
+                        <a href={r.url} target="_blank" rel="noreferrer"
+                          className="d-flex align-items-center gap-2 p-2 rounded border text-decoration-none text-dark"
+                          style={{ background: 'white', borderColor: '#e5e7eb', borderLeftWidth: 3, borderLeftColor: ic.color, transition: 'all .15s' }}
+                          onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = '#f8fafc'}
+                          onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'white'}
+                        >
+                          <i className={`bi ${ic.icon}`} style={{ color: ic.color, fontSize: '1.4rem' }} />
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div className="fw-semibold text-truncate">{r.name}</div>
+                            <small className="text-muted">{ic.label}</small>
+                          </div>
+                          <i className="bi bi-box-arrow-up-right text-muted" />
+                        </a>
+                      </Col>
+                    );
+                  })}
+                </Row>
+              </Card.Body>
+            </Card>
+          )}
 
           {monthFiltered.length === 0 ? (
             <Card body className="text-center text-muted">No reports for this month.</Card>
