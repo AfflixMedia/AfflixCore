@@ -136,15 +136,37 @@ export default function WeeklyReportEdit() {
     setLoadingComments(false);
   };
 
+  const pullInComment = async (cm: Comment) => {
+    if (!report || !profile) return;
+    const priorLabel = priorReports.find(p => p.id === cm.report_id);
+    const origDate = new Date(cm.created_at).toLocaleDateString();
+    const quoted = cm.body.split('\n').map(l => `> ${l}`).join('\n');
+    const body = `📌 Referenced from ${priorLabel ? `Week #${priorLabel.week_number}` : 'prior report'} — ${cm.author_name} (${origDate}):\n${quoted}`;
+    try {
+      await addComment(cm.section as CommentSection, body, profile.full_name || profile.email || 'User');
+      setShowComments(false);
+    } catch (e: any) {
+      alert(e?.message ?? 'Failed to pull comment');
+    }
+  };
+
   if (loading) return <div className="text-center py-5"><Spinner animation="border" /></div>;
   if (err && !report) return <Alert variant="danger">{err}</Alert>;
   if (!report || !brand) return null;
 
-  const sectionsForComments: CommentSection[] = ['overall','top_creators','top_videos','video_performance','gmv_max','product_highlights','shop_health','insights'];
+  const renderComments = (section: CommentSection) => (
+    <SectionComments
+      section={section}
+      comments={comments}
+      mode="authed"
+      currentAuthorName={profile?.full_name || profile?.email || 'User'}
+      onAdd={(b, n, parentId) => addComment(section, b, n, parentId)}
+      onDelete={delComment}
+    />
+  );
 
   return (
     <>
-    <Form onSubmit={(e) => submit(e, 'submitted')}>
       <div className="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
         <div>
           <h2 className="mb-1">{brand.name} <small className="text-muted fs-6">— {brand.client}</small></h2>
@@ -161,7 +183,7 @@ export default function WeeklyReportEdit() {
           )}
           <Button variant="outline-secondary" onClick={() => nav('/reporting/weekly')}>Cancel</Button>
           <Button variant="outline-primary" disabled={saving} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
-          <Button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
+          <Button variant="primary" disabled={saving} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
         </div>
       </div>
 
@@ -204,6 +226,7 @@ export default function WeeklyReportEdit() {
           </Row>
         </Card.Body>
       </Card>
+      {renderComments('overall')}
 
       {/* Top Creators */}
       <Section title="Top Creators" onAdd={() => addRow('top_creators', emptyTopCreator)} empty={c.top_creators.length === 0}>
@@ -230,6 +253,7 @@ export default function WeeklyReportEdit() {
           </tbody>
         </Table>
       </Section>
+      {renderComments('top_creators')}
 
       {/* Top Videos — current week only; last week auto-shown in dashboard */}
       <Section title="Top Videos (this week)" onAdd={() => addRow('top_videos', emptyTopVideo)} empty={c.top_videos.length === 0}>
@@ -254,6 +278,7 @@ export default function WeeklyReportEdit() {
           </tbody>
         </Table>
       </Section>
+      {renderComments('top_videos')}
 
       {/* Video Performance */}
       <Card className="mb-4">
@@ -271,6 +296,7 @@ export default function WeeklyReportEdit() {
           </Row>
         </Card.Body>
       </Card>
+      {renderComments('video_performance')}
 
       {/* GMV Max */}
       <Card className="mb-4">
@@ -302,6 +328,7 @@ export default function WeeklyReportEdit() {
           </Row>
         </Card.Body>
       </Card>
+      {renderComments('gmv_max')}
 
       {/* Product Highlights */}
       <Section title="Product Highlights" onAdd={() => addRow('product_highlights', emptyProduct)} empty={c.product_highlights.length === 0}>
@@ -341,6 +368,7 @@ export default function WeeklyReportEdit() {
           </tbody>
         </Table>
       </Section>
+      {renderComments('product_highlights')}
 
       {/* Shop Health */}
       <Card className="mb-4">
@@ -385,6 +413,7 @@ export default function WeeklyReportEdit() {
           </Row>
         </Card.Body>
       </Card>
+      {renderComments('shop_health')}
 
       {/* Insights */}
       <Card className="mb-4">
@@ -395,52 +424,13 @@ export default function WeeklyReportEdit() {
             onChange={e => setC({ ...c, insights: { summary: e.target.value } })} />
         </Card.Body>
       </Card>
+      {renderComments('insights')}
 
       <div className="d-flex justify-content-end gap-2 mb-4">
         <Button variant="outline-secondary" onClick={() => nav('/reporting/weekly')}>Cancel</Button>
         <Button variant="outline-primary" disabled={saving} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
-        <Button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
+        <Button variant="primary" disabled={saving} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
       </div>
-
-    </Form>
-
-    <Card className="mb-4">
-      <Card.Header className="fw-semibold d-flex align-items-center gap-2">
-        <i className="bi bi-chat-dots" /> Conversation on this report
-        {comments.length > 0 && <Badge bg="primary" pill>{comments.length}</Badge>}
-      </Card.Header>
-      <Card.Body>
-        {comments.length === 0 && (
-          <p className="text-muted small mb-3">No comments yet. Post a note below for any section, or wait for client feedback from the shared link.</p>
-        )}
-        {sectionsForComments.map(section => {
-          const hasComments = comments.some(c => c.section === section);
-          const reliablyHidden = !hasComments; // hide empty sections behind a "Show all" toggle? Keep simple: render all
-          if (reliablyHidden) return null;
-          return (
-            <SectionComments
-              key={section}
-              section={section}
-              comments={comments}
-              mode="authed"
-              currentAuthorName={profile?.full_name || profile?.email || 'User'}
-              onAdd={(b, n, parentId) => addComment(section, b, n, parentId)}
-              onDelete={delComment}
-            />
-          );
-        })}
-        {comments.length === 0 && (
-          <SectionComments
-            section="overall"
-            comments={comments}
-            mode="authed"
-            currentAuthorName={profile?.full_name || profile?.email || 'User'}
-            onAdd={(b, n, parentId) => addComment('overall', b, n, parentId)}
-            onDelete={delComment}
-          />
-        )}
-      </Card.Body>
-    </Card>
 
       <Modal show={showComments} onHide={() => setShowComments(false)} centered size="lg" scrollable>
         <Modal.Header closeButton>
@@ -480,6 +470,10 @@ export default function WeeklyReportEdit() {
                               {cm.author_type === 'client' ? 'Client' : cm.author_type === 'bob' ? 'Bob' : 'APC'}
                             </Badge>
                             <span className="text-muted">{new Date(cm.created_at).toLocaleDateString()}</span>
+                            <Button size="sm" variant="outline-primary" className="ms-auto py-0 px-2" style={{ fontSize: '.75rem' }}
+                              onClick={() => pullInComment(cm)} title="Copy this comment into the current report for reference">
+                              <i className="bi bi-pin-angle me-1" /> Pull into this report
+                            </Button>
                           </div>
                           <div style={{ whiteSpace: 'pre-wrap' }}>{cm.body}</div>
                         </div>
