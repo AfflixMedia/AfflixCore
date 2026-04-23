@@ -22,6 +22,7 @@ export default function SharedReports() {
   const [reports, setReports] = useState<Report[]>([]);
   const [resources, setResources] = useState<SharedResource[]>([]);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [publicName, setPublicName] = useState<string>(localStorage.getItem('ac_public_name') ?? '');
   const [label, setLabel] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -102,6 +103,7 @@ export default function SharedReports() {
     if (error) throw error;
     if ((data as any)?.error) throw new Error((data as any).error);
     setComments(prev => [...prev, (data as any).comment as Comment]);
+    setPublicName(authorName);
   };
 
   const reportComments = openReport ? comments.filter(c => c.report_id === openReport.id) : [];
@@ -125,7 +127,7 @@ export default function SharedReports() {
           commentsConfig={{
             mode: 'public',
             comments: reportComments,
-            defaultPublicName: localStorage.getItem('ac_public_name') ?? '',
+            defaultPublicName: publicName,
             onAdd: addComment,
           }}
         />

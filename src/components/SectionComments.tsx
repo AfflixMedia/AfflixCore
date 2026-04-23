@@ -36,9 +36,12 @@ export default function SectionComments(props: SectionCommentsProps) {
   const { section, comments, mode, currentAuthorName, defaultPublicName, onAdd, onDelete } = props;
   const [body, setBody] = useState('');
   const [name, setName] = useState(defaultPublicName ?? '');
+  const [editingName, setEditingName] = useState(false);
   const [open, setOpen] = useState(comments.length > 0);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  const hasSavedName = mode === 'public' && !!defaultPublicName;
 
   const sectionComments = comments.filter(c => c.section === section);
 
@@ -47,11 +50,14 @@ export default function SectionComments(props: SectionCommentsProps) {
     if (!body.trim()) return;
     setBusy(true); setErr(null);
     try {
-      const authorName = mode === 'authed' ? (currentAuthorName ?? 'User') : name.trim();
+      const authorName = mode === 'authed'
+        ? (currentAuthorName ?? 'User')
+        : (hasSavedName && !editingName ? defaultPublicName! : name.trim());
       if (mode === 'public' && !authorName) { setErr('Please enter your name'); setBusy(false); return; }
       await onAdd(body.trim(), authorName);
       if (mode === 'public') localStorage.setItem('ac_public_name', authorName);
       setBody('');
+      setEditingName(false);
     } catch (e: any) {
       setErr(e?.message ?? 'Failed to post');
     } finally {
@@ -103,7 +109,7 @@ export default function SectionComments(props: SectionCommentsProps) {
 
             <Form onSubmit={submit}>
               {err && <Alert variant="danger" className="py-2 mb-2 small">{err}</Alert>}
-              {mode === 'public' && (
+              {mode === 'public' && (!hasSavedName || editingName) && (
                 <Form.Control
                   size="sm"
                   className="mb-2"
@@ -111,6 +117,7 @@ export default function SectionComments(props: SectionCommentsProps) {
                   value={name}
                   onChange={e => setName(e.target.value)}
                   required
+                  autoFocus={editingName}
                 />
               )}
               <Form.Control
@@ -121,7 +128,15 @@ export default function SectionComments(props: SectionCommentsProps) {
                 onChange={e => setBody(e.target.value)}
                 required
               />
-              <div className="text-end mt-2">
+              <div className="d-flex justify-content-between align-items-center mt-2">
+                {mode === 'public' && hasSavedName && !editingName ? (
+                  <small className="text-muted">
+                    Commenting as <strong>{defaultPublicName}</strong>
+                    <button type="button" className="btn btn-link btn-sm p-0 ms-2" onClick={() => { setName(defaultPublicName!); setEditingName(true); }}>
+                      change
+                    </button>
+                  </small>
+                ) : <span />}
                 <Button type="submit" size="sm" disabled={busy || !body.trim()}>
                   <i className="bi bi-send me-1" />
                   {busy ? 'Posting…' : 'Post comment'}
