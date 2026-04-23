@@ -8,7 +8,8 @@ import {
   emptyTopCreator, emptyTopVideo, emptyProduct,
   ListingQuality, YesNoNA,
 } from '../lib/reportSchema';
-import { Comment } from '../components/SectionComments';
+import SectionComments, { Comment, CommentSection } from '../components/SectionComments';
+import { useAuth } from '../auth/AuthContext';
 
 const SECTION_LABELS: Record<string, string> = {
   overall: 'Overall Performance',
@@ -30,9 +31,11 @@ interface Brand { id: string; name: string; client: string; }
 export default function WeeklyReportEdit() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
+  const { profile } = useAuth();
   const [report, setReport] = useState<ReportRow | null>(null);
   const [brand, setBrand] = useState<Brand | null>(null);
   const [c, setC] = useState<WeeklyReportContent>(emptyContent());
+  const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -57,9 +60,32 @@ export default function WeeklyReportEdit() {
         .order('week_start', { ascending: false }).limit(12);
       setPriorReports((priors as ReportRow[]) ?? []);
       if (priors && priors.length > 0) setSelectedPriorId((priors[0] as any).id);
+      const { data: cm } = await supabase.from('report_comments')
+        .select('*').eq('report_id', r.id).order('created_at', { ascending: true });
+      setComments((cm as Comment[]) ?? []);
       setLoading(false);
     })();
   }, [id]);
+
+  const addComment = async (section: CommentSection, body: string, authorName: string, parentId?: string) => {
+    if (!report || !profile) return;
+    const { data, error } = await supabase.from('report_comments').insert({
+      report_id: report.id,
+      section,
+      author_type: profile.role === 'bob' ? 'bob' : 'apc',
+      author_name: authorName,
+      body,
+      parent_id: parentId ?? null,
+    }).select().single();
+    if (error) throw error;
+    setComments(prev => [...prev, data as Comment]);
+  };
+  const delComment = async (cid: string) => {
+    const prevState = comments;
+    setComments(comments.filter(x => x.id !== cid));
+    const { error } = await supabase.from('report_comments').delete().eq('id', cid);
+    if (error) { alert(error.message); setComments(prevState); }
+  };
 
   const o = c.overall;
   const vp = c.video_performance;
@@ -114,7 +140,10 @@ export default function WeeklyReportEdit() {
   if (err && !report) return <Alert variant="danger">{err}</Alert>;
   if (!report || !brand) return null;
 
+  const sectionsForComments: CommentSection[] = ['overall','top_creators','top_videos','video_performance','gmv_max','product_highlights','shop_health','insights'];
+
   return (
+    <>
     <Form onSubmit={(e) => submit(e, 'submitted')}>
       <div className="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
         <div>
@@ -373,6 +402,46 @@ export default function WeeklyReportEdit() {
         <Button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
       </div>
 
+    </Form>
+
+    <Card className="mb-4">
+      <Card.Header className="fw-semibold d-flex align-items-center gap-2">
+        <i className="bi bi-chat-dots" /> Conversation on this report
+        {comments.length > 0 && <Badge bg="primary" pill>{comments.length}</Badge>}
+      </Card.Header>
+      <Card.Body>
+        {comments.length === 0 && (
+          <p className="text-muted small mb-3">No comments yet. Post a note below for any section, or wait for client feedback from the shared link.</p>
+        )}
+        {sectionsForComments.map(section => {
+          const hasComments = comments.some(c => c.section === section);
+          const reliablyHidden = !hasComments; // hide empty sections behind a "Show all" toggle? Keep simple: render all
+          if (reliablyHidden) return null;
+          return (
+            <SectionComments
+              key={section}
+              section={section}
+              comments={comments}
+              mode="authed"
+              currentAuthorName={profile?.full_name || profile?.email || 'User'}
+              onAdd={(b, n, parentId) => addComment(section, b, n, parentId)}
+              onDelete={delComment}
+            />
+          );
+        })}
+        {comments.length === 0 && (
+          <SectionComments
+            section="overall"
+            comments={comments}
+            mode="authed"
+            currentAuthorName={profile?.full_name || profile?.email || 'User'}
+            onAdd={(b, n, parentId) => addComment('overall', b, n, parentId)}
+            onDelete={delComment}
+          />
+        )}
+      </Card.Body>
+    </Card>
+
       <Modal show={showComments} onHide={() => setShowComments(false)} centered size="lg" scrollable>
         <Modal.Header closeButton>
           <Modal.Title>Previous comments — reference</Modal.Title>
@@ -426,7 +495,7 @@ export default function WeeklyReportEdit() {
           <Button variant="secondary" onClick={() => setShowComments(false)}>Close</Button>
         </Modal.Footer>
       </Modal>
-    </Form>
+    </>
   );
 }
 
