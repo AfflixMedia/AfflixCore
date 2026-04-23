@@ -98,10 +98,10 @@ export default function SharedReports() {
   if (loading) return <PublicShell clientName={clientName}><div className="text-center py-5"><Spinner animation="border" /></div></PublicShell>;
   if (err) return <PublicShell clientName={clientName}><Alert variant="danger">{err}</Alert></PublicShell>;
 
-  const addComment = async (section: CommentSection, body: string, authorName: string) => {
+  const addComment = async (section: CommentSection, body: string, authorName: string, parentId?: string) => {
     if (!openReport) return;
     const { data, error } = await supabase.functions.invoke('post-shared-comment', {
-      body: { token, report_id: openReport.id, section, author_name: authorName, body },
+      body: { token, report_id: openReport.id, section, author_name: authorName, body, parent_id: parentId },
     });
     if (error) throw error;
     if ((data as any)?.error) throw new Error((data as any).error);

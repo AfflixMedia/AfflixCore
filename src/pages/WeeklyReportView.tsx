@@ -61,7 +61,7 @@ export default function WeeklyReportView() {
     };
   }), [trend]);
 
-  const addComment = async (section: CommentSection, body: string, authorName: string) => {
+  const addComment = async (section: CommentSection, body: string, authorName: string, parentId?: string) => {
     if (!report || !profile) return;
     const { data, error } = await supabase.from('report_comments').insert({
       report_id: report.id,
@@ -69,6 +69,7 @@ export default function WeeklyReportView() {
       author_type: profile.role === 'bob' ? 'bob' : 'apc',
       author_name: authorName,
       body,
+      parent_id: parentId ?? null,
     }).select().single();
     if (error) throw error;
     setComments(prev => [...prev, data as Comment]);

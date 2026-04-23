@@ -13,7 +13,7 @@ export interface CommentsConfig {
   comments: Comment[];
   currentAuthorName?: string;
   defaultPublicName?: string;
-  onAdd: (section: CommentSection, body: string, authorName: string) => Promise<void>;
+  onAdd: (section: CommentSection, body: string, authorName: string, parentId?: string) => Promise<void>;
   onDelete?: (id: string) => Promise<void>;
 }
 
@@ -52,7 +52,7 @@ export default function ReportDashboard({
         mode={commentsConfig.mode}
         currentAuthorName={commentsConfig.currentAuthorName}
         defaultPublicName={commentsConfig.defaultPublicName}
-        onAdd={(body, name) => commentsConfig.onAdd(section, body, name)}
+        onAdd={(body, name, parentId) => commentsConfig.onAdd(section, body, name, parentId)}
         onDelete={commentsConfig.onDelete}
       />
     );

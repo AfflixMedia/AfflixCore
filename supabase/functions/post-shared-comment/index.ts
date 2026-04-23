@@ -21,7 +21,7 @@ serve(async (req) => {
     const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const admin = createClient(supabaseUrl, serviceKey);
 
-    const { token, report_id, section, author_name, body } = await req.json();
+    const { token, report_id, section, author_name, body, parent_id } = await req.json();
     if (!token || !report_id || !section || !author_name || !body) {
       return json({ error: 'token, report_id, section, author_name, body required' }, 400);
     }
@@ -39,12 +39,19 @@ serve(async (req) => {
     const brandIds: string[] = link.brand_ids ?? [];
     if (!brandIds.includes(report.brand_id)) return json({ error: 'Not allowed' }, 403);
 
+    if (parent_id) {
+      const { data: parent } = await admin.from('report_comments')
+        .select('report_id').eq('id', parent_id).maybeSingle();
+      if (!parent || parent.report_id !== report_id) return json({ error: 'Invalid parent' }, 400);
+    }
+
     const { data: inserted, error } = await admin.from('report_comments').insert({
       report_id,
       section,
       author_type: 'client',
       author_name: String(author_name).trim().slice(0, 80),
       body: String(body).trim().slice(0, 4000),
+      parent_id: parent_id ?? null,
     }).select().single();
     if (error) return json({ error: error.message }, 500);
     return json({ comment: inserted });
