@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Card, Spinner, Alert, Form, Row, Col, Badge, Button } from 'react-bootstrap';
+import { Card, Spinner, Alert, Form, Row, Col, Badge, Button, Tab, Nav } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import { addDays, formatRange, formatHuman, fromISO } from '../lib/dates';
 import { WeeklyReportContent, emptyContent } from '../lib/reportSchema';
@@ -24,8 +24,9 @@ export default function SharedReports() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
+  const [activeBrandId, setActiveBrandId] = useState<string>('');
+  const [activeTab, setActiveTab] = useState<'reporting' | 'resources'>('reporting');
   const [month, setMonth] = useState(currentMonth());
-  const [brandId, setBrandId] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -42,7 +43,7 @@ export default function SharedReports() {
         setReports(data.reports);
         setResources(data.resources ?? []);
         setLabel(data.label);
-        if (data.brands?.length === 1) setBrandId(data.brands[0].id);
+        if (data.brands?.length > 0) setActiveBrandId(data.brands[0].id);
       } catch (e: any) {
         setErr(e?.message ?? 'Failed to load');
       }
@@ -50,15 +51,22 @@ export default function SharedReports() {
     })();
   }, [token]);
 
+  const activeBrand = useMemo(() => brands.find(b => b.id === activeBrandId) ?? null, [brands, activeBrandId]);
+
+  const brandReports = useMemo(() => {
+    return reports.filter(r => r.brand_id === activeBrandId);
+  }, [reports, activeBrandId]);
+
   const monthFiltered = useMemo(() => {
-    return reports.filter(r => {
-      const d = fromISO(r.week_start);
-      const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      const match = ym === month;
-      const brandMatch = brandId ? r.brand_id === brandId : true;
-      return match && brandMatch;
-    });
-  }, [reports, month, brandId]);
+    return brandReports.filter(r => r.week_start.slice(0, 7) === month);
+  }, [brandReports, month]);
+
+  const brandResources = useMemo(() => {
+    // brand-specific + general for the public
+    return resources.filter(r =>
+      (r.scope === 'brand' && r.brand_id === activeBrandId) || r.scope === 'general'
+    );
+  }, [resources, activeBrandId]);
 
   const openReport = useMemo(() => reports.find(r => r.id === openId) ?? null, [reports, openId]);
   const prevReport = useMemo(() => {
@@ -83,110 +91,205 @@ export default function SharedReports() {
   if (loading) return <PublicShell clientName={clientName}><div className="text-center py-5"><Spinner animation="border" /></div></PublicShell>;
   if (err) return <PublicShell clientName={clientName}><Alert variant="danger">{err}</Alert></PublicShell>;
 
-  const openBrand = openReport ? brands.find(b => b.id === openReport.brand_id) : null;
+  // Report detail view
+  if (openReport && activeBrand) {
+    return (
+      <PublicShell clientName={clientName}>
+        <div className="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
+          <div>
+            <div className="text-muted small">{activeBrand.name}</div>
+            <h4 className="mb-0">Week #{openReport.week_number} — {formatRange(openReport.week_start, openReport.week_end)}</h4>
+          </div>
+          <Button variant="outline-secondary" onClick={() => setOpenId(null)}>← Back</Button>
+        </div>
+        <ReportDashboard
+          c={normalize(openReport.content)}
+          p={prevReport ? normalize(prevReport.content) : null}
+          trendData={trendData}
+          hasPrev={!!prevReport}
+        />
+      </PublicShell>
+    );
+  }
+
+  const brandReportCount = (brandId: string) => reports.filter(r => r.brand_id === brandId).length;
+  const brandResourceCount = (brandId: string) =>
+    resources.filter(r => (r.scope === 'brand' && r.brand_id === brandId) || r.scope === 'general').length;
 
   return (
     <PublicShell clientName={clientName}>
-      {openReport && openBrand ? (
-        <>
-          <div className="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
-            <div>
-              <div className="text-muted small">{openBrand.name}</div>
-              <h4 className="mb-0">Week #{openReport.week_number} — {formatRange(openReport.week_start, openReport.week_end)}</h4>
-            </div>
-            <Button variant="outline-secondary" onClick={() => setOpenId(null)}>← Back</Button>
-          </div>
-          <ReportDashboard
-            c={normalize(openReport.content)}
-            p={prevReport ? normalize(prevReport.content) : null}
-            trendData={trendData}
-            hasPrev={!!prevReport}
-          />
-        </>
-      ) : (
-        <>
-          <div className="d-flex justify-content-end mb-4">
-            <div className="d-flex align-items-end gap-2 flex-wrap" style={{ maxWidth: 520 }}>
-              <div>
-                <Form.Label className="small mb-1 text-muted">Month</Form.Label>
-                <Form.Control size="sm" type="month" value={month} onChange={e => setMonth(e.target.value)} style={{ minWidth: 160 }} />
-              </div>
-              <div>
-                <Form.Label className="small mb-1 text-muted">Brand</Form.Label>
-                <Form.Select size="sm" value={brandId} onChange={e => setBrandId(e.target.value)} style={{ minWidth: 180 }}>
-                  <option value="">All brands</option>
-                  {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </Form.Select>
-              </div>
-            </div>
-          </div>
+      {label && <div className="text-muted small mb-3">{label}</div>}
 
-          {resources.length > 0 && (
-            <Card className="mb-4">
-              <Card.Header className="fw-semibold bg-white">
-                <i className="bi bi-folder2-open me-2" />Resources
-              </Card.Header>
-              <Card.Body>
-                <Row className="g-2">
-                  {resources.map(r => {
-                    const ic = resourceIcon(r.url);
-                    return (
-                      <Col md={6} lg={4} key={r.id}>
-                        <a href={r.url} target="_blank" rel="noreferrer"
-                          className="d-flex align-items-center gap-2 p-2 rounded border text-decoration-none text-dark"
-                          style={{ background: 'white', borderColor: '#e5e7eb', borderLeftWidth: 3, borderLeftColor: ic.color, transition: 'all .15s' }}
-                          onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = '#f8fafc'}
-                          onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'white'}
-                        >
-                          <i className={`bi ${ic.icon}`} style={{ color: ic.color, fontSize: '1.4rem' }} />
-                          <div style={{ minWidth: 0, flex: 1 }}>
-                            <div className="fw-semibold text-truncate">{r.name}</div>
-                            <small className="text-muted">{ic.label}</small>
-                          </div>
-                          <i className="bi bi-box-arrow-up-right text-muted" />
-                        </a>
-                      </Col>
-                    );
-                  })}
-                </Row>
-              </Card.Body>
-            </Card>
-          )}
+      {/* Brand tiles */}
+      <div className="mb-4">
+        <div className="d-flex align-items-center gap-2 mb-2 flex-wrap">
+          {brands.map(b => {
+            const active = b.id === activeBrandId;
+            return (
+              <button
+                key={b.id}
+                onClick={() => { setActiveBrandId(b.id); setOpenId(null); }}
+                className="border-0"
+                style={{
+                  background: active ? 'linear-gradient(135deg, #2563eb, #7c3aed)' : 'white',
+                  color: active ? 'white' : '#111827',
+                  border: active ? 'none' : '1px solid #e5e7eb',
+                  borderRadius: 12,
+                  padding: '12px 20px',
+                  minWidth: 180,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  boxShadow: active ? '0 8px 20px rgba(37,99,235,.25)' : 'none',
+                  transition: 'all .15s',
+                }}
+              >
+                <div className="small" style={{ opacity: active ? .8 : .55, fontSize: '.7rem', letterSpacing: '.5px' }}>BRAND</div>
+                <div className="fw-semibold" style={{ fontSize: '1.05rem' }}>{b.name}</div>
+                <div className="small mt-1" style={{ opacity: active ? .85 : .6 }}>
+                  {brandReportCount(b.id)} report{brandReportCount(b.id) !== 1 ? 's' : ''} · {brandResourceCount(b.id)} resource{brandResourceCount(b.id) !== 1 ? 's' : ''}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
-          {monthFiltered.length === 0 ? (
-            <Card body className="text-center text-muted">No reports for this month.</Card>
-          ) : (
-            <Row className="g-3">
-              {monthFiltered.map(r => {
-                const b = brands.find(x => x.id === r.brand_id);
-                return (
-                  <Col md={6} lg={4} key={r.id}>
-                    <Card
-                      className="h-100 shadow-sm report-card"
-                      style={{ cursor: 'pointer', borderLeft: '4px solid #2563eb', transition: 'transform .15s, box-shadow .15s' }}
-                      onClick={() => setOpenId(r.id)}
-                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)'; (e.currentTarget as HTMLElement).style.boxShadow = '0 8px 24px rgba(0,0,0,.08)'; }}
-                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.transform = ''; (e.currentTarget as HTMLElement).style.boxShadow = ''; }}
-                    >
-                      <Card.Body>
-                        <div className="d-flex justify-content-between align-items-start">
-                          <div>
-                            <div className="text-muted small text-uppercase" style={{ letterSpacing: '.5px', fontSize: '.7rem' }}>Brand</div>
-                            <h5 className="mb-2">{b?.name ?? '—'}</h5>
-                          </div>
-                          <Badge bg="primary" pill>Week #{r.week_number}</Badge>
-                        </div>
-                        <div className="text-muted small mt-3">
-                          <i className="bi bi-calendar3 me-1" /> {formatRange(r.week_start, r.week_end)}
-                        </div>
-                      </Card.Body>
-                    </Card>
-                  </Col>
-                );
-              })}
-            </Row>
-          )}
-        </>
+      {activeBrand && (
+        <Tab.Container activeKey={activeTab} onSelect={k => setActiveTab((k as any) ?? 'reporting')}>
+          <Card className="shadow-sm border-0">
+            <Card.Header className="bg-white border-0 pt-3 pb-0">
+              <Nav variant="tabs" className="border-0">
+                <Nav.Item>
+                  <Nav.Link eventKey="reporting" className="d-flex align-items-center gap-2 px-3">
+                    <i className="bi bi-bar-chart-line" /> Reporting
+                    <Badge bg="secondary">{brandReports.length}</Badge>
+                  </Nav.Link>
+                </Nav.Item>
+                <Nav.Item>
+                  <Nav.Link eventKey="resources" className="d-flex align-items-center gap-2 px-3">
+                    <i className="bi bi-folder2" /> Resources
+                    <Badge bg="secondary">{brandResources.length}</Badge>
+                  </Nav.Link>
+                </Nav.Item>
+              </Nav>
+            </Card.Header>
+            <Card.Body>
+              <Tab.Content>
+                <Tab.Pane eventKey="reporting">
+                  <div className="d-flex justify-content-between align-items-end mb-3 flex-wrap gap-2">
+                    <div>
+                      <h5 className="mb-0">{activeBrand.name} — Reports</h5>
+                      <small className="text-muted">{monthFiltered.length} report{monthFiltered.length !== 1 ? 's' : ''} in selected month</small>
+                    </div>
+                    <div>
+                      <Form.Label className="small mb-1 text-muted">Month</Form.Label>
+                      <Form.Control size="sm" type="month" value={month} onChange={e => setMonth(e.target.value)} style={{ minWidth: 170 }} />
+                    </div>
+                  </div>
+
+                  {brandReports.length === 0 ? (
+                    <div className="text-center py-5 text-muted">
+                      <i className="bi bi-inbox" style={{ fontSize: '2rem' }} /><br />
+                      No reports shared for this brand yet.
+                    </div>
+                  ) : monthFiltered.length === 0 ? (
+                    <div className="text-center py-4 text-muted">No reports in this month. Try a different month.</div>
+                  ) : (
+                    <Row className="g-3">
+                      {monthFiltered.map(r => (
+                        <Col md={6} lg={4} key={r.id}>
+                          <Card
+                            className="h-100 shadow-sm report-card"
+                            style={{ cursor: 'pointer', borderLeft: '4px solid #2563eb', transition: 'transform .15s, box-shadow .15s' }}
+                            onClick={() => setOpenId(r.id)}
+                            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)'; (e.currentTarget as HTMLElement).style.boxShadow = '0 8px 24px rgba(0,0,0,.08)'; }}
+                            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.transform = ''; (e.currentTarget as HTMLElement).style.boxShadow = ''; }}
+                          >
+                            <Card.Body>
+                              <div className="d-flex justify-content-between align-items-start">
+                                <div className="text-muted small text-uppercase" style={{ letterSpacing: '.5px', fontSize: '.7rem' }}>Week</div>
+                                <Badge bg="primary" pill>#{r.week_number}</Badge>
+                              </div>
+                              <div className="fs-5 fw-semibold mt-1">{formatRange(r.week_start, r.week_end)}</div>
+                              <div className="text-muted small mt-2">
+                                <i className="bi bi-calendar3 me-1" /> Click to view dashboard
+                              </div>
+                            </Card.Body>
+                          </Card>
+                        </Col>
+                      ))}
+                    </Row>
+                  )}
+                </Tab.Pane>
+
+                <Tab.Pane eventKey="resources">
+                  <div className="d-flex justify-content-between align-items-end mb-3">
+                    <div>
+                      <h5 className="mb-0">{activeBrand.name} — Resources</h5>
+                      <small className="text-muted">Includes shared general resources</small>
+                    </div>
+                  </div>
+                  {brandResources.length === 0 ? (
+                    <div className="text-center py-5 text-muted">
+                      <i className="bi bi-folder-x" style={{ fontSize: '2rem' }} /><br />
+                      No resources shared for this brand.
+                    </div>
+                  ) : (
+                    <Row className="g-3">
+                      {brandResources.map(r => {
+                        const ic = resourceIcon(r.url);
+                        return (
+                          <Col md={6} lg={4} key={r.id}>
+                            <a href={r.url} target="_blank" rel="noreferrer"
+                              className="d-flex align-items-center gap-3 p-3 rounded text-decoration-none text-dark h-100"
+                              style={{
+                                background: 'white',
+                                border: '1px solid #e5e7eb',
+                                transition: 'transform .15s, box-shadow .15s, border-color .15s',
+                              }}
+                              onMouseEnter={e => {
+                                const el = e.currentTarget as HTMLElement;
+                                el.style.transform = 'translateY(-2px)';
+                                el.style.boxShadow = '0 10px 25px rgba(0,0,0,.08)';
+                                el.style.borderColor = ic.color;
+                              }}
+                              onMouseLeave={e => {
+                                const el = e.currentTarget as HTMLElement;
+                                el.style.transform = '';
+                                el.style.boxShadow = '';
+                                el.style.borderColor = '#e5e7eb';
+                              }}
+                            >
+                              <div style={{
+                                width: 44, height: 44, borderRadius: 10,
+                                background: `${ic.color}15`,
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                flexShrink: 0,
+                              }}>
+                                <i className={`bi ${ic.icon}`} style={{ color: ic.color, fontSize: '1.3rem' }} />
+                              </div>
+                              <div style={{ minWidth: 0, flex: 1 }}>
+                                <div className="fw-semibold text-truncate">{r.name}</div>
+                                <div className="d-flex align-items-center gap-2 mt-1">
+                                  <small className="text-muted">{ic.label}</small>
+                                  {r.scope === 'general' && <><span className="text-muted">·</span><small className="text-muted">General</small></>}
+                                </div>
+                                {r.description && (
+                                  <small className="text-muted d-block mt-1 text-truncate">{r.description}</small>
+                                )}
+                              </div>
+                              <i className="bi bi-arrow-up-right-square text-muted" style={{ fontSize: '1.1rem' }} />
+                            </a>
+                          </Col>
+                        );
+                      })}
+                    </Row>
+                  )}
+                </Tab.Pane>
+              </Tab.Content>
+            </Card.Body>
+          </Card>
+        </Tab.Container>
       )}
     </PublicShell>
   );

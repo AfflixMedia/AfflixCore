@@ -38,8 +38,11 @@ export default function Resources() {
       supabase.from('resources').select('*').order('created_at', { ascending: false }),
       supabase.from('brands').select('id,name').order('name'),
     ]);
-    if (r.error || b.error) setErr((r.error ?? b.error)!.message);
-    else { setItems((r.data as Resource[]) ?? []); setBrands((b.data as BrandLite[]) ?? []); }
+    setBrands((b.data as BrandLite[]) ?? []);
+    setItems((r.data as Resource[]) ?? []);
+    if (r.error && !r.error.message?.includes('does not exist')) setErr(r.error.message);
+    else if (r.error) setErr('Run the resources SQL migration in Supabase (schema_resources.sql).');
+    else if (b.error) setErr(b.error.message);
     setLoading(false);
   };
 
@@ -100,8 +103,10 @@ export default function Resources() {
 
   const remove = async (r: Resource) => {
     if (!confirm(`Delete resource "${r.name}"?`)) return;
+    const prev = items;
+    setItems(items.filter(x => x.id !== r.id));
     const { error } = await supabase.from('resources').delete().eq('id', r.id);
-    if (error) alert(error.message); else load();
+    if (error) { alert(error.message); setItems(prev); }
   };
 
   return (

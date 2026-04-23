@@ -22,6 +22,7 @@ export default function ClientAccess() {
   const [err, setErr] = useState<string | null>(null);
 
   const [show, setShow] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [clientId, setClientId] = useState('');
   const [brandIds, setBrandIds] = useState<string[]>([]);
   const [resourceIds, setResourceIds] = useState<string[]>([]);
@@ -62,7 +63,18 @@ export default function ClientAccess() {
   }, [resources, brandIds]);
 
   const openAdd = () => {
+    setEditingId(null);
     setClientId(''); setBrandIds([]); setResourceIds([]); setLabel(''); setErr(null); setShow(true);
+  };
+
+  const openEdit = (l: Link) => {
+    setEditingId(l.id);
+    setClientId(l.client_id);
+    setBrandIds(l.brand_ids ?? []);
+    setResourceIds(l.resource_ids ?? []);
+    setLabel(l.label ?? '');
+    setErr(null);
+    setShow(true);
   };
 
   const toggle = (id: string) => {
@@ -76,34 +88,45 @@ export default function ClientAccess() {
     e.preventDefault();
     setSaving(true); setErr(null);
     if (brandIds.length === 0) { setErr('Pick at least one brand'); setSaving(false); return; }
-    const token = generateToken();
-    const { error } = await supabase.from('report_share_links').insert({
-      token, label: label.trim() || null, client_id: clientId,
-      brand_ids: brandIds, resource_ids: resourceIds,
-      created_by: user?.id,
-    });
+    const payload = {
+      label: label.trim() || null,
+      client_id: clientId,
+      brand_ids: brandIds,
+      resource_ids: resourceIds,
+    };
+    const res = editingId
+      ? await supabase.from('report_share_links').update(payload).eq('id', editingId).select().single()
+      : await supabase.from('report_share_links').insert({ ...payload, token: generateToken(), created_by: user?.id }).select().single();
     setSaving(false);
-    if (error) { setErr(error.message); return; }
-    setShow(false); load();
+    if (res.error) { setErr(res.error.message); return; }
+    const saved = res.data as Link;
+    if (editingId) setLinks(links.map(l => l.id === saved.id ? saved : l));
+    else setLinks([saved, ...links]);
+    setShow(false);
   };
 
   const revoke = async (l: Link) => {
     if (!confirm('Revoke this link? Anyone using it will lose access.')) return;
+    const revoked_at = new Date().toISOString();
+    setLinks(links.map(x => x.id === l.id ? { ...x, revoked_at } : x));
     const { error } = await supabase.from('report_share_links')
-      .update({ revoked_at: new Date().toISOString() }).eq('id', l.id);
-    if (error) alert(error.message); else load();
+      .update({ revoked_at }).eq('id', l.id);
+    if (error) { alert(error.message); setLinks(links); }
   };
 
   const reactivate = async (l: Link) => {
+    setLinks(links.map(x => x.id === l.id ? { ...x, revoked_at: null } : x));
     const { error } = await supabase.from('report_share_links')
       .update({ revoked_at: null }).eq('id', l.id);
-    if (error) alert(error.message); else load();
+    if (error) { alert(error.message); setLinks(links); }
   };
 
   const remove = async (l: Link) => {
     if (!confirm('Delete this link permanently?')) return;
+    const prev = links;
+    setLinks(links.filter(x => x.id !== l.id));
     const { error } = await supabase.from('report_share_links').delete().eq('id', l.id);
-    if (error) alert(error.message); else load();
+    if (error) { alert(error.message); setLinks(prev); }
   };
 
   const linkUrl = (token: string) => `${window.location.origin}/share/${token}`;
@@ -154,6 +177,7 @@ export default function ClientAccess() {
                             : <Badge bg="success">Active</Badge>}
                         </td>
                         <td className="text-end">
+                          <Button size="sm" variant="outline-primary" className="me-2" onClick={() => openEdit(l)}><i className="bi bi-pencil" /></Button>
                           {l.revoked_at
                             ? <Button size="sm" variant="outline-success" className="me-2" onClick={() => reactivate(l)}>Reactivate</Button>
                             : <Button size="sm" variant="outline-warning" className="me-2" onClick={() => revoke(l)}>Revoke</Button>}
@@ -170,7 +194,7 @@ export default function ClientAccess() {
 
       <Modal show={show} onHide={() => setShow(false)} centered>
         <Form onSubmit={submit}>
-          <Modal.Header closeButton><Modal.Title>Create Share Link</Modal.Title></Modal.Header>
+          <Modal.Header closeButton><Modal.Title>{editingId ? 'Edit Share Link' : 'Create Share Link'}</Modal.Title></Modal.Header>
           <Modal.Body>
             {err && <Alert variant="danger">{err}</Alert>}
             <Form.Group className="mb-3">
@@ -234,7 +258,7 @@ export default function ClientAccess() {
           <Modal.Footer>
             <Button variant="secondary" onClick={() => setShow(false)} disabled={saving}>Cancel</Button>
             <Button type="submit" disabled={saving || !clientId || brandIds.length === 0}>
-              {saving ? 'Creating…' : 'Create link'}
+              {saving ? 'Saving…' : (editingId ? 'Save changes' : 'Create link')}
             </Button>
           </Modal.Footer>
         </Form>
