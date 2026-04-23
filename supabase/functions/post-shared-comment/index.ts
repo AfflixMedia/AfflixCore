@@ -12,7 +12,7 @@ const cors = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const SECTIONS = ['overall','top_creators','top_videos','gmv_max','product_highlights','insights'];
+const SECTIONS = ['overall','top_creators','top_videos','video_performance','gmv_max','product_highlights','shop_health','insights'];
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });

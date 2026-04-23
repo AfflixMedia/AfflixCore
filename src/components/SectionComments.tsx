@@ -1,7 +1,7 @@
 import { useState, FormEvent } from 'react';
 import { Card, Form, Button, Alert, Badge } from 'react-bootstrap';
 
-export type CommentSection = 'overall' | 'top_creators' | 'top_videos' | 'gmv_max' | 'product_highlights' | 'insights';
+export type CommentSection = 'overall' | 'top_creators' | 'top_videos' | 'video_performance' | 'gmv_max' | 'product_highlights' | 'shop_health' | 'insights';
 
 export interface Comment {
   id: string;
@@ -27,8 +27,10 @@ const SECTION_LABELS: Record<CommentSection, string> = {
   overall: 'Overall Performance',
   top_creators: 'Top Creators',
   top_videos: 'Top Videos',
-  gmv_max: 'GMV Max Campaigns',
+  video_performance: 'Video Performance',
+  gmv_max: 'GMV Max',
   product_highlights: 'Product Highlights',
+  shop_health: 'Shop Health',
   insights: 'Insights',
 };
 

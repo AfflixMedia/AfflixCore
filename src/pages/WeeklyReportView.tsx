@@ -4,7 +4,7 @@ import { Spinner, Alert, Badge, Button } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/AuthContext';
 import { addDays, formatRange, formatHuman } from '../lib/dates';
-import { WeeklyReportContent, emptyContent } from '../lib/reportSchema';
+import { WeeklyReportContent, normalizeContent } from '../lib/reportSchema';
 import ReportDashboard, { TrendPoint } from '../components/ReportDashboard';
 import { Comment, CommentSection } from '../components/SectionComments';
 
@@ -50,13 +50,16 @@ export default function WeeklyReportView() {
     })();
   }, [id]);
 
-  const c = useMemo<WeeklyReportContent>(() => normalize(report?.content), [report]);
-  const p = useMemo<WeeklyReportContent | null>(() => prev ? normalize(prev.content) : null, [prev]);
-  const trendData: TrendPoint[] = useMemo(() => trend.map(t => ({
-    label: formatHuman(t.week_start).slice(0, 6),
-    GMV: t.content?.overall?.gmv ?? 0,
-    'Affiliate GMV': t.content?.overall?.affiliate_gmv ?? 0,
-  })), [trend]);
+  const c = useMemo<WeeklyReportContent>(() => normalizeContent(report?.content), [report]);
+  const p = useMemo<WeeklyReportContent | null>(() => prev ? normalizeContent(prev.content) : null, [prev]);
+  const trendData: TrendPoint[] = useMemo(() => trend.map(t => {
+    const n = normalizeContent(t.content);
+    return {
+      label: formatHuman(t.week_start).slice(0, 6),
+      GMV: n.overall.total_gmv,
+      'Affiliate GMV': n.overall.affiliate_gmv,
+    };
+  }), [trend]);
 
   const addComment = async (section: CommentSection, body: string, authorName: string) => {
     if (!report || !profile) return;
@@ -105,6 +108,7 @@ export default function WeeklyReportView() {
         p={p}
         trendData={trendData}
         hasPrev={!!prev}
+        prevTopVideos={p?.top_videos}
         commentsConfig={{
           mode: 'authed',
           comments,
@@ -115,11 +119,4 @@ export default function WeeklyReportView() {
       />
     </>
   );
-}
-
-function normalize(content: any): WeeklyReportContent {
-  const merged = { ...emptyContent(), ...(content ?? {}) };
-  merged.overall  = { ...emptyContent().overall,  ...(content?.overall ?? {}) };
-  merged.insights = { ...emptyContent().insights, ...(content?.insights ?? {}) };
-  return merged;
 }

@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { Card, Spinner, Alert, Form, Row, Col, Badge, Button, Tab, Nav } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import { addDays, formatRange, formatHuman, fromISO } from '../lib/dates';
-import { WeeklyReportContent, emptyContent } from '../lib/reportSchema';
+import { WeeklyReportContent, normalizeContent } from '../lib/reportSchema';
 import ReportDashboard, { TrendPoint } from '../components/ReportDashboard';
 import { Comment, CommentSection } from '../components/SectionComments';
 import { resourceIcon } from '../lib/resourceIcon';
@@ -84,11 +84,14 @@ export default function SharedReports() {
       .filter(r => r.brand_id === openReport.brand_id && r.week_start <= openReport.week_start)
       .sort((a, b) => a.week_start.localeCompare(b.week_start))
       .slice(-8)
-      .map(t => ({
-        label: formatHuman(t.week_start).slice(0, 6),
-        GMV: t.content?.overall?.gmv ?? 0,
-        'Affiliate GMV': t.content?.overall?.affiliate_gmv ?? 0,
-      }));
+      .map(t => {
+        const n = normalizeContent(t.content);
+        return {
+          label: formatHuman(t.week_start).slice(0, 6),
+          GMV: n.overall.total_gmv,
+          'Affiliate GMV': n.overall.affiliate_gmv,
+        };
+      });
   }, [openReport, reports]);
 
   const clientName = client?.name ?? 'Client';
@@ -120,10 +123,11 @@ export default function SharedReports() {
           <Button variant="outline-secondary" onClick={() => setOpenId(null)}>← Back</Button>
         </div>
         <ReportDashboard
-          c={normalize(openReport.content)}
-          p={prevReport ? normalize(prevReport.content) : null}
+          c={normalizeContent(openReport.content)}
+          p={prevReport ? normalizeContent(prevReport.content) : null}
           trendData={trendData}
           hasPrev={!!prevReport}
+          prevTopVideos={prevReport ? normalizeContent(prevReport.content).top_videos : undefined}
           commentsConfig={{
             mode: 'public',
             comments: reportComments,
@@ -337,9 +341,3 @@ function currentMonth(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-function normalize(content: any): WeeklyReportContent {
-  const merged = { ...emptyContent(), ...(content ?? {}) };
-  merged.overall  = { ...emptyContent().overall,  ...(content?.overall ?? {}) };
-  merged.insights = { ...emptyContent().insights, ...(content?.insights ?? {}) };
-  return merged;
-}
