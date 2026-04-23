@@ -1,49 +1,229 @@
+export type ListingQuality = '' | 'excellent' | 'good' | 'fair' | 'poor';
+export type YesNoNA = 'yes' | 'no' | 'not_rated';
+
 export interface OverallPerformance {
-  gmv: number;
+  total_gmv: number;
   affiliate_gmv: number;
   orders: number;
   samples_approved: number;
-  samples_approved_note: string;
-  roi: number;
-  sps: number;
-  videos_posted: number;
-  videos_total_note: string;
-  offsite_gmv: number;
-  tiktok_shop_gmv: number;
-  offsite_effect: number;
+  samples_approved_note: string;       // e.g. "MTD Approved: 38"
+  ad_spend_not_started: boolean;       // true => display "Not yet started"
+  ad_spend: number;
+  ad_spend_target: string;             // e.g. "Target: $5,000"
+  pending_collabs: number;
 }
 
-export interface TopCreator   { name: string; videos: number; items_sold: number; gmv: number; notes: string; }
-export interface TopVideo     { creator_name: string; video_url: string; items_sold: number; gmv: number; views: number; product_clicks: number; notes: string; }
-export interface GmvMaxRow    { campaign: string; spend: number; roi: number; orders: number; cpo: number; gmv: number; notes: string; }
-export interface ProductRow   { product_id: string; product_name: string; units_sold: number; gmv: number; new_videos: number; notes: string; }
-export interface Insights     { summary: string; bullets: string[]; main_call_out: string; }
+export interface TopCreator { name: string; videos: number; items_sold: number; gmv: number; notes: string; }
+export interface TopVideo   { creator_name: string; video_url: string; items_sold: number; gmv: number; }
+
+export interface VideoPerformance {
+  total_videos_posted: number;
+  video_views: number;
+  ctr: number;   // percentage value, e.g. 0.09
+  ctor: number;
+}
+
+export interface GmvMax {
+  not_yet_started: boolean;
+  ad_spend: number;
+  roi: number;
+  orders: number;
+  cpo: number;
+  gmv: number;
+  notes: string;
+}
+
+export interface ProductRow {
+  product_id: string;
+  product_name: string;
+  total_units_sold: number;
+  affiliate_units_sold: number;
+  total_gmv: number;
+  videos_posted: number;
+  listing_quality: ListingQuality;
+  notes: string;
+}
+
+export interface ShopHealth {
+  shop_performance_score: number | null;
+  product_satisfaction_rating: number | null;
+  fulfillment_rating: number | null;
+  customer_service_rating: number | null;
+  dispatching_on_time: YesNoNA;
+  replying_within_24h: YesNoNA;
+  warnings_received: boolean;
+  violations_received: boolean;
+}
+
+export interface Insights { summary: string; }  // summary is now HTML (rich text)
+
+export type CustomFieldType = 'text' | 'number' | 'textarea' | 'richtext' | 'date' | 'url' | 'select';
+
+export interface CustomField {
+  id: string;                 // uuid per field
+  label: string;
+  type: CustomFieldType;
+  options?: string[];         // for type 'select'
+}
+
+export interface CustomSection {
+  id: string;                 // uuid per section
+  name: string;
+  description?: string;
+  is_repeater: boolean;       // true => table of rows; false => single entry
+  fields: CustomField[];
+  rows: Record<string, any>[]; // each row: field.id => value; length==1 when not repeater
+}
 
 export interface WeeklyReportContent {
   overall: OverallPerformance;
   top_creators: TopCreator[];
   top_videos: TopVideo[];
-  gmv_max: GmvMaxRow[];
+  video_performance: VideoPerformance;
+  gmv_max: GmvMax;
   product_highlights: ProductRow[];
+  shop_health: ShopHealth;
   insights: Insights;
+  custom_sections: CustomSection[];
 }
 
 export const emptyOverall = (): OverallPerformance => ({
-  gmv: 0, affiliate_gmv: 0, orders: 0, samples_approved: 0, samples_approved_note: '',
-  roi: 0, sps: 0, videos_posted: 0, videos_total_note: '',
-  offsite_gmv: 0, tiktok_shop_gmv: 0, offsite_effect: 0,
+  total_gmv: 0, affiliate_gmv: 0, orders: 0,
+  samples_approved: 0, samples_approved_note: '',
+  ad_spend_not_started: true, ad_spend: 0, ad_spend_target: '',
+  pending_collabs: 0,
+});
+
+export const emptyVideoPerf = (): VideoPerformance => ({
+  total_videos_posted: 0, video_views: 0, ctr: 0, ctor: 0,
+});
+
+export const emptyGmvMax = (): GmvMax => ({
+  not_yet_started: true, ad_spend: 0, roi: 0, orders: 0, cpo: 0, gmv: 0, notes: '',
+});
+
+export const emptyShopHealth = (): ShopHealth => ({
+  shop_performance_score: null,
+  product_satisfaction_rating: null,
+  fulfillment_rating: null,
+  customer_service_rating: null,
+  dispatching_on_time: 'not_rated',
+  replying_within_24h: 'not_rated',
+  warnings_received: false,
+  violations_received: false,
 });
 
 export const emptyContent = (): WeeklyReportContent => ({
   overall: emptyOverall(),
   top_creators: [],
   top_videos: [],
-  gmv_max: [],
+  video_performance: emptyVideoPerf(),
+  gmv_max: emptyGmvMax(),
   product_highlights: [],
-  insights: { summary: '', bullets: [], main_call_out: '' },
+  shop_health: emptyShopHealth(),
+  insights: { summary: '' },
+  custom_sections: [],
 });
 
 export const emptyTopCreator = (): TopCreator => ({ name: '', videos: 0, items_sold: 0, gmv: 0, notes: '' });
-export const emptyTopVideo   = (): TopVideo   => ({ creator_name: '', video_url: '', items_sold: 0, gmv: 0, views: 0, product_clicks: 0, notes: '' });
-export const emptyGmvMax     = (): GmvMaxRow  => ({ campaign: '', spend: 0, roi: 0, orders: 0, cpo: 0, gmv: 0, notes: '' });
-export const emptyProduct    = (): ProductRow => ({ product_id: '', product_name: '', units_sold: 0, gmv: 0, new_videos: 0, notes: '' });
+export const emptyTopVideo   = (): TopVideo   => ({ creator_name: '', video_url: '', items_sold: 0, gmv: 0 });
+export const emptyProduct    = (): ProductRow => ({
+  product_id: '', product_name: '', total_units_sold: 0, affiliate_units_sold: 0,
+  total_gmv: 0, videos_posted: 0, listing_quality: '', notes: '',
+});
+
+// Backward-compat loader: map old report shapes onto the new one gracefully.
+export function normalizeContent(raw: any): WeeklyReportContent {
+  const src = raw ?? {};
+  const o = src.overall ?? {};
+  const overall: OverallPerformance = {
+    total_gmv: num(o.total_gmv ?? o.gmv),
+    affiliate_gmv: num(o.affiliate_gmv),
+    orders: num(o.orders),
+    samples_approved: num(o.samples_approved),
+    samples_approved_note: str(o.samples_approved_note),
+    ad_spend_not_started: o.ad_spend_not_started ?? true,
+    ad_spend: num(o.ad_spend),
+    ad_spend_target: str(o.ad_spend_target),
+    pending_collabs: num(o.pending_collabs),
+  };
+  const vp: VideoPerformance = {
+    total_videos_posted: num(src.video_performance?.total_videos_posted ?? o.videos_posted),
+    video_views: num(src.video_performance?.video_views),
+    ctr: num(src.video_performance?.ctr),
+    ctor: num(src.video_performance?.ctor),
+  };
+  const gm = Array.isArray(src.gmv_max) ? (src.gmv_max[0] ?? {}) : (src.gmv_max ?? {});
+  const gmv_max: GmvMax = {
+    not_yet_started: gm.not_yet_started ?? (!gm.ad_spend && !gm.gmv),
+    ad_spend: num(gm.ad_spend ?? gm.spend),
+    roi: num(gm.roi),
+    orders: num(gm.orders),
+    cpo: num(gm.cpo),
+    gmv: num(gm.gmv),
+    notes: str(gm.notes),
+  };
+  const product_highlights: ProductRow[] = Array.isArray(src.product_highlights)
+    ? src.product_highlights.map((p: any) => ({
+        product_id: str(p.product_id),
+        product_name: str(p.product_name),
+        total_units_sold: num(p.total_units_sold ?? p.units_sold),
+        affiliate_units_sold: num(p.affiliate_units_sold),
+        total_gmv: num(p.total_gmv ?? p.gmv),
+        videos_posted: num(p.videos_posted ?? p.new_videos),
+        listing_quality: (p.listing_quality ?? '') as ListingQuality,
+        notes: str(p.notes),
+      })) : [];
+  const sh = src.shop_health ?? {};
+  const shop_health: ShopHealth = {
+    shop_performance_score: sh.shop_performance_score ?? (typeof o.sps === 'number' && o.sps > 0 ? o.sps : null),
+    product_satisfaction_rating: sh.product_satisfaction_rating ?? null,
+    fulfillment_rating: sh.fulfillment_rating ?? null,
+    customer_service_rating: sh.customer_service_rating ?? null,
+    dispatching_on_time: sh.dispatching_on_time ?? 'not_rated',
+    replying_within_24h: sh.replying_within_24h ?? 'not_rated',
+    warnings_received: !!sh.warnings_received,
+    violations_received: !!sh.violations_received,
+  };
+  const top_creators: TopCreator[] = Array.isArray(src.top_creators)
+    ? src.top_creators.map((r: any) => ({
+        name: str(r.name), videos: num(r.videos), items_sold: num(r.items_sold),
+        gmv: num(r.gmv), notes: str(r.notes),
+      })) : [];
+  const top_videos: TopVideo[] = Array.isArray(src.top_videos)
+    ? src.top_videos.map((r: any) => ({
+        creator_name: str(r.creator_name),
+        video_url: str(r.video_url),
+        items_sold: num(r.items_sold),
+        gmv: num(r.gmv),
+      })) : [];
+  const custom_sections: CustomSection[] = Array.isArray(src.custom_sections)
+    ? src.custom_sections.map((s: any) => ({
+        id: str(s.id) || crypto.randomUUID(),
+        name: str(s.name),
+        description: str(s.description),
+        is_repeater: !!s.is_repeater,
+        fields: Array.isArray(s.fields) ? s.fields.map((f: any) => ({
+          id: str(f.id) || crypto.randomUUID(),
+          label: str(f.label),
+          type: (['text','number','textarea','richtext','date','url','select'].includes(f.type) ? f.type : 'text') as CustomFieldType,
+          options: Array.isArray(f.options) ? f.options.map(str) : undefined,
+        })) : [],
+        rows: Array.isArray(s.rows) ? s.rows : [],
+      }))
+    : [];
+  return {
+    overall,
+    top_creators,
+    top_videos,
+    video_performance: vp,
+    gmv_max,
+    product_highlights,
+    shop_health,
+    insights: { summary: str(src.insights?.summary) },
+    custom_sections,
+  };
+}
+
+function num(v: any): number { const n = Number(v); return Number.isFinite(n) ? n : 0; }
+function str(v: any): string { return v == null ? '' : String(v); }

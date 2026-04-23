@@ -1,47 +1,86 @@
-import { Card, Row, Col, Table, Alert } from 'react-bootstrap';
+import { Card, Row, Col, Table, Alert, Badge } from 'react-bootstrap';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
   LineChart, Line, RadialBarChart, RadialBar, PolarAngleAxis,
 } from 'recharts';
-import { WeeklyReportContent } from '../lib/reportSchema';
+import { WeeklyReportContent, ListingQuality, CustomSection, CustomField } from '../lib/reportSchema';
+import DOMPurify from 'dompurify';
+import SectionComments, { Comment, CommentSection } from './SectionComments';
 
 export interface TrendPoint { label: string; GMV: number; 'Affiliate GMV': number; }
 
+export interface CommentsConfig {
+  mode: 'authed' | 'public';
+  comments: Comment[];
+  currentAuthorName?: string;
+  defaultPublicName?: string;
+  onAdd: (section: CommentSection, body: string, authorName: string, parentId?: string) => Promise<void>;
+  onDelete?: (id: string) => Promise<void>;
+}
+
 export default function ReportDashboard({
-  c, p, trendData, hasPrev,
+  c, p, trendData, hasPrev, commentsConfig, prevTopVideos,
 }: {
   c: WeeklyReportContent;
   p: WeeklyReportContent | null;
   trendData: TrendPoint[];
   hasPrev: boolean;
+  commentsConfig?: CommentsConfig;
+  prevTopVideos?: WeeklyReportContent['top_videos'];
 }) {
-  const o = c.overall;
-  const po = p?.overall;
+  const o = c.overall, po = p?.overall;
+  const vp = c.video_performance, pvp = p?.video_performance;
+  const gm = c.gmv_max, pgm = p?.gmv_max;
+  const sh = c.shop_health;
 
   const compareData = [
-    { metric: 'GMV',           'This Week': o.gmv,            'Last Week': po?.gmv ?? 0 },
+    { metric: 'Total GMV',     'This Week': o.total_gmv,      'Last Week': po?.total_gmv ?? 0 },
     { metric: 'Affiliate GMV', 'This Week': o.affiliate_gmv,  'Last Week': po?.affiliate_gmv ?? 0 },
     { metric: 'Orders',        'This Week': o.orders,         'Last Week': po?.orders ?? 0 },
     { metric: 'Samples',       'This Week': o.samples_approved,'Last Week': po?.samples_approved ?? 0 },
-    { metric: 'Videos',        'This Week': o.videos_posted,  'Last Week': po?.videos_posted ?? 0 },
+    { metric: 'Videos',        'This Week': vp.total_videos_posted, 'Last Week': pvp?.total_videos_posted ?? 0 },
   ];
 
-  const sps = Math.max(0, Math.min(5, o.sps));
-  const spsData = [{ name: 'SPS', value: (sps / 5) * 100, fill: spsColor(sps) }];
+  const sps = sh.shop_performance_score ?? 0;
+  const spsData = [{ name: 'SPS', value: sps > 0 ? (sps / 5) * 100 : 0, fill: spsColor(sps) }];
+
+  const renderComments = (section: CommentSection) => {
+    if (!commentsConfig) return null;
+    return (
+      <SectionComments
+        section={section}
+        comments={commentsConfig.comments}
+        mode={commentsConfig.mode}
+        currentAuthorName={commentsConfig.currentAuthorName}
+        defaultPublicName={commentsConfig.defaultPublicName}
+        onAdd={(body, name, parentId) => commentsConfig.onAdd(section, body, name, parentId)}
+        onDelete={commentsConfig.onDelete}
+      />
+    );
+  };
 
   return (
     <>
       {!hasPrev && <Alert variant="warning" className="py-2">No previous week — single-week view (no comparison).</Alert>}
 
+      {/* KPI cards */}
       <Row className="g-3 mb-4">
-        <KpiCard label="GMV"              value={`$${o.gmv.toLocaleString()}`}           prev={po?.gmv}           cur={o.gmv} money />
-        <KpiCard label="Affiliate GMV"    value={`$${o.affiliate_gmv.toLocaleString()}`} prev={po?.affiliate_gmv} cur={o.affiliate_gmv} money />
-        <KpiCard label="Orders"           value={o.orders.toLocaleString()}              prev={po?.orders}        cur={o.orders} />
-        <KpiCard label="ROI"              value={o.roi.toFixed(2)}                       prev={po?.roi}           cur={o.roi} dec />
-        <KpiCard label="Samples Approved" value={o.samples_approved.toLocaleString()}    prev={po?.samples_approved} cur={o.samples_approved} sub={o.samples_approved_note} />
-        <KpiCard label="Videos Posted"    value={o.videos_posted.toLocaleString()}       prev={po?.videos_posted} cur={o.videos_posted} sub={o.videos_total_note} />
+        <KpiCard label="Total GMV"       value={`$${o.total_gmv.toLocaleString()}`}      prev={po?.total_gmv}      cur={o.total_gmv} money />
+        <KpiCard label="Affiliate GMV"   value={`$${o.affiliate_gmv.toLocaleString()}`}  prev={po?.affiliate_gmv}  cur={o.affiliate_gmv} money />
+        <KpiCard label="Orders"          value={o.orders.toLocaleString()}               prev={po?.orders}         cur={o.orders} />
+        <KpiCard label="Samples Approved"value={o.samples_approved.toLocaleString()}     prev={po?.samples_approved} cur={o.samples_approved} sub={o.samples_approved_note} />
+        <KpiCard label="Pending Collabs" value={o.pending_collabs.toLocaleString()}      prev={po?.pending_collabs} cur={o.pending_collabs} />
+        <KpiCard
+          label="Ad Spend"
+          value={o.ad_spend_not_started ? 'Not started' : `$${o.ad_spend.toLocaleString()}`}
+          prev={po?.ad_spend_not_started ? undefined : po?.ad_spend}
+          cur={o.ad_spend_not_started ? 0 : o.ad_spend}
+          money
+          sub={o.ad_spend_target}
+        />
       </Row>
 
+      {/* Comparison + SPS radial */}
       <Row className="g-3 mb-4">
         <Col lg={8}>
           <Card className="h-100">
@@ -65,17 +104,27 @@ export default function ReportDashboard({
           <Card className="h-100">
             <Card.Header className="fw-semibold">Shop Performance Score</Card.Header>
             <Card.Body style={{ height: 340, position: 'relative' }}>
-              <ResponsiveContainer>
-                <RadialBarChart innerRadius="70%" outerRadius="100%" data={spsData} startAngle={90} endAngle={-270}>
-                  <PolarAngleAxis type="number" domain={[0,100]} tick={false} />
-                  <RadialBar background dataKey="value" cornerRadius={20} />
-                </RadialBarChart>
-              </ResponsiveContainer>
-              <div style={{ position: 'absolute', top: '50%', left: 0, right: 0, transform: 'translateY(-50%)', textAlign: 'center', pointerEvents: 'none' }}>
-                <div className="fs-1 fw-bold">{sps.toFixed(1)}</div>
-                <div className="text-muted small">out of 5.0</div>
-                {po && <div className="small mt-1"><Delta cur={sps} prev={po.sps} dec /></div>}
-              </div>
+              {sh.shop_performance_score == null ? (
+                <div className="d-flex align-items-center justify-content-center h-100 text-muted">
+                  <div className="text-center">
+                    <i className="bi bi-hourglass-split" style={{ fontSize: '2rem' }} />
+                    <div className="mt-2">Not yet assigned</div>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <ResponsiveContainer>
+                    <RadialBarChart innerRadius="70%" outerRadius="100%" data={spsData} startAngle={90} endAngle={-270}>
+                      <PolarAngleAxis type="number" domain={[0,100]} tick={false} />
+                      <RadialBar background dataKey="value" cornerRadius={20} />
+                    </RadialBarChart>
+                  </ResponsiveContainer>
+                  <div style={{ position: 'absolute', top: '50%', left: 0, right: 0, transform: 'translateY(-50%)', textAlign: 'center', pointerEvents: 'none' }}>
+                    <div className="fs-1 fw-bold">{sps.toFixed(1)}</div>
+                    <div className="text-muted small">out of 5.0</div>
+                  </div>
+                </>
+              )}
             </Card.Body>
           </Card>
         </Col>
@@ -100,121 +149,233 @@ export default function ReportDashboard({
         </Card>
       )}
 
-      <Row className="g-3 mb-4">
+      {renderComments('overall')}
+
+      {/* Top Creators */}
+      <Card className="mb-3">
+        <Card.Header className="fw-semibold">Top Creators</Card.Header>
+        <Card.Body className="p-0">
+          {c.top_creators.length === 0 ? <p className="text-muted text-center py-3 mb-0 small">No creators</p> : (
+            <Table size="sm" className="mb-0 align-middle">
+              <thead><tr>
+                <th>Creator</th><th className="text-end">Videos</th><th className="text-end">Items</th><th className="text-end">GMV</th><th>Notes</th>
+              </tr></thead>
+              <tbody>
+                {c.top_creators.map((r, i) => (
+                  <tr key={i}>
+                    <td className="fw-semibold">{r.name}</td>
+                    <td className="text-end">{r.videos}</td>
+                    <td className="text-end">{r.items_sold}</td>
+                    <td className="text-end">${r.gmv.toLocaleString()}</td>
+                    <td className="small text-muted">{r.notes}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
+        </Card.Body>
+      </Card>
+      {renderComments('top_creators')}
+
+      {/* Top Videos: this + last side by side */}
+      <Row className="g-3 mb-3">
         <Col lg={6}>
           <Card className="h-100">
-            <Card.Header className="fw-semibold">Top Creators</Card.Header>
+            <Card.Header className="fw-semibold">Top Videos — This Week</Card.Header>
             <Card.Body className="p-0">
-              {c.top_creators.length === 0 ? <p className="text-muted text-center py-3 mb-0 small">No data</p> : (
-                <Table size="sm" className="mb-0 align-middle">
-                  <thead><tr><th>Creator</th><th className="text-end">Videos</th><th className="text-end">Items</th><th className="text-end">GMV</th></tr></thead>
-                  <tbody>
-                    {c.top_creators.map((r, i) => (
-                      <tr key={i}>
-                        <td className="fw-semibold">{r.name}</td>
-                        <td className="text-end">{r.videos}</td>
-                        <td className="text-end">{r.items_sold}</td>
-                        <td className="text-end">${r.gmv.toLocaleString()}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </Table>
-              )}
+              <VideosTable rows={c.top_videos} />
             </Card.Body>
           </Card>
         </Col>
         <Col lg={6}>
           <Card className="h-100">
-            <Card.Header className="fw-semibold">Top Videos</Card.Header>
+            <Card.Header className="fw-semibold">Top Videos — Last Week</Card.Header>
             <Card.Body className="p-0">
-              {c.top_videos.length === 0 ? <p className="text-muted text-center py-3 mb-0 small">No data</p> : (
-                <Table size="sm" className="mb-0 align-middle">
-                  <thead><tr><th>Creator</th><th className="text-end">Items</th><th className="text-end">GMV</th><th className="text-end">Views</th></tr></thead>
-                  <tbody>
-                    {c.top_videos.map((r, i) => (
-                      <tr key={i}>
-                        <td className="fw-semibold">
-                          {r.video_url ? <a href={r.video_url} target="_blank" rel="noreferrer">{r.creator_name}</a> : r.creator_name}
-                        </td>
-                        <td className="text-end">{r.items_sold}</td>
-                        <td className="text-end">${r.gmv.toLocaleString()}</td>
-                        <td className="text-end">{r.views.toLocaleString()}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </Table>
-              )}
+              <VideosTable rows={prevTopVideos ?? []} />
             </Card.Body>
           </Card>
         </Col>
       </Row>
+      {renderComments('top_videos')}
 
-      <Row className="g-3 mb-4">
-        <Col lg={6}>
-          <Card className="h-100">
-            <Card.Header className="fw-semibold">GMV Max Campaigns</Card.Header>
-            <Card.Body className="p-0">
-              {c.gmv_max.length === 0 ? <p className="text-muted text-center py-3 mb-0 small">No data</p> : (
-                <Table size="sm" className="mb-0 align-middle">
-                  <thead><tr><th>Campaign</th><th className="text-end">Spend</th><th className="text-end">ROI</th><th className="text-end">GMV</th></tr></thead>
-                  <tbody>
-                    {c.gmv_max.map((r, i) => (
-                      <tr key={i}>
-                        <td className="fw-semibold">{r.campaign}</td>
-                        <td className="text-end">${r.spend.toLocaleString()}</td>
-                        <td className="text-end">{r.roi.toFixed(2)}</td>
-                        <td className="text-end">${r.gmv.toLocaleString()}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </Table>
-              )}
-            </Card.Body>
-          </Card>
-        </Col>
-        <Col lg={6}>
-          <Card className="h-100">
-            <Card.Header className="fw-semibold">Product Highlights</Card.Header>
-            <Card.Body className="p-0">
-              {c.product_highlights.length === 0 ? <p className="text-muted text-center py-3 mb-0 small">No data</p> : (
-                <Table size="sm" className="mb-0 align-middle">
-                  <thead><tr><th>Product</th><th className="text-end">Units</th><th className="text-end">GMV</th><th className="text-end">New Videos</th></tr></thead>
-                  <tbody>
-                    {c.product_highlights.map((r, i) => (
-                      <tr key={i}>
-                        <td>
-                          <div className="fw-semibold">{r.product_name}</div>
-                          <small className="text-muted">{r.product_id}</small>
-                        </td>
-                        <td className="text-end">{r.units_sold}</td>
-                        <td className="text-end">${r.gmv.toLocaleString()}</td>
-                        <td className="text-end">{r.new_videos}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </Table>
-              )}
-            </Card.Body>
-          </Card>
-        </Col>
-      </Row>
+      {/* Video Performance */}
+      <Card className="mb-3">
+        <Card.Header className="fw-semibold">Video Performance</Card.Header>
+        <Card.Body>
+          <Row className="g-3">
+            <MiniStat label="Total Videos" cur={vp.total_videos_posted} prev={pvp?.total_videos_posted} />
+            <MiniStat label="Video Views" cur={vp.video_views} prev={pvp?.video_views} />
+            <MiniStat label="CTR" cur={vp.ctr} prev={pvp?.ctr} suffix="%" />
+            <MiniStat label="CTOR" cur={vp.ctor} prev={pvp?.ctor} suffix="%" />
+          </Row>
+        </Card.Body>
+      </Card>
+      {renderComments('video_performance')}
 
-      {c.insights.summary && (
-        <Card className="mb-4">
+      {/* GMV Max */}
+      <Card className="mb-3">
+        <Card.Header className="fw-semibold">Overall GMV Max Performance</Card.Header>
+        <Card.Body>
+          {gm.not_yet_started ? (
+            <Alert variant="secondary" className="mb-0">Not yet started.</Alert>
+          ) : (
+            <Row className="g-3">
+              <MiniStat label="Ad Spend" cur={gm.ad_spend} prev={pgm?.not_yet_started ? undefined : pgm?.ad_spend} money />
+              <MiniStat label="ROI"      cur={gm.roi}      prev={pgm?.not_yet_started ? undefined : pgm?.roi} dec />
+              <MiniStat label="Orders"   cur={gm.orders}   prev={pgm?.not_yet_started ? undefined : pgm?.orders} />
+              <MiniStat label="CPO"      cur={gm.cpo}      prev={pgm?.not_yet_started ? undefined : pgm?.cpo} money />
+              <MiniStat label="GMV"      cur={gm.gmv}      prev={pgm?.not_yet_started ? undefined : pgm?.gmv} money />
+              {gm.notes && <Col md={12}><small className="text-muted">{gm.notes}</small></Col>}
+            </Row>
+          )}
+        </Card.Body>
+      </Card>
+      {renderComments('gmv_max')}
+
+      {/* Product Highlights */}
+      <Card className="mb-3">
+        <Card.Header className="fw-semibold">Product Highlights</Card.Header>
+        <Card.Body className="p-0">
+          {c.product_highlights.length === 0 ? <p className="text-muted text-center py-3 mb-0 small">No products</p> : (
+            <Table size="sm" responsive className="mb-0 align-middle">
+              <thead><tr>
+                <th>Product</th>
+                <th className="text-end">Total Units</th>
+                <th className="text-end">Affiliate Units</th>
+                <th className="text-end">Total GMV</th>
+                <th className="text-end">Videos</th>
+                <th>Listing Quality</th>
+              </tr></thead>
+              <tbody>
+                {c.product_highlights.map((r, i) => (
+                  <tr key={i}>
+                    <td>
+                      <div className="fw-semibold">{r.product_name || '—'}</div>
+                      {r.product_id && <small className="text-muted">{r.product_id}</small>}
+                    </td>
+                    <td className="text-end">{r.total_units_sold}</td>
+                    <td className="text-end">{r.affiliate_units_sold}</td>
+                    <td className="text-end">${r.total_gmv.toLocaleString()}</td>
+                    <td className="text-end">{r.videos_posted}</td>
+                    <td><QualityBadge q={r.listing_quality} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
+        </Card.Body>
+      </Card>
+      {renderComments('product_highlights')}
+
+      {/* Shop Health */}
+      <Card className="mb-3">
+        <Card.Header className="fw-semibold">Shop Health</Card.Header>
+        <Card.Body>
+          <Row className="g-3">
+            <RatingCell label="Shop Performance" value={sh.shop_performance_score} />
+            <RatingCell label="Product Satisfaction" value={sh.product_satisfaction_rating} />
+            <RatingCell label="Fulfillment" value={sh.fulfillment_rating} />
+            <RatingCell label="Customer Service" value={sh.customer_service_rating} />
+            <StatusCell label="Dispatching on time" value={sh.dispatching_on_time} />
+            <StatusCell label="Replying within 24h" value={sh.replying_within_24h} />
+            <FlagCell label="Warnings this week" on={sh.warnings_received} />
+            <FlagCell label="Violations this week" on={sh.violations_received} />
+          </Row>
+        </Card.Body>
+      </Card>
+      {renderComments('shop_health')}
+
+      {/* Insights */}
+      {c.insights.summary && c.insights.summary.replace(/<[^>]*>/g,'').trim().length > 0 && (
+        <Card className="mb-3">
           <Card.Header className="fw-semibold">Insights</Card.Header>
           <Card.Body>
-            <p className="mb-0" style={{whiteSpace:'pre-wrap'}}>{c.insights.summary}</p>
+            <div className="ac-rte-view" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(c.insights.summary) }} />
           </Card.Body>
         </Card>
       )}
+      {renderComments('insights')}
+
+      {/* Custom Sections */}
+      {c.custom_sections.map(s => <CustomSectionView key={s.id} section={s} />)}
     </>
+  );
+}
+
+function CustomSectionView({ section }: { section: CustomSection }) {
+  if (section.fields.length === 0) return null;
+  return (
+    <Card className="mb-3" style={{ borderLeft: '4px solid #7c3aed' }}>
+      <Card.Header className="fw-semibold">{section.name || 'Custom Section'}</Card.Header>
+      <Card.Body>
+        {section.description && <p className="text-muted small mb-3">{section.description}</p>}
+        {section.is_repeater ? (
+          section.rows.length === 0 ? <p className="text-muted small mb-0">No data</p> : (
+            <Table size="sm" responsive className="mb-0 align-middle">
+              <thead><tr>{section.fields.map(f => <th key={f.id}>{f.label}</th>)}</tr></thead>
+              <tbody>
+                {section.rows.map((row, i) => (
+                  <tr key={i}>
+                    {section.fields.map(f => <td key={f.id}>{renderValue(f, row[f.id])}</td>)}
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )
+        ) : (
+          <Row className="g-3">
+            {section.fields.map(f => (
+              <Col md={f.type === 'textarea' || f.type === 'richtext' ? 12 : 4} key={f.id}>
+                <div className="text-muted small text-uppercase" style={{ letterSpacing: '.5px', fontSize: '.7rem' }}>{f.label}</div>
+                <div className="mt-1">{renderValue(f, section.rows[0]?.[f.id])}</div>
+              </Col>
+            ))}
+          </Row>
+        )}
+      </Card.Body>
+    </Card>
+  );
+}
+
+function renderValue(field: CustomField, value: any) {
+  if (value == null || value === '') return <span className="text-muted">—</span>;
+  switch (field.type) {
+    case 'number': return Number(value).toLocaleString();
+    case 'url':    return <a href={String(value)} target="_blank" rel="noreferrer">{String(value)}</a>;
+    case 'richtext': return <div className="ac-rte-view" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(String(value)) }} />;
+    case 'textarea': return <span style={{ whiteSpace: 'pre-wrap' }}>{String(value)}</span>;
+    case 'date': return new Date(String(value)).toLocaleDateString();
+    default: return String(value);
+  }
+}
+
+function VideosTable({ rows }: { rows: WeeklyReportContent['top_videos'] }) {
+  if (!rows || rows.length === 0) return <p className="text-muted text-center py-3 mb-0 small">No data</p>;
+  return (
+    <Table size="sm" className="mb-0 align-middle">
+      <thead><tr>
+        <th>Creator</th><th className="text-end">Items</th><th className="text-end">GMV</th>
+      </tr></thead>
+      <tbody>
+        {rows.map((r, i) => (
+          <tr key={i}>
+            <td className="fw-semibold">
+              {r.video_url ? <a href={r.video_url} target="_blank" rel="noreferrer">{r.creator_name}</a> : r.creator_name}
+            </td>
+            <td className="text-end">{r.items_sold}</td>
+            <td className="text-end">${r.gmv.toLocaleString()}</td>
+          </tr>
+        ))}
+      </tbody>
+    </Table>
   );
 }
 
 function spsColor(v: number) {
   if (v >= 4.5) return '#10b981';
   if (v >= 3.5) return '#f59e0b';
-  return '#ef4444';
+  if (v > 0)    return '#ef4444';
+  return '#cbd5e1';
 }
 
 function KpiCard({ label, value, prev, cur, money, dec, sub }: {
@@ -235,6 +396,25 @@ function KpiCard({ label, value, prev, cur, money, dec, sub }: {
   );
 }
 
+function MiniStat({ label, cur, prev, money, dec, suffix }: {
+  label: string; cur: number; prev?: number; money?: boolean; dec?: boolean; suffix?: string;
+}) {
+  const fmt = (n: number) =>
+    money ? `$${n.toLocaleString()}`
+    : dec ? n.toFixed(2)
+    : suffix ? `${n.toFixed(2)}${suffix}`
+    : n.toLocaleString();
+  return (
+    <Col md={3}>
+      <div className="p-3 rounded" style={{ background: '#f8fafc', border: '1px solid #e5e7eb' }}>
+        <div className="text-muted small text-uppercase" style={{ letterSpacing: '.5px', fontSize: '.7rem' }}>{label}</div>
+        <div className="fs-5 fw-semibold mt-1">{fmt(cur)}</div>
+        <Delta cur={cur} prev={prev} money={money} dec={dec} />
+      </div>
+    </Col>
+  );
+}
+
 function Delta({ cur, prev, money, dec }: { cur: number; prev?: number; money?: boolean; dec?: boolean; }) {
   if (prev == null) return <small className="text-muted">—</small>;
   if (prev === 0 && cur === 0) return <small className="text-muted">no change</small>;
@@ -248,5 +428,64 @@ function Delta({ cur, prev, money, dec }: { cur: number; prev?: number; money?: 
     <small className={color}>
       <i className={`bi ${icon}`} /> {fmt(diff)} ({pct >= 0 ? '+' : ''}{pct.toFixed(1)}%)
     </small>
+  );
+}
+
+function QualityBadge({ q }: { q: ListingQuality }) {
+  if (!q) return <span className="text-muted small">—</span>;
+  const map: Record<string, { bg: string; label: string }> = {
+    excellent: { bg: 'success',  label: 'Excellent' },
+    good:      { bg: 'success',  label: 'Good' },
+    fair:      { bg: 'warning',  label: 'Fair' },
+    poor:      { bg: 'danger',   label: 'Poor' },
+  };
+  const m = map[q];
+  return <Badge bg={m.bg} text={m.bg === 'warning' ? 'dark' : undefined}>{m.label}</Badge>;
+}
+
+function RatingCell({ label, value }: { label: string; value: number | null }) {
+  return (
+    <Col md={3}>
+      <div className="p-3 rounded h-100" style={{ background: '#f8fafc', border: '1px solid #e5e7eb' }}>
+        <div className="text-muted small">{label}</div>
+        {value == null
+          ? <div className="text-muted small mt-1">Not yet rated</div>
+          : <div className="fs-4 fw-bold mt-1" style={{ color: spsColor(value) }}>{value.toFixed(1)}<small className="text-muted fs-6 ms-1">/5</small></div>}
+      </div>
+    </Col>
+  );
+}
+
+function StatusCell({ label, value }: { label: string; value: 'yes' | 'no' | 'not_rated' }) {
+  const map = {
+    yes: { bg: 'success', text: 'Yes', icon: 'bi-check-circle' },
+    no:  { bg: 'danger',  text: 'No',  icon: 'bi-x-circle' },
+    not_rated: { bg: 'secondary', text: 'Not rated', icon: 'bi-dash-circle' },
+  };
+  const m = map[value];
+  return (
+    <Col md={3}>
+      <div className="p-3 rounded h-100" style={{ background: '#f8fafc', border: '1px solid #e5e7eb' }}>
+        <div className="text-muted small">{label}</div>
+        <div className="mt-1">
+          <Badge bg={m.bg} className="fs-6"><i className={`bi ${m.icon} me-1`} />{m.text}</Badge>
+        </div>
+      </div>
+    </Col>
+  );
+}
+
+function FlagCell({ label, on }: { label: string; on: boolean }) {
+  return (
+    <Col md={3}>
+      <div className="p-3 rounded h-100" style={{ background: '#f8fafc', border: '1px solid #e5e7eb' }}>
+        <div className="text-muted small">{label}</div>
+        <div className="mt-1">
+          <Badge bg={on ? 'danger' : 'success'} className="fs-6">
+            <i className={`bi ${on ? 'bi-exclamation-triangle' : 'bi-check-circle'} me-1`} />{on ? 'Yes' : 'No'}
+          </Badge>
+        </div>
+      </div>
+    </Col>
   );
 }

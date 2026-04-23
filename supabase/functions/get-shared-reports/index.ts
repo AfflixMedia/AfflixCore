@@ -45,11 +45,17 @@ serve(async (req) => {
         : Promise.resolve({ data: [] }),
     ]);
 
+    const reportIds = (reports ?? []).map((r: any) => r.id);
+    const { data: comments } = reportIds.length > 0
+      ? await admin.from('report_comments').select('*').in('report_id', reportIds).order('created_at', { ascending: true })
+      : { data: [] };
+
     return json({
       client,
       brands: brands ?? [],
       reports: reports ?? [],
       resources: resources ?? [],
+      comments: comments ?? [],
       label: link.label ?? null,
     });
   } catch (e) {
