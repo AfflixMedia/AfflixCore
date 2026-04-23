@@ -10,6 +10,9 @@ import {
 } from '../lib/reportSchema';
 import SectionComments, { Comment, CommentSection } from '../components/SectionComments';
 import { useAuth } from '../auth/AuthContext';
+import RichTextEditor from '../components/RichTextEditor';
+import { CustomSectionsEditor } from '../components/CustomSectionEditor';
+import { CustomSection } from '../lib/reportSchema';
 
 const SECTION_LABELS: Record<string, string> = {
   overall: 'Overall Performance',
@@ -419,12 +422,21 @@ export default function WeeklyReportEdit() {
       <Card className="mb-4">
         <Card.Header className="fw-semibold">Insights</Card.Header>
         <Card.Body>
-          <Form.Control as="textarea" rows={8} placeholder="Write your insights for this week…"
+          <RichTextEditor
             value={c.insights.summary}
-            onChange={e => setC({ ...c, insights: { summary: e.target.value } })} />
+            onChange={html => setC({ ...c, insights: { summary: html } })}
+            placeholder="Write your insights for this week…"
+            minHeight={220}
+          />
         </Card.Body>
       </Card>
       {renderComments('insights')}
+
+      {/* Custom Sections */}
+      <CustomSectionsEditor
+        sections={c.custom_sections}
+        onChange={(next: CustomSection[]) => setC({ ...c, custom_sections: next })}
+      />
 
       <div className="d-flex justify-content-end gap-2 mb-4">
         <Button variant="outline-secondary" onClick={() => nav('/reporting/weekly')}>Cancel</Button>

@@ -3,7 +3,8 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
   LineChart, Line, RadialBarChart, RadialBar, PolarAngleAxis,
 } from 'recharts';
-import { WeeklyReportContent, ListingQuality } from '../lib/reportSchema';
+import { WeeklyReportContent, ListingQuality, CustomSection, CustomField } from '../lib/reportSchema';
+import DOMPurify from 'dompurify';
 import SectionComments, { Comment, CommentSection } from './SectionComments';
 
 export interface TrendPoint { label: string; GMV: number; 'Affiliate GMV': number; }
@@ -285,17 +286,67 @@ export default function ReportDashboard({
       {renderComments('shop_health')}
 
       {/* Insights */}
-      {c.insights.summary && (
+      {c.insights.summary && c.insights.summary.replace(/<[^>]*>/g,'').trim().length > 0 && (
         <Card className="mb-3">
           <Card.Header className="fw-semibold">Insights</Card.Header>
           <Card.Body>
-            <p className="mb-0" style={{whiteSpace:'pre-wrap'}}>{c.insights.summary}</p>
+            <div className="ac-rte-view" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(c.insights.summary) }} />
           </Card.Body>
         </Card>
       )}
       {renderComments('insights')}
+
+      {/* Custom Sections */}
+      {c.custom_sections.map(s => <CustomSectionView key={s.id} section={s} />)}
     </>
   );
+}
+
+function CustomSectionView({ section }: { section: CustomSection }) {
+  if (section.fields.length === 0) return null;
+  return (
+    <Card className="mb-3" style={{ borderLeft: '4px solid #7c3aed' }}>
+      <Card.Header className="fw-semibold">{section.name || 'Custom Section'}</Card.Header>
+      <Card.Body>
+        {section.description && <p className="text-muted small mb-3">{section.description}</p>}
+        {section.is_repeater ? (
+          section.rows.length === 0 ? <p className="text-muted small mb-0">No data</p> : (
+            <Table size="sm" responsive className="mb-0 align-middle">
+              <thead><tr>{section.fields.map(f => <th key={f.id}>{f.label}</th>)}</tr></thead>
+              <tbody>
+                {section.rows.map((row, i) => (
+                  <tr key={i}>
+                    {section.fields.map(f => <td key={f.id}>{renderValue(f, row[f.id])}</td>)}
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )
+        ) : (
+          <Row className="g-3">
+            {section.fields.map(f => (
+              <Col md={f.type === 'textarea' || f.type === 'richtext' ? 12 : 4} key={f.id}>
+                <div className="text-muted small text-uppercase" style={{ letterSpacing: '.5px', fontSize: '.7rem' }}>{f.label}</div>
+                <div className="mt-1">{renderValue(f, section.rows[0]?.[f.id])}</div>
+              </Col>
+            ))}
+          </Row>
+        )}
+      </Card.Body>
+    </Card>
+  );
+}
+
+function renderValue(field: CustomField, value: any) {
+  if (value == null || value === '') return <span className="text-muted">—</span>;
+  switch (field.type) {
+    case 'number': return Number(value).toLocaleString();
+    case 'url':    return <a href={String(value)} target="_blank" rel="noreferrer">{String(value)}</a>;
+    case 'richtext': return <div className="ac-rte-view" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(String(value)) }} />;
+    case 'textarea': return <span style={{ whiteSpace: 'pre-wrap' }}>{String(value)}</span>;
+    case 'date': return new Date(String(value)).toLocaleDateString();
+    default: return String(value);
+  }
 }
 
 function VideosTable({ rows }: { rows: WeeklyReportContent['top_videos'] }) {

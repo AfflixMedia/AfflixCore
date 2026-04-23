@@ -55,7 +55,25 @@ export interface ShopHealth {
   violations_received: boolean;
 }
 
-export interface Insights { summary: string; }
+export interface Insights { summary: string; }  // summary is now HTML (rich text)
+
+export type CustomFieldType = 'text' | 'number' | 'textarea' | 'richtext' | 'date' | 'url' | 'select';
+
+export interface CustomField {
+  id: string;                 // uuid per field
+  label: string;
+  type: CustomFieldType;
+  options?: string[];         // for type 'select'
+}
+
+export interface CustomSection {
+  id: string;                 // uuid per section
+  name: string;
+  description?: string;
+  is_repeater: boolean;       // true => table of rows; false => single entry
+  fields: CustomField[];
+  rows: Record<string, any>[]; // each row: field.id => value; length==1 when not repeater
+}
 
 export interface WeeklyReportContent {
   overall: OverallPerformance;
@@ -66,6 +84,7 @@ export interface WeeklyReportContent {
   product_highlights: ProductRow[];
   shop_health: ShopHealth;
   insights: Insights;
+  custom_sections: CustomSection[];
 }
 
 export const emptyOverall = (): OverallPerformance => ({
@@ -103,6 +122,7 @@ export const emptyContent = (): WeeklyReportContent => ({
   product_highlights: [],
   shop_health: emptyShopHealth(),
   insights: { summary: '' },
+  custom_sections: [],
 });
 
 export const emptyTopCreator = (): TopCreator => ({ name: '', videos: 0, items_sold: 0, gmv: 0, notes: '' });
@@ -177,6 +197,21 @@ export function normalizeContent(raw: any): WeeklyReportContent {
         items_sold: num(r.items_sold),
         gmv: num(r.gmv),
       })) : [];
+  const custom_sections: CustomSection[] = Array.isArray(src.custom_sections)
+    ? src.custom_sections.map((s: any) => ({
+        id: str(s.id) || crypto.randomUUID(),
+        name: str(s.name),
+        description: str(s.description),
+        is_repeater: !!s.is_repeater,
+        fields: Array.isArray(s.fields) ? s.fields.map((f: any) => ({
+          id: str(f.id) || crypto.randomUUID(),
+          label: str(f.label),
+          type: (['text','number','textarea','richtext','date','url','select'].includes(f.type) ? f.type : 'text') as CustomFieldType,
+          options: Array.isArray(f.options) ? f.options.map(str) : undefined,
+        })) : [],
+        rows: Array.isArray(s.rows) ? s.rows : [],
+      }))
+    : [];
   return {
     overall,
     top_creators,
@@ -186,6 +221,7 @@ export function normalizeContent(raw: any): WeeklyReportContent {
     product_highlights,
     shop_health,
     insights: { summary: str(src.insights?.summary) },
+    custom_sections,
   };
 }
 

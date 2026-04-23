@@ -61,3 +61,15 @@ body { background: #f5f6fa; }
   background: linear-gradient(135deg, #1e3a8a, #2563eb);
 }
 .ac-auth-card { width: 100%; max-width: 420px; }
+
+.ac-rte .ql-container { min-height: 180px; font-size: 1rem; background: white; }
+.ac-rte .ql-toolbar { background: #f8fafc; border-radius: 6px 6px 0 0; }
+.ac-rte .ql-container.ql-snow { border-radius: 0 0 6px 6px; }
+.ac-rte-view { line-height: 1.55; }
+.ac-rte-view p { margin-bottom: .6rem; }
+.ac-rte-view ul, .ac-rte-view ol { margin-bottom: .6rem; padding-left: 1.5rem; }
+.ac-rte-view blockquote { border-left: 3px solid #cbd5e1; margin: 0 0 .6rem; padding-left: 1rem; color: #475569; }
+.ac-rte-view img { max-width: 100%; height: auto; }
+.ac-rte-view h1 { font-size: 1.6rem; margin: .8rem 0 .4rem; }
+.ac-rte-view h2 { font-size: 1.35rem; margin: .8rem 0 .4rem; }
+.ac-rte-view h3 { font-size: 1.15rem; margin: .8rem 0 .4rem; }
