@@ -8,6 +8,7 @@ import APCs from './pages/APCs';
 import Clients from './pages/Clients';
 import ClientAccess from './pages/ClientAccess';
 import Resources from './pages/Resources';
+import NotificationsPage from './pages/Notifications';
 import SharedReports from './pages/SharedReports';
 import Reporting from './pages/Reporting';
 import WeeklyReports from './pages/WeeklyReports';
@@ -42,6 +43,7 @@ export default function App() {
         <Route path="clients" element={<ProtectedRoute roles={['bob']}><Clients /></ProtectedRoute>} />
         <Route path="client-access" element={<ProtectedRoute roles={['bob']}><ClientAccess /></ProtectedRoute>} />
         <Route path="resources" element={<Resources />} />
+        <Route path="notifications" element={<NotificationsPage />} />
         <Route path="reporting/weekly" element={<WeeklyReports />} />
         <Route path="reporting/weekly/:id" element={<WeeklyReportView />} />
         <Route path="reporting/weekly/:id/edit" element={<WeeklyReportEdit />} />

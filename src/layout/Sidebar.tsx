@@ -1,11 +1,15 @@
 import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { useNotifications } from '../notifications/NotificationsContext';
+import { Badge } from 'react-bootstrap';
 
 export default function Sidebar() {
   const [reportingOpen, setReportingOpen] = useState(true);
   const { profile } = useAuth();
+  const { unreadCount, notifications } = useNotifications();
   const isBob = profile?.role === 'bob';
+  const reportingUnread = notifications.filter(n => !n.read_at && n.link?.startsWith('/reporting/')).length;
   const isApc = profile?.role === 'apc';
 
   return (
@@ -52,15 +56,22 @@ export default function Sidebar() {
         )}
         <button className="ac-nav-toggle" onClick={() => setReportingOpen(o => !o)}>
           <i className="bi bi-bar-chart" /> Reporting
+          {reportingUnread > 0 && <Badge bg="danger" pill className="ms-2">{reportingUnread}</Badge>}
           <i className={`bi ms-auto ${reportingOpen ? 'bi-chevron-up' : 'bi-chevron-down'}`} />
         </button>
         {reportingOpen && (
           <div className="ac-sub">
-            <NavLink to="/reporting/weekly">Weekly</NavLink>
+            <NavLink to="/reporting/weekly">
+              Weekly {reportingUnread > 0 && <Badge bg="danger" pill className="ms-1">{reportingUnread}</Badge>}
+            </NavLink>
             <NavLink to="/reporting/bi-weekly">Bi-Weekly</NavLink>
             <NavLink to="/reporting/monthly">Monthly</NavLink>
           </div>
         )}
+        <NavLink to="/notifications">
+          <i className="bi bi-bell" /> Notifications
+          {unreadCount > 0 && <Badge bg="danger" pill className="ms-2">{unreadCount}</Badge>}
+        </NavLink>
       </nav>
       <div className="footer">
         <div>{profile?.full_name ?? profile?.email}</div>

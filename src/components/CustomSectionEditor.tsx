@@ -3,9 +3,9 @@ import { Card, Form, Button, Row, Col, Table, Modal, Badge } from 'react-bootstr
 import { CustomField, CustomFieldType, CustomSection, StandardSectionId } from '../lib/reportSchema';
 import RichTextEditor from './RichTextEditor';
 
-const TYPE_LABELS: Record<CustomFieldType, string> = {
+const TYPE_LABELS: Partial<Record<CustomFieldType, string>> = {
   text: 'Short text', number: 'Number', textarea: 'Long text',
-  richtext: 'Rich text', date: 'Date', url: 'URL', select: 'Dropdown',
+  date: 'Date', url: 'URL', select: 'Dropdown',
 };
 
 export const POSITION_LABELS: Record<StandardSectionId, string> = {
@@ -54,7 +54,6 @@ export function CustomSectionInline({
       <Card.Header className="d-flex justify-content-between align-items-center">
         <div>
           <span className="fw-semibold">{section.name}</span>
-          {section.is_repeater && <Badge bg="info" className="ms-2">Repeater</Badge>}
           {section.description && <div className="text-muted small">{section.description}</div>}
         </div>
         <div className="d-flex gap-2">
@@ -78,7 +77,9 @@ export function CustomSectionInline({
             : <Table size="sm" responsive className="align-middle mb-0">
                 <thead>
                   <tr>
-                    {section.fields.map(f => <th key={f.id}>{f.label}</th>)}
+                    {section.fields.map(f => (
+                      <th key={f.id} className="fw-normal small text-muted text-uppercase" style={{ letterSpacing: '.3px', fontSize: '.75rem' }}>{f.label}</th>
+                    ))}
                     <th style={{ width: 50 }}></th>
                   </tr>
                 </thead>
@@ -135,7 +136,6 @@ function FieldInput({ field, value, onChange, size }: {
     case 'url':
       return <Form.Control {...common} type="url" placeholder="https://…" value={value ?? ''} onChange={e => onChange(e.target.value)} />;
     case 'textarea':
-      return <Form.Control {...common} as="textarea" rows={3} value={value ?? ''} onChange={e => onChange(e.target.value)} />;
     case 'richtext':
       return <RichTextEditor value={value ?? ''} onChange={onChange} />;
     case 'select':
