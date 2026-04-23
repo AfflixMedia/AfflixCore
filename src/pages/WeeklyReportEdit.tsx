@@ -11,8 +11,8 @@ import {
 import SectionComments, { Comment, CommentSection } from '../components/SectionComments';
 import { useAuth } from '../auth/AuthContext';
 import RichTextEditor from '../components/RichTextEditor';
-import { CustomSectionsEditor } from '../components/CustomSectionEditor';
-import { CustomSection } from '../lib/reportSchema';
+import { CustomSectionInline, CustomSectionDefModal, customSectionsAt, newSection } from '../components/CustomSectionEditor';
+import { CustomSection, StandardSectionId } from '../lib/reportSchema';
 
 const SECTION_LABELS: Record<string, string> = {
   overall: 'Overall Performance',
@@ -168,6 +168,37 @@ export default function WeeklyReportEdit() {
     />
   );
 
+  // Custom section management
+  const [csModalOpen, setCsModalOpen] = useState(false);
+  const [csDraft, setCsDraft] = useState<CustomSection>(newSection());
+  const [csIsEdit, setCsIsEdit] = useState(false);
+
+  const openAddCustom = () => { setCsDraft(newSection('insights')); setCsIsEdit(false); setCsModalOpen(true); };
+  const openEditCustom = (s: CustomSection) => { setCsDraft({ ...s, fields: s.fields.map(f => ({ ...f })) }); setCsIsEdit(true); setCsModalOpen(true); };
+  const saveCustomDef = (s: CustomSection) => {
+    if (csIsEdit) setC({ ...c, custom_sections: c.custom_sections.map(x => x.id === s.id ? s : x) });
+    else setC({ ...c, custom_sections: [...c.custom_sections, s] });
+    setCsModalOpen(false);
+  };
+  const removeCustom = (id: string) => {
+    if (!confirm('Delete this custom section and all its data?')) return;
+    setC({ ...c, custom_sections: c.custom_sections.filter(s => s.id !== id) });
+  };
+  const updateCustomData = (id: string, patch: Partial<CustomSection>) => {
+    setC({ ...c, custom_sections: c.custom_sections.map(s => s.id === id ? { ...s, ...patch } : s) });
+  };
+
+  const renderCustomAt = (anchor: StandardSectionId) =>
+    customSectionsAt(c.custom_sections, anchor).map(s => (
+      <CustomSectionInline
+        key={s.id}
+        section={s}
+        onChange={(patch) => updateCustomData(s.id, patch)}
+        onEditDef={() => openEditCustom(s)}
+        onRemove={() => removeCustom(s.id)}
+      />
+    ));
+
   return (
     <>
       <div className="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
@@ -184,6 +215,9 @@ export default function WeeklyReportEdit() {
               <i className="bi bi-chat-left-text me-1" /> Load previous comments
             </Button>
           )}
+          <Button variant="outline-success" onClick={openAddCustom}>
+            <i className="bi bi-plus-square me-1" /> Add custom section
+          </Button>
           <Button variant="outline-secondary" onClick={() => nav('/reporting/weekly')}>Cancel</Button>
           <Button variant="outline-primary" disabled={saving} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
           <Button variant="primary" disabled={saving} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
@@ -191,6 +225,8 @@ export default function WeeklyReportEdit() {
       </div>
 
       {err && <Alert variant="danger">{err}</Alert>}
+
+      {renderCustomAt('start')}
 
       {/* Overall Performance */}
       <Card className="mb-4">
@@ -230,6 +266,7 @@ export default function WeeklyReportEdit() {
         </Card.Body>
       </Card>
       {renderComments('overall')}
+      {renderCustomAt('overall')}
 
       {/* Top Creators */}
       <Section title="Top Creators" onAdd={() => addRow('top_creators', emptyTopCreator)} empty={c.top_creators.length === 0}>
@@ -257,6 +294,7 @@ export default function WeeklyReportEdit() {
         </Table>
       </Section>
       {renderComments('top_creators')}
+      {renderCustomAt('top_creators')}
 
       {/* Top Videos — current week only; last week auto-shown in dashboard */}
       <Section title="Top Videos (this week)" onAdd={() => addRow('top_videos', emptyTopVideo)} empty={c.top_videos.length === 0}>
@@ -282,6 +320,7 @@ export default function WeeklyReportEdit() {
         </Table>
       </Section>
       {renderComments('top_videos')}
+      {renderCustomAt('top_videos')}
 
       {/* Video Performance */}
       <Card className="mb-4">
@@ -300,6 +339,7 @@ export default function WeeklyReportEdit() {
         </Card.Body>
       </Card>
       {renderComments('video_performance')}
+      {renderCustomAt('video_performance')}
 
       {/* GMV Max */}
       <Card className="mb-4">
@@ -332,6 +372,7 @@ export default function WeeklyReportEdit() {
         </Card.Body>
       </Card>
       {renderComments('gmv_max')}
+      {renderCustomAt('gmv_max')}
 
       {/* Product Highlights */}
       <Section title="Product Highlights" onAdd={() => addRow('product_highlights', emptyProduct)} empty={c.product_highlights.length === 0}>
@@ -372,6 +413,7 @@ export default function WeeklyReportEdit() {
         </Table>
       </Section>
       {renderComments('product_highlights')}
+      {renderCustomAt('product_highlights')}
 
       {/* Shop Health */}
       <Card className="mb-4">
@@ -417,6 +459,7 @@ export default function WeeklyReportEdit() {
         </Card.Body>
       </Card>
       {renderComments('shop_health')}
+      {renderCustomAt('shop_health')}
 
       {/* Insights */}
       <Card className="mb-4">
@@ -431,11 +474,15 @@ export default function WeeklyReportEdit() {
         </Card.Body>
       </Card>
       {renderComments('insights')}
+      {renderCustomAt('insights')}
 
-      {/* Custom Sections */}
-      <CustomSectionsEditor
-        sections={c.custom_sections}
-        onChange={(next: CustomSection[]) => setC({ ...c, custom_sections: next })}
+      <CustomSectionDefModal
+        show={csModalOpen}
+        onHide={() => setCsModalOpen(false)}
+        initial={csDraft}
+        onSave={saveCustomDef}
+        isEdit={csIsEdit}
+        key={csDraft.id}
       />
 
       <div className="d-flex justify-content-end gap-2 mb-4">

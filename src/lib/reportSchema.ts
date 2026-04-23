@@ -66,6 +66,8 @@ export interface CustomField {
   options?: string[];         // for type 'select'
 }
 
+export type StandardSectionId = 'start' | 'overall' | 'top_creators' | 'top_videos' | 'video_performance' | 'gmv_max' | 'product_highlights' | 'shop_health' | 'insights';
+
 export interface CustomSection {
   id: string;                 // uuid per section
   name: string;
@@ -73,6 +75,7 @@ export interface CustomSection {
   is_repeater: boolean;       // true => table of rows; false => single entry
   fields: CustomField[];
   rows: Record<string, any>[]; // each row: field.id => value; length==1 when not repeater
+  insert_after: StandardSectionId; // where to inject this section in form/dashboard order
 }
 
 export interface WeeklyReportContent {
@@ -197,6 +200,7 @@ export function normalizeContent(raw: any): WeeklyReportContent {
         items_sold: num(r.items_sold),
         gmv: num(r.gmv),
       })) : [];
+  const VALID_POS: StandardSectionId[] = ['start','overall','top_creators','top_videos','video_performance','gmv_max','product_highlights','shop_health','insights'];
   const custom_sections: CustomSection[] = Array.isArray(src.custom_sections)
     ? src.custom_sections.map((s: any) => ({
         id: str(s.id) || crypto.randomUUID(),
@@ -210,6 +214,7 @@ export function normalizeContent(raw: any): WeeklyReportContent {
           options: Array.isArray(f.options) ? f.options.map(str) : undefined,
         })) : [],
         rows: Array.isArray(s.rows) ? s.rows : [],
+        insert_after: VALID_POS.includes(s.insert_after) ? s.insert_after : 'insights',
       }))
     : [];
   return {

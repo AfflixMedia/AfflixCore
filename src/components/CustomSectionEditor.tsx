@@ -1,6 +1,6 @@
 import { useState, FormEvent } from 'react';
 import { Card, Form, Button, Row, Col, Table, Modal, Badge } from 'react-bootstrap';
-import { CustomField, CustomFieldType, CustomSection } from '../lib/reportSchema';
+import { CustomField, CustomFieldType, CustomSection, StandardSectionId } from '../lib/reportSchema';
 import RichTextEditor from './RichTextEditor';
 
 const TYPE_LABELS: Record<CustomFieldType, string> = {
@@ -8,81 +8,27 @@ const TYPE_LABELS: Record<CustomFieldType, string> = {
   richtext: 'Rich text', date: 'Date', url: 'URL', select: 'Dropdown',
 };
 
-export function CustomSectionsEditor({
-  sections, onChange,
-}: {
-  sections: CustomSection[];
-  onChange: (sections: CustomSection[]) => void;
-}) {
-  const [showDef, setShowDef] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<CustomSection>(newSection());
+export const POSITION_LABELS: Record<StandardSectionId, string> = {
+  start: 'At the very top',
+  overall: 'After Overall Performance',
+  top_creators: 'After Top Creators',
+  top_videos: 'After Top Videos',
+  video_performance: 'After Video Performance',
+  gmv_max: 'After GMV Max',
+  product_highlights: 'After Product Highlights',
+  shop_health: 'After Shop Health',
+  insights: 'After Insights (end)',
+};
 
-  const openAdd = () => { setEditingId(null); setDraft(newSection()); setShowDef(true); };
-  const openEdit = (s: CustomSection) => { setEditingId(s.id); setDraft({ ...s, fields: [...s.fields] }); setShowDef(true); };
+/* ------------------ Inline render of one custom section ------------------ */
 
-  const saveDefinition = () => {
-    if (!draft.name.trim()) return alert('Section name is required.');
-    if (draft.fields.length === 0) return alert('Add at least one field.');
-    if (editingId) {
-      onChange(sections.map(s => s.id === editingId ? draft : s));
-    } else {
-      onChange([...sections, draft]);
-    }
-    setShowDef(false);
-  };
-
-  const removeSection = (id: string) => {
-    if (confirm('Delete this custom section and all its data?')) {
-      onChange(sections.filter(s => s.id !== id));
-    }
-  };
-
-  const updateSectionData = (id: string, patch: Partial<CustomSection>) => {
-    onChange(sections.map(s => s.id === id ? { ...s, ...patch } : s));
-  };
-
-  return (
-    <>
-      <Card className="mb-4">
-        <Card.Header className="d-flex justify-content-between align-items-center">
-          <span className="fw-semibold"><i className="bi bi-plus-square me-1" /> Custom Sections</span>
-          <Button size="sm" onClick={openAdd}><i className="bi bi-plus-lg me-1" />Add section</Button>
-        </Card.Header>
-        <Card.Body>
-          {sections.length === 0
-            ? <p className="text-muted small mb-0 text-center py-2">No custom sections. Add one to capture anything not covered by the standard sections above.</p>
-            : sections.map(s => (
-                <CustomSectionCard
-                  key={s.id}
-                  section={s}
-                  onEditDef={() => openEdit(s)}
-                  onRemove={() => removeSection(s.id)}
-                  onChange={(patch) => updateSectionData(s.id, patch)}
-                />
-              ))}
-        </Card.Body>
-      </Card>
-
-      <DefinitionModal
-        show={showDef}
-        onHide={() => setShowDef(false)}
-        draft={draft}
-        setDraft={setDraft}
-        onSave={saveDefinition}
-        isEdit={!!editingId}
-      />
-    </>
-  );
-}
-
-function CustomSectionCard({
-  section, onEditDef, onRemove, onChange,
+export function CustomSectionInline({
+  section, onChange, onEditDef, onRemove,
 }: {
   section: CustomSection;
+  onChange: (patch: Partial<CustomSection>) => void;
   onEditDef: () => void;
   onRemove: () => void;
-  onChange: (patch: Partial<CustomSection>) => void;
 }) {
   const addRow = () => {
     const row: Record<string, any> = {};
@@ -90,31 +36,34 @@ function CustomSectionCard({
     onChange({ rows: [...section.rows, row] });
   };
   const updateRow = (i: number, fieldId: string, value: any) => {
-    const rows = section.rows.map((r, idx) => idx === i ? { ...r, [fieldId]: value } : r);
-    onChange({ rows });
+    onChange({ rows: section.rows.map((r, idx) => idx === i ? { ...r, [fieldId]: value } : r) });
   };
   const deleteRow = (i: number) => {
     onChange({ rows: section.rows.filter((_, idx) => idx !== i) });
   };
 
-  // Ensure at least one row for single-entry sections
+  // Ensure single-entry sections have exactly one row
   if (!section.is_repeater && section.rows.length === 0) {
     const row: Record<string, any> = {};
     section.fields.forEach(f => { row[f.id] = f.type === 'number' ? 0 : ''; });
-    // update state lazily
     setTimeout(() => onChange({ rows: [row] }), 0);
   }
 
   return (
-    <Card className="mb-3" style={{ borderLeft: '4px solid #7c3aed' }}>
-      <Card.Header className="bg-white d-flex justify-content-between align-items-center">
+    <Card className="mb-4">
+      <Card.Header className="d-flex justify-content-between align-items-center">
         <div>
           <span className="fw-semibold">{section.name}</span>
           {section.is_repeater && <Badge bg="info" className="ms-2">Repeater</Badge>}
           {section.description && <div className="text-muted small">{section.description}</div>}
         </div>
         <div className="d-flex gap-2">
-          <Button size="sm" variant="outline-secondary" onClick={onEditDef} title="Edit fields">
+          {section.is_repeater && (
+            <Button size="sm" variant="outline-primary" onClick={addRow}>
+              <i className="bi bi-plus-lg me-1" />Add row
+            </Button>
+          )}
+          <Button size="sm" variant="outline-secondary" onClick={onEditDef} title="Edit fields/position">
             <i className="bi bi-pencil" />
           </Button>
           <Button size="sm" variant="outline-danger" onClick={onRemove} title="Delete section">
@@ -122,37 +71,34 @@ function CustomSectionCard({
           </Button>
         </div>
       </Card.Header>
-      <Card.Body>
+      <Card.Body className={section.is_repeater ? 'p-2' : undefined}>
         {section.is_repeater ? (
-          <>
-            <Table size="sm" responsive className="align-middle mb-2">
-              <thead>
-                <tr>
-                  {section.fields.map(f => <th key={f.id}>{f.label}</th>)}
-                  <th style={{ width: 50 }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {section.rows.map((row, i) => (
-                  <tr key={i}>
-                    {section.fields.map(f => (
-                      <td key={f.id}>
-                        <FieldInput field={f} value={row[f.id]} onChange={v => updateRow(i, f.id, v)} size="sm" />
-                      </td>
-                    ))}
-                    <td>
-                      <Button size="sm" variant="outline-danger" onClick={() => deleteRow(i)}>
-                        <i className="bi bi-trash" />
-                      </Button>
-                    </td>
+          section.rows.length === 0
+            ? <p className="text-muted text-center py-3 mb-0 small">No rows yet — click "Add row".</p>
+            : <Table size="sm" responsive className="align-middle mb-0">
+                <thead>
+                  <tr>
+                    {section.fields.map(f => <th key={f.id}>{f.label}</th>)}
+                    <th style={{ width: 50 }}></th>
                   </tr>
-                ))}
-              </tbody>
-            </Table>
-            <Button size="sm" variant="outline-primary" onClick={addRow}>
-              <i className="bi bi-plus-lg me-1" /> Add row
-            </Button>
-          </>
+                </thead>
+                <tbody>
+                  {section.rows.map((row, i) => (
+                    <tr key={i}>
+                      {section.fields.map(f => (
+                        <td key={f.id}>
+                          <FieldInput field={f} value={row[f.id]} onChange={v => updateRow(i, f.id, v)} size="sm" />
+                        </td>
+                      ))}
+                      <td>
+                        <Button size="sm" variant="outline-danger" onClick={() => deleteRow(i)}>
+                          <i className="bi bi-trash" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
         ) : (
           <Row className="g-3">
             {section.fields.map(f => (
@@ -161,10 +107,7 @@ function CustomSectionCard({
                 <FieldInput
                   field={f}
                   value={section.rows[0]?.[f.id]}
-                  onChange={v => {
-                    const newRow = { ...(section.rows[0] ?? {}), [f.id]: v };
-                    onChange({ rows: [newRow] });
-                  }}
+                  onChange={v => onChange({ rows: [{ ...(section.rows[0] ?? {}), [f.id]: v }] })}
                 />
               </Col>
             ))}
@@ -175,44 +118,60 @@ function CustomSectionCard({
   );
 }
 
+/* ------------------ Field input dispatcher ------------------ */
+
 function FieldInput({ field, value, onChange, size }: {
   field: CustomField;
   value: any;
   onChange: (v: any) => void;
   size?: 'sm';
 }) {
-  const common = { size, value: value ?? '' } as any;
+  const common = { size } as any;
   switch (field.type) {
     case 'number':
       return <Form.Control {...common} type="number" step="0.01" value={value || ''} onChange={e => onChange(e.target.value === '' ? 0 : Number(e.target.value))} />;
     case 'date':
-      return <Form.Control {...common} type="date" onChange={e => onChange(e.target.value)} />;
+      return <Form.Control {...common} type="date" value={value ?? ''} onChange={e => onChange(e.target.value)} />;
     case 'url':
-      return <Form.Control {...common} type="url" placeholder="https://…" onChange={e => onChange(e.target.value)} />;
+      return <Form.Control {...common} type="url" placeholder="https://…" value={value ?? ''} onChange={e => onChange(e.target.value)} />;
     case 'textarea':
-      return <Form.Control {...common} as="textarea" rows={3} onChange={e => onChange(e.target.value)} />;
+      return <Form.Control {...common} as="textarea" rows={3} value={value ?? ''} onChange={e => onChange(e.target.value)} />;
     case 'richtext':
       return <RichTextEditor value={value ?? ''} onChange={onChange} />;
     case 'select':
       return (
-        <Form.Select {...common} onChange={e => onChange(e.target.value)}>
+        <Form.Select {...common} value={value ?? ''} onChange={e => onChange(e.target.value)}>
           <option value="">—</option>
           {(field.options ?? []).map(o => <option key={o} value={o}>{o}</option>)}
         </Form.Select>
       );
     case 'text':
     default:
-      return <Form.Control {...common} onChange={e => onChange(e.target.value)} />;
+      return <Form.Control {...common} value={value ?? ''} onChange={e => onChange(e.target.value)} />;
   }
 }
 
-function DefinitionModal({
-  show, onHide, draft, setDraft, onSave, isEdit,
+/* ------------------ Definition modal (add / edit a section) ------------------ */
+
+export function CustomSectionDefModal({
+  show, onHide, initial, onSave, isEdit,
 }: {
-  show: boolean; onHide: () => void;
-  draft: CustomSection; setDraft: (s: CustomSection) => void;
-  onSave: () => void; isEdit: boolean;
+  show: boolean;
+  onHide: () => void;
+  initial: CustomSection;
+  onSave: (s: CustomSection) => void;
+  isEdit: boolean;
 }) {
+  const [draft, setDraft] = useState<CustomSection>(initial);
+  // Track the raw text of options per field so commas type freely
+  const [optsText, setOptsText] = useState<Record<string, string>>({});
+
+  // Reset state when initial changes (modal reopens with new section)
+  if (draft.id !== initial.id || (show && !isEdit && draft !== initial && draft.fields.length === 0 && initial.fields.length === 0 && draft.name !== initial.name)) {
+    // intentionally simple: reset on identity change
+  }
+  // Actually use an effect-like sync via key reset on show+initial.id in parent
+
   const addField = () => setDraft({ ...draft, fields: [...draft.fields, { id: crypto.randomUUID(), label: '', type: 'text' }] });
   const updField = (i: number, patch: Partial<CustomField>) => {
     const fields = draft.fields.map((f, idx) => idx === i ? { ...f, ...patch } : f);
@@ -220,7 +179,18 @@ function DefinitionModal({
   };
   const delField = (i: number) => setDraft({ ...draft, fields: draft.fields.filter((_, idx) => idx !== i) });
 
-  const onSubmit = (e: FormEvent) => { e.preventDefault(); onSave(); };
+  const onSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!draft.name.trim()) { alert('Section name is required.'); return; }
+    if (draft.fields.length === 0) { alert('Add at least one field.'); return; }
+    // Finalize options: parse raw text strings now
+    const cleanedFields: CustomField[] = draft.fields.map(f => {
+      if (f.type !== 'select') return { ...f, options: undefined };
+      const text = optsText[f.id] ?? (f.options ?? []).join(', ');
+      return { ...f, options: text.split(',').map(s => s.trim()).filter(Boolean) };
+    });
+    onSave({ ...draft, fields: cleanedFields });
+  };
 
   return (
     <Modal show={show} onHide={onHide} centered size="lg">
@@ -230,11 +200,11 @@ function DefinitionModal({
         </Modal.Header>
         <Modal.Body>
           <Row className="g-3 mb-3">
-            <Col md={7}>
+            <Col md={6}>
               <Form.Label className="small">Section name</Form.Label>
               <Form.Control required placeholder="e.g. Offsite Data" value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} />
             </Col>
-            <Col md={5}>
+            <Col md={6}>
               <Form.Label className="small">Entry mode</Form.Label>
               <Form.Select value={draft.is_repeater ? 'repeater' : 'single'} onChange={e => setDraft({ ...draft, is_repeater: e.target.value === 'repeater' })}>
                 <option value="single">Single entry (one set of fields)</option>
@@ -245,6 +215,15 @@ function DefinitionModal({
               <Form.Label className="small">Description (optional)</Form.Label>
               <Form.Control value={draft.description ?? ''} onChange={e => setDraft({ ...draft, description: e.target.value })}
                 placeholder="Short helper text for this section" />
+            </Col>
+            <Col md={12}>
+              <Form.Label className="small">Position</Form.Label>
+              <Form.Select value={draft.insert_after} onChange={e => setDraft({ ...draft, insert_after: e.target.value as StandardSectionId })}>
+                {(Object.keys(POSITION_LABELS) as StandardSectionId[]).map(p => (
+                  <option key={p} value={p}>{POSITION_LABELS[p]}</option>
+                ))}
+              </Form.Select>
+              <Form.Text className="text-muted">Where this section will appear in the form and the dashboard.</Form.Text>
             </Col>
           </Row>
 
@@ -269,9 +248,12 @@ function DefinitionModal({
                   </td>
                   <td>
                     {f.type === 'select' ? (
-                      <Form.Control size="sm" value={(f.options ?? []).join(', ')}
-                        onChange={e => updField(i, { options: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
-                        placeholder="Good, Fair, Poor" />
+                      <Form.Control
+                        size="sm"
+                        value={optsText[f.id] ?? (f.options ?? []).join(', ')}
+                        onChange={e => setOptsText({ ...optsText, [f.id]: e.target.value })}
+                        placeholder="Good, Fair, Poor"
+                      />
                     ) : <span className="text-muted small">—</span>}
                   </td>
                   <td>
@@ -292,7 +274,9 @@ function DefinitionModal({
   );
 }
 
-function newSection(): CustomSection {
+/* ------------------ Helpers ------------------ */
+
+export function newSection(insertAfter: StandardSectionId = 'insights'): CustomSection {
   return {
     id: crypto.randomUUID(),
     name: '',
@@ -300,5 +284,10 @@ function newSection(): CustomSection {
     is_repeater: false,
     fields: [],
     rows: [],
+    insert_after: insertAfter,
   };
+}
+
+export function customSectionsAt(all: CustomSection[], anchor: StandardSectionId): CustomSection[] {
+  return all.filter(s => s.insert_after === anchor);
 }

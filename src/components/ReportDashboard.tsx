@@ -3,7 +3,7 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
   LineChart, Line, RadialBarChart, RadialBar, PolarAngleAxis,
 } from 'recharts';
-import { WeeklyReportContent, ListingQuality, CustomSection, CustomField } from '../lib/reportSchema';
+import { WeeklyReportContent, ListingQuality, CustomSection, CustomField, StandardSectionId } from '../lib/reportSchema';
 import DOMPurify from 'dompurify';
 import SectionComments, { Comment, CommentSection } from './SectionComments';
 
@@ -59,9 +59,16 @@ export default function ReportDashboard({
     );
   };
 
+  const renderCustomAt = (anchor: StandardSectionId) =>
+    (c.custom_sections ?? []).filter(s => s.insert_after === anchor).map(s => (
+      <CustomSectionView key={s.id} section={s} />
+    ));
+
   return (
     <>
       {!hasPrev && <Alert variant="warning" className="py-2">No previous week — single-week view (no comparison).</Alert>}
+
+      {renderCustomAt('start')}
 
       {/* KPI cards */}
       <Row className="g-3 mb-4">
@@ -150,6 +157,7 @@ export default function ReportDashboard({
       )}
 
       {renderComments('overall')}
+      {renderCustomAt('overall')}
 
       {/* Top Creators */}
       <Card className="mb-3">
@@ -176,6 +184,7 @@ export default function ReportDashboard({
         </Card.Body>
       </Card>
       {renderComments('top_creators')}
+      {renderCustomAt('top_creators')}
 
       {/* Top Videos: this + last side by side */}
       <Row className="g-3 mb-3">
@@ -197,6 +206,7 @@ export default function ReportDashboard({
         </Col>
       </Row>
       {renderComments('top_videos')}
+      {renderCustomAt('top_videos')}
 
       {/* Video Performance */}
       <Card className="mb-3">
@@ -211,6 +221,7 @@ export default function ReportDashboard({
         </Card.Body>
       </Card>
       {renderComments('video_performance')}
+      {renderCustomAt('video_performance')}
 
       {/* GMV Max */}
       <Card className="mb-3">
@@ -231,6 +242,7 @@ export default function ReportDashboard({
         </Card.Body>
       </Card>
       {renderComments('gmv_max')}
+      {renderCustomAt('gmv_max')}
 
       {/* Product Highlights */}
       <Card className="mb-3">
@@ -266,6 +278,7 @@ export default function ReportDashboard({
         </Card.Body>
       </Card>
       {renderComments('product_highlights')}
+      {renderCustomAt('product_highlights')}
 
       {/* Shop Health */}
       <Card className="mb-3">
@@ -284,6 +297,7 @@ export default function ReportDashboard({
         </Card.Body>
       </Card>
       {renderComments('shop_health')}
+      {renderCustomAt('shop_health')}
 
       {/* Insights */}
       {c.insights.summary && c.insights.summary.replace(/<[^>]*>/g,'').trim().length > 0 && (
@@ -295,9 +309,9 @@ export default function ReportDashboard({
         </Card>
       )}
       {renderComments('insights')}
+      {renderCustomAt('insights')}
 
       {/* Custom Sections */}
-      {c.custom_sections.map(s => <CustomSectionView key={s.id} section={s} />)}
     </>
   );
 }
@@ -305,7 +319,7 @@ export default function ReportDashboard({
 function CustomSectionView({ section }: { section: CustomSection }) {
   if (section.fields.length === 0) return null;
   return (
-    <Card className="mb-3" style={{ borderLeft: '4px solid #7c3aed' }}>
+    <Card className="mb-3">
       <Card.Header className="fw-semibold">{section.name || 'Custom Section'}</Card.Header>
       <Card.Body>
         {section.description && <p className="text-muted small mb-3">{section.description}</p>}
