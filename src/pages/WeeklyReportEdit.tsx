@@ -49,6 +49,10 @@ export default function WeeklyReportEdit() {
   const [priorComments, setPriorComments] = useState<Comment[]>([]);
   const [loadingComments, setLoadingComments] = useState(false);
 
+  const [csModalOpen, setCsModalOpen] = useState(false);
+  const [csDraft, setCsDraft] = useState<CustomSection>(newSection());
+  const [csIsEdit, setCsIsEdit] = useState(false);
+
   useEffect(() => {
     (async () => {
       const { data, error } = await supabase.from('weekly_reports').select('*').eq('id', id).single();
@@ -169,10 +173,6 @@ export default function WeeklyReportEdit() {
   );
 
   // Custom section management
-  const [csModalOpen, setCsModalOpen] = useState(false);
-  const [csDraft, setCsDraft] = useState<CustomSection>(newSection());
-  const [csIsEdit, setCsIsEdit] = useState(false);
-
   const openAddCustom = () => { setCsDraft(newSection('insights')); setCsIsEdit(false); setCsModalOpen(true); };
   const openEditCustom = (s: CustomSection) => { setCsDraft({ ...s, fields: s.fields.map(f => ({ ...f })) }); setCsIsEdit(true); setCsModalOpen(true); };
   const saveCustomDef = (s: CustomSection) => {
