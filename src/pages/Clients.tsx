@@ -50,8 +50,10 @@ export default function Clients() {
 
   const remove = async (c: Client) => {
     if (!confirm(`Delete client "${c.name}"? Brands will be unlinked.`)) return;
+    const prev = clients;
+    setClients(clients.filter(x => x.id !== c.id));
     const { error } = await supabase.from('clients').delete().eq('id', c.id);
-    if (error) alert(error.message); else load();
+    if (error) { alert(error.message); setClients(prev); }
   };
 
   return (

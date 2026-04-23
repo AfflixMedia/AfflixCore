@@ -34,17 +34,22 @@ serve(async (req) => {
     const brandIds: string[] = link.brand_ids ?? [];
     if (brandIds.length === 0) return json({ error: 'No brands assigned to this link' }, 400);
 
-    const [{ data: client }, { data: brands }, { data: reports }] = await Promise.all([
+    const resourceIds: string[] = link.resource_ids ?? [];
+    const [{ data: client }, { data: brands }, { data: reports }, { data: resources }] = await Promise.all([
       admin.from('clients').select('id,name').eq('id', link.client_id).single(),
       admin.from('brands').select('id,name,client,client_id').in('id', brandIds),
       admin.from('weekly_reports').select('*').in('brand_id', brandIds)
         .order('week_start', { ascending: false }),
+      resourceIds.length > 0
+        ? admin.from('resources').select('*').in('id', resourceIds)
+        : Promise.resolve({ data: [] }),
     ]);
 
     return json({
       client,
       brands: brands ?? [],
       reports: reports ?? [],
+      resources: resources ?? [],
       label: link.label ?? null,
     });
   } catch (e) {

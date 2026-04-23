@@ -66,8 +66,10 @@ export default function Brands() {
 
   const remove = async (b: Brand) => {
     if (!confirm(`Delete brand "${b.name}"?`)) return;
+    const prev = brands;
+    setBrands(brands.filter(x => x.id !== b.id));
     const { error } = await supabase.from('brands').delete().eq('id', b.id);
-    if (error) alert(error.message); else load();
+    if (error) { alert(error.message); setBrands(prev); }
   };
 
   const submit = async (e: FormEvent) => {
