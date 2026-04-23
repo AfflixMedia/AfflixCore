@@ -95,11 +95,21 @@ export default function WeeklyReportView() {
             <Badge bg={report.status === 'draft' ? 'secondary' : 'success'} className="ms-2">{report.status}</Badge>
           </div>
         </div>
-        <div className="d-flex gap-2">
+        <div className="d-flex gap-2 flex-wrap">
           <Button variant="outline-secondary" onClick={() => nav('/reporting/weekly')}>← Back</Button>
           <Button variant="primary" onClick={() => nav(`/reporting/weekly/${id}/edit`)}>
             <i className="bi bi-pencil me-1" /> Edit data
           </Button>
+          {profile?.role === 'bob' && (
+            <Button variant="outline-danger" onClick={async () => {
+              if (!confirm(`Delete this report permanently?`)) return;
+              const { error } = await supabase.from('weekly_reports').delete().eq('id', report!.id);
+              if (error) { alert(error.message); return; }
+              nav('/reporting/weekly');
+            }}>
+              <i className="bi bi-trash me-1" /> Delete
+            </Button>
+          )}
         </div>
       </div>
 

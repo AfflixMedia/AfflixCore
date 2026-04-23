@@ -131,49 +131,53 @@ export default function WeeklyReports() {
   const nextWindowFor = (brandId: string): { start: string; end: string; week_number: number } | null => {
     const anchor = settings[brandId];
     if (!anchor) return null;
-    const brandReports = reports.filter(r => r.brand_id === brandId).sort((a, b) => a.week_start.localeCompare(b.week_start));
-    if (brandReports.length === 0) {
-      return { start: anchor, end: addDays(anchor, 6), week_number: 1 };
+    const existing = new Set(reports.filter(r => r.brand_id === brandId).map(r => r.week_start));
+    let start = anchor;
+    let week_number = 1;
+    while (existing.has(start)) {
+      start = addDays(start, 7);
+      week_number++;
     }
-    const last = brandReports[brandReports.length - 1];
-    const start = addDays(last.week_end, 1);
-    return { start, end: addDays(start, 6), week_number: last.week_number + 1 };
+    return { start, end: addDays(start, 6), week_number };
   };
 
   const openCreate = (b: Brand) => {
     setCreateBrand(b);
-    setAnchorPick('');
+    // Prefill with existing anchor (if any) so a re-pick is easy
+    setAnchorPick(settings[b.id] ?? '');
     setErr(null);
     setShow(true);
   };
+
+  const hasExistingReports = (brandId: string) =>
+    reports.some(r => r.brand_id === brandId);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (!createBrand || !user) return;
     setSaving(true); setErr(null);
     try {
+      const firstTime = !hasExistingReports(createBrand.id);
       let anchor = settings[createBrand.id];
-      if (!anchor) {
+      if (firstTime) {
         if (!anchorPick) throw new Error('Please choose an anchor date.');
         anchor = anchorPick;
         const { error } = await supabase.from('brand_report_settings')
           .upsert({ brand_id: createBrand.id, weekly_anchor: anchor });
         if (error) throw error;
+        setSettings(prev => ({ ...prev, [createBrand.id]: anchor! }));
+      } else if (!anchor) {
+        throw new Error('No anchor set for this brand.');
       }
-      // recompute next window with fresh anchor
-      const brandReports = reports.filter(r => r.brand_id === createBrand.id)
-        .sort((a, b) => a.week_start.localeCompare(b.week_start));
-      let start: string, end: string, week_number: number;
-      if (brandReports.length === 0) {
-        start = anchor!;
-        end = addDays(anchor!, 6);
-        week_number = 1;
-      } else {
-        const last = brandReports[brandReports.length - 1];
-        start = addDays(last.week_end, 1);
-        end = addDays(start, 6);
-        week_number = last.week_number + 1;
+      // earliest-gap-first: skip any weeks that already have a report
+      const existing = new Set(reports.filter(r => r.brand_id === createBrand.id).map(r => r.week_start));
+      let start = anchor!;
+      let week_number = 1;
+      while (existing.has(start)) {
+        start = addDays(start, 7);
+        week_number++;
       }
+      const end = addDays(start, 6);
       const { data: inserted, error } = await supabase.from('weekly_reports').insert({
         brand_id: createBrand.id,
         created_by: user.id,
@@ -193,6 +197,16 @@ export default function WeeklyReports() {
   };
 
   const clearFilters = () => { setFBrand(''); setFApc(''); setFFrom(''); setFTo(''); setFSearch(''); setFMonth(currentMonth()); };
+
+  const deleteReport = async (r: Report, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const b = brandMap.get(r.brand_id);
+    if (!confirm(`Delete report for ${b?.name ?? 'this brand'} (Week #${r.week_number}, ${formatRange(r.week_start, r.week_end)})? This removes all its data and comments permanently.`)) return;
+    const prev = reports;
+    setReports(reports.filter(x => x.id !== r.id));
+    const { error } = await supabase.from('weekly_reports').delete().eq('id', r.id);
+    if (error) { alert(error.message); setReports(prev); }
+  };
 
   return (
     <>
@@ -309,6 +323,7 @@ export default function WeeklyReports() {
                   <th>Period</th>
                   <th>Status</th>
                   <th>Created</th>
+                  {isBob && <th style={{ width: 60 }}></th>}
                 </tr>
               </thead>
               <tbody>
@@ -324,6 +339,13 @@ export default function WeeklyReports() {
                       <td>{formatRange(r.week_start, r.week_end)}</td>
                       <td><Badge bg={r.status === 'draft' ? 'secondary' : 'success'}>{r.status}</Badge></td>
                       <td><small className="text-muted">{new Date(r.created_at).toLocaleDateString()}</small></td>
+                      {isBob && (
+                        <td className="text-end">
+                          <Button size="sm" variant="outline-danger" onClick={(e) => deleteReport(r, e)} title="Delete report">
+                            <i className="bi bi-trash" />
+                          </Button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -349,6 +371,7 @@ export default function WeeklyReports() {
           ) : (
             <Row className="g-2">
               {brands.map(b => {
+                const existingCount = reports.filter(r => r.brand_id === b.id).length;
                 const next = nextWindowFor(b.id);
                 return (
                   <Col md={4} lg={3} key={b.id}>
@@ -359,7 +382,9 @@ export default function WeeklyReports() {
                     >
                       <div className="fw-semibold">{b.name}</div>
                       <small className="text-muted d-block">
-                        {next ? `Next: ${formatRange(next.start, next.end)}` : 'No anchor — first report'}
+                        {existingCount === 0
+                          ? 'No reports yet — pick anchor'
+                          : next ? `Next: ${formatRange(next.start, next.end)}` : 'No anchor'}
                       </small>
                     </Button>
                   </Col>
@@ -378,11 +403,12 @@ export default function WeeklyReports() {
           </Modal.Header>
           <Modal.Body>
             {err && <Alert variant="danger">{err}</Alert>}
-            {createBrand && !settings[createBrand.id] ? (
+            {createBrand && !hasExistingReports(createBrand.id) ? (
               <>
                 <Alert variant="info">
-                  You have not created any report for <strong>{createBrand.name}</strong> yet.
-                  Please choose an anchor date — your weekly cycle will start from this date.
+                  {settings[createBrand.id]
+                    ? <>No reports exist for <strong>{createBrand.name}</strong>. Confirm or re-pick the anchor date — your weekly cycle will start from here.</>
+                    : <>You have not created any report for <strong>{createBrand.name}</strong> yet. Please choose an anchor date — your weekly cycle will start from this date.</>}
                 </Alert>
                 <Form.Group>
                   <Form.Label>Anchor date</Form.Label>
