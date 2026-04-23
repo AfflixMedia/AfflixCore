@@ -1,12 +1,22 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Card, Form, Button, Row, Col, Table, Spinner, Alert, Badge } from 'react-bootstrap';
+import { Card, Form, Button, Row, Col, Table, Spinner, Alert, Badge, Modal } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import { formatRange } from '../lib/dates';
 import {
   WeeklyReportContent, emptyContent,
   emptyTopCreator, emptyTopVideo, emptyGmvMax, emptyProduct,
 } from '../lib/reportSchema';
+import { Comment } from '../components/SectionComments';
+
+const SECTION_LABELS: Record<string, string> = {
+  overall: 'Overall Performance',
+  top_creators: 'Top Creators',
+  top_videos: 'Top Videos',
+  gmv_max: 'GMV Max Campaigns',
+  product_highlights: 'Product Highlights',
+  insights: 'Insights',
+};
 
 interface ReportRow {
   id: string; brand_id: string; week_start: string; week_end: string;
@@ -24,6 +34,12 @@ export default function WeeklyReportEdit() {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  const [showComments, setShowComments] = useState(false);
+  const [priorReports, setPriorReports] = useState<ReportRow[]>([]);
+  const [selectedPriorId, setSelectedPriorId] = useState<string>('');
+  const [priorComments, setPriorComments] = useState<Comment[]>([]);
+  const [loadingComments, setLoadingComments] = useState(false);
+
   useEffect(() => {
     (async () => {
       const { data, error } = await supabase.from('weekly_reports').select('*').eq('id', id).single();
@@ -36,9 +52,28 @@ export default function WeeklyReportEdit() {
       setC(merged);
       const { data: bd } = await supabase.from('brands').select('id,name,client').eq('id', r.brand_id).single();
       setBrand(bd as Brand);
+      const { data: priors } = await supabase.from('weekly_reports')
+        .select('*').eq('brand_id', r.brand_id).lt('week_start', r.week_start)
+        .order('week_start', { ascending: false }).limit(12);
+      setPriorReports((priors as ReportRow[]) ?? []);
+      if (priors && priors.length > 0) setSelectedPriorId((priors[0] as any).id);
       setLoading(false);
     })();
   }, [id]);
+
+  const openCommentsModal = async () => {
+    setShowComments(true);
+    if (!selectedPriorId) return;
+    await loadPriorComments(selectedPriorId);
+  };
+
+  const loadPriorComments = async (priorId: string) => {
+    setLoadingComments(true);
+    const { data } = await supabase.from('report_comments')
+      .select('*').eq('report_id', priorId).order('created_at', { ascending: true });
+    setPriorComments((data as Comment[]) ?? []);
+    setLoadingComments(false);
+  };
 
   const setOverall = (k: keyof typeof c.overall, v: any) => setC({ ...c, overall: { ...c.overall, [k]: v } });
   const num = (v: string) => v === '' ? 0 : Number(v);
@@ -84,7 +119,12 @@ export default function WeeklyReportEdit() {
             <Badge bg={report.status === 'draft' ? 'secondary' : 'success'} className="ms-2">{report.status}</Badge>
           </div>
         </div>
-        <div className="d-flex gap-2">
+        <div className="d-flex gap-2 flex-wrap">
+          {priorReports.length > 0 && (
+            <Button variant="outline-info" onClick={openCommentsModal}>
+              <i className="bi bi-chat-left-text me-1" /> Load previous comments
+            </Button>
+          )}
           <Button variant="outline-secondary" onClick={() => nav('/reporting/weekly')}>Cancel</Button>
           <Button variant="outline-primary" disabled={saving} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
           <Button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
@@ -92,6 +132,61 @@ export default function WeeklyReportEdit() {
       </div>
 
       {err && <Alert variant="danger">{err}</Alert>}
+
+      <Modal show={showComments} onHide={() => setShowComments(false)} centered size="lg" scrollable>
+        <Modal.Header closeButton>
+          <Modal.Title>Previous comments — reference</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {priorReports.length === 0 ? (
+            <p className="text-muted mb-0">No previous reports for this brand.</p>
+          ) : (
+            <>
+              <Form.Group className="mb-3">
+                <Form.Label className="small">Choose a report to view its comments</Form.Label>
+                <Form.Select value={selectedPriorId} onChange={e => { setSelectedPriorId(e.target.value); loadPriorComments(e.target.value); }}>
+                  {priorReports.map(p => (
+                    <option key={p.id} value={p.id}>
+                      Week #{p.week_number} — {formatRange(p.week_start, p.week_end)}
+                    </option>
+                  ))}
+                </Form.Select>
+              </Form.Group>
+
+              {loadingComments ? (
+                <div className="text-center py-4"><Spinner animation="border" size="sm" /></div>
+              ) : priorComments.length === 0 ? (
+                <p className="text-muted text-center py-3 mb-0">No comments on this report.</p>
+              ) : (
+                Object.keys(SECTION_LABELS).map(section => {
+                  const sc = priorComments.filter(c => c.section === section);
+                  if (sc.length === 0) return null;
+                  return (
+                    <div key={section} className="mb-3">
+                      <h6 className="text-muted">{SECTION_LABELS[section]}</h6>
+                      {sc.map(c => (
+                        <div key={c.id} className="p-2 mb-2 rounded small" style={{ background: '#f8fafc', border: '1px solid #e5e7eb' }}>
+                          <div className="d-flex align-items-center gap-2 mb-1">
+                            <strong>{c.author_name}</strong>
+                            <Badge bg={c.author_type === 'client' ? 'info' : c.author_type === 'bob' ? 'warning' : 'success'} text={c.author_type === 'bob' ? 'dark' : undefined}>
+                              {c.author_type === 'client' ? 'Client' : c.author_type === 'bob' ? 'Bob' : 'APC'}
+                            </Badge>
+                            <span className="text-muted">{new Date(c.created_at).toLocaleDateString()}</span>
+                          </div>
+                          <div style={{ whiteSpace: 'pre-wrap' }}>{c.body}</div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })
+              )}
+            </>
+          )}
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setShowComments(false)}>Close</Button>
+        </Modal.Footer>
+      </Modal>
 
       {/* Overall */}
       <Card className="mb-4">

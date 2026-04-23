@@ -4,16 +4,27 @@ import {
   LineChart, Line, RadialBarChart, RadialBar, PolarAngleAxis,
 } from 'recharts';
 import { WeeklyReportContent } from '../lib/reportSchema';
+import SectionComments, { Comment, CommentSection } from './SectionComments';
 
 export interface TrendPoint { label: string; GMV: number; 'Affiliate GMV': number; }
 
+export interface CommentsConfig {
+  mode: 'authed' | 'public';
+  comments: Comment[];
+  currentAuthorName?: string;
+  defaultPublicName?: string;
+  onAdd: (section: CommentSection, body: string, authorName: string) => Promise<void>;
+  onDelete?: (id: string) => Promise<void>;
+}
+
 export default function ReportDashboard({
-  c, p, trendData, hasPrev,
+  c, p, trendData, hasPrev, commentsConfig,
 }: {
   c: WeeklyReportContent;
   p: WeeklyReportContent | null;
   trendData: TrendPoint[];
   hasPrev: boolean;
+  commentsConfig?: CommentsConfig;
 }) {
   const o = c.overall;
   const po = p?.overall;
@@ -28,6 +39,21 @@ export default function ReportDashboard({
 
   const sps = Math.max(0, Math.min(5, o.sps));
   const spsData = [{ name: 'SPS', value: (sps / 5) * 100, fill: spsColor(sps) }];
+
+  const renderComments = (section: CommentSection) => {
+    if (!commentsConfig) return null;
+    return (
+      <SectionComments
+        section={section}
+        comments={commentsConfig.comments}
+        mode={commentsConfig.mode}
+        currentAuthorName={commentsConfig.currentAuthorName}
+        defaultPublicName={commentsConfig.defaultPublicName}
+        onAdd={(body, name) => commentsConfig.onAdd(section, body, name)}
+        onDelete={commentsConfig.onDelete}
+      />
+    );
+  };
 
   return (
     <>
@@ -100,6 +126,8 @@ export default function ReportDashboard({
         </Card>
       )}
 
+      {renderComments('overall')}
+
       <Row className="g-3 mb-4">
         <Col lg={6}>
           <Card className="h-100">
@@ -147,6 +175,11 @@ export default function ReportDashboard({
             </Card.Body>
           </Card>
         </Col>
+      </Row>
+
+      <Row>
+        <Col lg={6}>{renderComments('top_creators')}</Col>
+        <Col lg={6}>{renderComments('top_videos')}</Col>
       </Row>
 
       <Row className="g-3 mb-4">
@@ -199,6 +232,11 @@ export default function ReportDashboard({
         </Col>
       </Row>
 
+      <Row>
+        <Col lg={6}>{renderComments('gmv_max')}</Col>
+        <Col lg={6}>{renderComments('product_highlights')}</Col>
+      </Row>
+
       {c.insights.summary && (
         <Card className="mb-4">
           <Card.Header className="fw-semibold">Insights</Card.Header>
@@ -207,6 +245,8 @@ export default function ReportDashboard({
           </Card.Body>
         </Card>
       )}
+
+      {renderComments('insights')}
     </>
   );
 }

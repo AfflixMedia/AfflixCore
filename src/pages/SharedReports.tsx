@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { addDays, formatRange, formatHuman, fromISO } from '../lib/dates';
 import { WeeklyReportContent, emptyContent } from '../lib/reportSchema';
 import ReportDashboard, { TrendPoint } from '../components/ReportDashboard';
+import { Comment, CommentSection } from '../components/SectionComments';
 import { resourceIcon } from '../lib/resourceIcon';
 
 interface Brand { id: string; name: string; client: string | null; client_id: string | null; }
@@ -20,6 +21,7 @@ export default function SharedReports() {
   const [brands, setBrands] = useState<Brand[]>([]);
   const [reports, setReports] = useState<Report[]>([]);
   const [resources, setResources] = useState<SharedResource[]>([]);
+  const [comments, setComments] = useState<Comment[]>([]);
   const [label, setLabel] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -42,6 +44,7 @@ export default function SharedReports() {
         setBrands(data.brands);
         setReports(data.reports);
         setResources(data.resources ?? []);
+        setComments(data.comments ?? []);
         setLabel(data.label);
         if (data.brands?.length > 0) setActiveBrandId(data.brands[0].id);
       } catch (e: any) {
@@ -91,6 +94,18 @@ export default function SharedReports() {
   if (loading) return <PublicShell clientName={clientName}><div className="text-center py-5"><Spinner animation="border" /></div></PublicShell>;
   if (err) return <PublicShell clientName={clientName}><Alert variant="danger">{err}</Alert></PublicShell>;
 
+  const addComment = async (section: CommentSection, body: string, authorName: string) => {
+    if (!openReport) return;
+    const { data, error } = await supabase.functions.invoke('post-shared-comment', {
+      body: { token, report_id: openReport.id, section, author_name: authorName, body },
+    });
+    if (error) throw error;
+    if ((data as any)?.error) throw new Error((data as any).error);
+    setComments(prev => [...prev, (data as any).comment as Comment]);
+  };
+
+  const reportComments = openReport ? comments.filter(c => c.report_id === openReport.id) : [];
+
   // Report detail view
   if (openReport && activeBrand) {
     return (
@@ -107,6 +122,12 @@ export default function SharedReports() {
           p={prevReport ? normalize(prevReport.content) : null}
           trendData={trendData}
           hasPrev={!!prevReport}
+          commentsConfig={{
+            mode: 'public',
+            comments: reportComments,
+            defaultPublicName: localStorage.getItem('ac_public_name') ?? '',
+            onAdd: addComment,
+          }}
         />
       </PublicShell>
     );

@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Spinner, Alert, Badge, Button } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../auth/AuthContext';
 import { addDays, formatRange, formatHuman } from '../lib/dates';
 import { WeeklyReportContent, emptyContent } from '../lib/reportSchema';
 import ReportDashboard, { TrendPoint } from '../components/ReportDashboard';
+import { Comment, CommentSection } from '../components/SectionComments';
 
 interface ReportRow {
   id: string; brand_id: string; week_start: string; week_end: string;
@@ -15,10 +17,12 @@ interface Brand { id: string; name: string; client: string; }
 export default function WeeklyReportView() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
+  const { profile } = useAuth();
   const [report, setReport] = useState<ReportRow | null>(null);
   const [prev, setPrev] = useState<ReportRow | null>(null);
   const [brand, setBrand] = useState<Brand | null>(null);
   const [trend, setTrend] = useState<ReportRow[]>([]);
+  const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
@@ -39,6 +43,9 @@ export default function WeeklyReportView() {
         .select('*').eq('brand_id', r.brand_id)
         .lte('week_start', r.week_start).order('week_start', { ascending: true }).limit(8);
       setTrend((tr as ReportRow[]) ?? []);
+      const { data: cm } = await supabase.from('report_comments')
+        .select('*').eq('report_id', r.id).order('created_at', { ascending: true });
+      setComments((cm as Comment[]) ?? []);
       setLoading(false);
     })();
   }, [id]);
@@ -50,6 +57,26 @@ export default function WeeklyReportView() {
     GMV: t.content?.overall?.gmv ?? 0,
     'Affiliate GMV': t.content?.overall?.affiliate_gmv ?? 0,
   })), [trend]);
+
+  const addComment = async (section: CommentSection, body: string, authorName: string) => {
+    if (!report || !profile) return;
+    const { data, error } = await supabase.from('report_comments').insert({
+      report_id: report.id,
+      section,
+      author_type: profile.role === 'bob' ? 'bob' : 'apc',
+      author_name: authorName,
+      body,
+    }).select().single();
+    if (error) throw error;
+    setComments(prev => [...prev, data as Comment]);
+  };
+
+  const delComment = async (cid: string) => {
+    const prevState = comments;
+    setComments(comments.filter(x => x.id !== cid));
+    const { error } = await supabase.from('report_comments').delete().eq('id', cid);
+    if (error) { alert(error.message); setComments(prevState); }
+  };
 
   if (loading) return <div className="text-center py-5"><Spinner animation="border" /></div>;
   if (err || !report || !brand) return <Alert variant="danger">{err ?? 'Not found'}</Alert>;
@@ -73,7 +100,19 @@ export default function WeeklyReportView() {
         </div>
       </div>
 
-      <ReportDashboard c={c} p={p} trendData={trendData} hasPrev={!!prev} />
+      <ReportDashboard
+        c={c}
+        p={p}
+        trendData={trendData}
+        hasPrev={!!prev}
+        commentsConfig={{
+          mode: 'authed',
+          comments,
+          currentAuthorName: profile?.full_name || profile?.email || 'User',
+          onAdd: addComment,
+          onDelete: delComment,
+        }}
+      />
     </>
   );
 }

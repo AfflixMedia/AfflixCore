@@ -9,3 +9,5 @@ dist
 
 .vercel
 tsconfig.tsbuildinfo
+
+.vercel
