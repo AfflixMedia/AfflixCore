@@ -25,6 +25,12 @@ export default function APCs() {
   const [form, setForm] = useState({ email: '', password: '', full_name: '', brand_ids: [] as string[] });
   const [saving, setSaving] = useState(false);
 
+  const [pwApc, setPwApc] = useState<APC | null>(null);
+  const [newPw, setNewPw] = useState('');
+  const [pwBusy, setPwBusy] = useState(false);
+  const [pwErr, setPwErr] = useState<string | null>(null);
+  const [pwOk, setPwOk] = useState(false);
+
   const load = async () => {
     setLoading(true); setErr(null);
     const [{ data: apcRows, error: e1 }, { data: brandRows, error: e2 }, { data: assigns, error: e3 }] = await Promise.all([
@@ -153,6 +159,10 @@ export default function APCs() {
                         : a.brand_names!.map(n => <Badge key={n} bg="info" className="me-1">{n}</Badge>)}
                     </td>
                     <td className="text-end">
+                      <Button size="sm" variant="outline-secondary" className="me-2" onClick={() => { setPwApc(a); setNewPw(''); setPwErr(null); setPwOk(false); }}
+                        title="Reset password">
+                        <i className="bi bi-key" />
+                      </Button>
                       <Button size="sm" variant="outline-primary" onClick={() => openEdit(a)}>
                         <i className="bi bi-pencil" />
                       </Button>
@@ -213,6 +223,45 @@ export default function APCs() {
           <Modal.Footer>
             <Button variant="secondary" onClick={() => setShow(false)} disabled={saving}>Cancel</Button>
             <Button type="submit" disabled={saving}>{saving ? 'Saving…' : (editApc ? 'Save' : 'Create APC')}</Button>
+          </Modal.Footer>
+        </Form>
+      </Modal>
+
+      <Modal show={!!pwApc} onHide={() => setPwApc(null)} centered>
+        <Form onSubmit={async (e) => {
+          e.preventDefault();
+          if (!pwApc) return;
+          setPwBusy(true); setPwErr(null); setPwOk(false);
+          try {
+            const { data, error } = await supabase.functions.invoke('reset-apc-password', {
+              body: { user_id: pwApc.id, password: newPw },
+            });
+            if (error) throw error;
+            if ((data as any)?.error) throw new Error((data as any).error);
+            setPwOk(true);
+          } catch (e: any) {
+            setPwErr(e?.message ?? 'Failed to reset password');
+          } finally {
+            setPwBusy(false);
+          }
+        }}>
+          <Modal.Header closeButton>
+            <Modal.Title>Reset password — {pwApc?.full_name || pwApc?.email}</Modal.Title>
+          </Modal.Header>
+          <Modal.Body>
+            {pwErr && <Alert variant="danger">{pwErr}</Alert>}
+            {pwOk && <Alert variant="success">Password updated. Share it with the APC.</Alert>}
+            <Form.Group>
+              <Form.Label>New password (min 6 chars)</Form.Label>
+              <Form.Control type="text" required minLength={6}
+                value={newPw} onChange={e => setNewPw(e.target.value)}
+                placeholder="e.g. afflix-2026" autoFocus />
+              <Form.Text className="text-muted">The APC can use this to sign in immediately. Copy it and send it to them manually.</Form.Text>
+            </Form.Group>
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="secondary" onClick={() => setPwApc(null)}>Close</Button>
+            <Button type="submit" disabled={pwBusy || newPw.length < 6}>{pwBusy ? 'Updating…' : 'Reset password'}</Button>
           </Modal.Footer>
         </Form>
       </Modal>
