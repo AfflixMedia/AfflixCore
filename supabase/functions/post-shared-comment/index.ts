@@ -45,15 +45,61 @@ serve(async (req) => {
       if (!parent || parent.report_id !== report_id) return json({ error: 'Invalid parent' }, 400);
     }
 
+    const cleanName = String(author_name).trim().slice(0, 80);
+    const cleanBody = String(body).trim().slice(0, 4000);
+
     const { data: inserted, error } = await admin.from('report_comments').insert({
       report_id,
       section,
       author_type: 'client',
-      author_name: String(author_name).trim().slice(0, 80),
-      body: String(body).trim().slice(0, 4000),
+      author_name: cleanName,
+      body: cleanBody,
       parent_id: parent_id ?? null,
     }).select().single();
     if (error) return json({ error: error.message }, 500);
+
+    // Notify Bob + assigned APCs of this brand. Best-effort; don't fail the comment if this errors.
+    try {
+      const sectionLabel: Record<string, string> = {
+        overall: 'Overall Performance', top_creators: 'Top Creators', top_videos: 'Top Videos',
+        video_performance: 'Video Performance', gmv_max: 'GMV Max',
+        product_highlights: 'Product Highlights', shop_health: 'Shop Health', insights: 'Insights',
+      };
+      const [{ data: brand }, { data: bobs }, { data: apcRows }] = await Promise.all([
+        admin.from('brands').select('id,name').eq('id', report.brand_id).single(),
+        admin.from('profiles').select('id').eq('role', 'bob'),
+        admin.from('apc_brands').select('apc_id').eq('brand_id', report.brand_id),
+      ]);
+      const recipientIds = new Set<string>();
+      (bobs ?? []).forEach((p: any) => recipientIds.add(p.id));
+      (apcRows ?? []).forEach((r: any) => recipientIds.add(r.apc_id));
+
+      const title = `New comment on ${brand?.name ?? 'brand'} report`;
+      const bodyText = `${cleanName} commented on ${sectionLabel[section] ?? section}: "${cleanBody.slice(0, 140)}${cleanBody.length > 140 ? '…' : ''}"`;
+      const link = `/reporting/weekly/${report_id}`;
+      const payload = {
+        report_id, brand_id: report.brand_id, section, comment_id: (inserted as any).id,
+      };
+      const rows = Array.from(recipientIds).map(uid => ({
+        user_id: uid, type: 'client_comment', title, body: bodyText, link, payload,
+      }));
+      if (rows.length > 0) await admin.from('notifications').insert(rows);
+
+      // Phase 2: web push if VAPID configured + send-push function deployed
+      const vapidConfigured = !!Deno.env.get('VAPID_PUBLIC_KEY');
+      if (vapidConfigured && rows.length > 0) {
+        try {
+          await fetch(`${supabaseUrl}/functions/v1/send-push`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${serviceKey}` },
+            body: JSON.stringify({ user_ids: Array.from(recipientIds), title, body: bodyText, link }),
+          });
+        } catch (_) { /* best effort */ }
+      }
+    } catch (notifyErr) {
+      console.error('Notification dispatch failed:', notifyErr);
+    }
+
     return json({ comment: inserted });
   } catch (e) {
     return json({ error: (e as Error).message }, 500);

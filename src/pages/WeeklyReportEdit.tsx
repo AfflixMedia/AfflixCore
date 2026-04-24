@@ -1,6 +1,6 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Card, Form, Button, Row, Col, Table, Spinner, Alert, Badge, Modal } from 'react-bootstrap';
+import { Card, Form, Button, Row, Col, Table, Spinner, Alert, Badge, Modal, Offcanvas } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import { formatRange } from '../lib/dates';
 import {
@@ -52,6 +52,8 @@ export default function WeeklyReportEdit() {
   const [csModalOpen, setCsModalOpen] = useState(false);
   const [csDraft, setCsDraft] = useState<CustomSection>(newSection());
   const [csIsEdit, setCsIsEdit] = useState(false);
+
+  const [feedbackSection, setFeedbackSection] = useState<CommentSection | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -161,15 +163,31 @@ export default function WeeklyReportEdit() {
   if (err && !report) return <Alert variant="danger">{err}</Alert>;
   if (!report || !brand) return null;
 
-  const renderComments = (section: CommentSection) => (
-    <SectionComments
-      section={section}
-      comments={comments}
-      mode="authed"
-      currentAuthorName={profile?.full_name || profile?.email || 'User'}
-      onAdd={(b, n, parentId) => addComment(section, b, n, parentId)}
-      onDelete={delComment}
-    />
+  const sectionFeedbackCount = (section: CommentSection) =>
+    comments.filter(c => c.section === section).length;
+
+  const FeedbackButton = ({ section }: { section: CommentSection }) => {
+    const n = sectionFeedbackCount(section);
+    if (n === 0) return null;
+    return (
+      <Button size="sm" variant="outline-primary" className="ms-2 d-inline-flex align-items-center gap-1"
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setFeedbackSection(section); }}
+        title="View client feedback">
+        <i className="bi bi-chat-left-text" />
+        <Badge bg="primary" pill>{n}</Badge>
+      </Button>
+    );
+  };
+
+  // Wrap a header label so it sits at left and the feedback icon at right
+  const HeaderWithFeedback = ({ title, section, extra }: { title: string; section: CommentSection; extra?: React.ReactNode }) => (
+    <div className="d-flex justify-content-between align-items-center">
+      <span className="fw-semibold">{title}</span>
+      <div className="d-flex align-items-center gap-2">
+        {extra}
+        <FeedbackButton section={section} />
+      </div>
+    </div>
   );
 
   // Custom section management
@@ -230,7 +248,7 @@ export default function WeeklyReportEdit() {
 
       {/* Overall Performance */}
       <Card className="mb-4">
-        <Card.Header className="fw-semibold">Overall Performance</Card.Header>
+        <Card.Header><HeaderWithFeedback title="Overall Performance" section="overall" /></Card.Header>
         <Card.Body>
           <Row className="g-3">
             <Col md={3}><Form.Label className="small">Total GMV ($)</Form.Label>
@@ -265,11 +283,10 @@ export default function WeeklyReportEdit() {
           </Row>
         </Card.Body>
       </Card>
-      {renderComments('overall')}
       {renderCustomAt('overall')}
 
       {/* Top Creators */}
-      <Section title="Top Creators" onAdd={() => addRow('top_creators', emptyTopCreator)} empty={c.top_creators.length === 0}>
+      <Section title="Top Creators" onAdd={() => addRow('top_creators', emptyTopCreator)} empty={c.top_creators.length === 0} headerRight={<FeedbackButton section="top_creators" />}>
         <Table size="sm" className="mb-0 align-middle">
           <thead><tr>
             <th>Creator Name</th>
@@ -293,11 +310,10 @@ export default function WeeklyReportEdit() {
           </tbody>
         </Table>
       </Section>
-      {renderComments('top_creators')}
       {renderCustomAt('top_creators')}
 
       {/* Top Videos — current week only; last week auto-shown in dashboard */}
-      <Section title="Top Videos (this week)" onAdd={() => addRow('top_videos', emptyTopVideo)} empty={c.top_videos.length === 0}>
+      <Section title="Top Videos (this week)" onAdd={() => addRow('top_videos', emptyTopVideo)} empty={c.top_videos.length === 0} headerRight={<FeedbackButton section="top_videos" />}>
         <Table size="sm" className="mb-0 align-middle">
           <thead><tr>
             <th>Creator Name</th>
@@ -319,12 +335,11 @@ export default function WeeklyReportEdit() {
           </tbody>
         </Table>
       </Section>
-      {renderComments('top_videos')}
       {renderCustomAt('top_videos')}
 
       {/* Video Performance */}
       <Card className="mb-4">
-        <Card.Header className="fw-semibold">Video Performance</Card.Header>
+        <Card.Header><HeaderWithFeedback title="Video Performance" section="video_performance" /></Card.Header>
         <Card.Body>
           <Row className="g-3">
             <Col md={3}><Form.Label className="small">Total Videos Posted</Form.Label>
@@ -338,12 +353,11 @@ export default function WeeklyReportEdit() {
           </Row>
         </Card.Body>
       </Card>
-      {renderComments('video_performance')}
       {renderCustomAt('video_performance')}
 
       {/* GMV Max */}
       <Card className="mb-4">
-        <Card.Header className="fw-semibold">Overall GMV Max Performance</Card.Header>
+        <Card.Header><HeaderWithFeedback title="Overall GMV Max Performance" section="gmv_max" /></Card.Header>
         <Card.Body>
           <Row className="g-3">
             <Col md={3}>
@@ -371,11 +385,10 @@ export default function WeeklyReportEdit() {
           </Row>
         </Card.Body>
       </Card>
-      {renderComments('gmv_max')}
       {renderCustomAt('gmv_max')}
 
       {/* Product Highlights */}
-      <Section title="Product Highlights" onAdd={() => addRow('product_highlights', emptyProduct)} empty={c.product_highlights.length === 0}>
+      <Section title="Product Highlights" onAdd={() => addRow('product_highlights', emptyProduct)} empty={c.product_highlights.length === 0} headerRight={<FeedbackButton section="product_highlights" />}>
         <Table size="sm" className="mb-0 align-middle">
           <thead><tr>
             <th>Product Name</th>
@@ -412,12 +425,11 @@ export default function WeeklyReportEdit() {
           </tbody>
         </Table>
       </Section>
-      {renderComments('product_highlights')}
       {renderCustomAt('product_highlights')}
 
       {/* Shop Health */}
       <Card className="mb-4">
-        <Card.Header className="fw-semibold">Shop Health</Card.Header>
+        <Card.Header><HeaderWithFeedback title="Shop Health" section="shop_health" /></Card.Header>
         <Card.Body>
           <Row className="g-3">
             <Col md={3}><Form.Label className="small">Shop Performance Score (out of 5)</Form.Label>
@@ -458,12 +470,11 @@ export default function WeeklyReportEdit() {
           </Row>
         </Card.Body>
       </Card>
-      {renderComments('shop_health')}
       {renderCustomAt('shop_health')}
 
       {/* Insights */}
       <Card className="mb-4">
-        <Card.Header className="fw-semibold">Insights</Card.Header>
+        <Card.Header><HeaderWithFeedback title="Insights" section="insights" /></Card.Header>
         <Card.Body>
           <RichTextEditor
             value={c.insights.summary}
@@ -473,7 +484,6 @@ export default function WeeklyReportEdit() {
           />
         </Card.Body>
       </Card>
-      {renderComments('insights')}
       {renderCustomAt('insights')}
 
       <CustomSectionDefModal
@@ -484,6 +494,28 @@ export default function WeeklyReportEdit() {
         isEdit={csIsEdit}
         key={csDraft.id}
       />
+
+      <Offcanvas show={!!feedbackSection} onHide={() => setFeedbackSection(null)} placement="end" style={{ width: 480 }}>
+        <Offcanvas.Header closeButton>
+          <Offcanvas.Title>
+            <i className="bi bi-chat-left-text me-2" />
+            Client feedback
+            {feedbackSection && <small className="text-muted ms-2 fw-normal">— {SECTION_LABELS[feedbackSection]}</small>}
+          </Offcanvas.Title>
+        </Offcanvas.Header>
+        <Offcanvas.Body>
+          {feedbackSection && (
+            <SectionComments
+              section={feedbackSection}
+              comments={comments}
+              mode="authed"
+              currentAuthorName={profile?.full_name || profile?.email || 'User'}
+              onAdd={(b, n, parentId) => addComment(feedbackSection, b, n, parentId)}
+              onDelete={delComment}
+            />
+          )}
+        </Offcanvas.Body>
+      </Offcanvas>
 
       <div className="d-flex justify-content-end gap-2 mb-4">
         <Button variant="outline-secondary" onClick={() => nav('/reporting/weekly')}>Cancel</Button>
@@ -552,12 +584,15 @@ export default function WeeklyReportEdit() {
   );
 }
 
-function Section({ title, onAdd, empty, children }: { title: string; onAdd: () => void; empty: boolean; children: React.ReactNode }) {
+function Section({ title, onAdd, empty, children, headerRight }: { title: string; onAdd: () => void; empty: boolean; children: React.ReactNode; headerRight?: React.ReactNode }) {
   return (
     <Card className="mb-4">
       <Card.Header className="d-flex justify-content-between align-items-center">
         <span className="fw-semibold">{title}</span>
-        <Button size="sm" onClick={onAdd}><i className="bi bi-plus-lg me-1" />Add row</Button>
+        <div className="d-flex align-items-center gap-2">
+          <Button size="sm" onClick={onAdd}><i className="bi bi-plus-lg me-1" />Add row</Button>
+          {headerRight}
+        </div>
       </Card.Header>
       <Card.Body className="p-2">
         {empty ? <p className="text-muted text-center mb-0 py-3 small">No rows yet — click "Add row".</p> : children}

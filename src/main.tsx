@@ -6,12 +6,18 @@ import 'bootstrap-icons/font/bootstrap-icons.css';
 import './styles.css';
 import App from './App';
 import { AuthProvider } from './auth/AuthContext';
+import { NotificationsProvider } from './notifications/NotificationsContext';
+import { registerSW } from './notifications/swSetup';
+
+registerSW();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter>
       <AuthProvider>
-        <App />
+        <NotificationsProvider>
+          <App />
+        </NotificationsProvider>
       </AuthProvider>
     </BrowserRouter>
   </React.StrictMode>

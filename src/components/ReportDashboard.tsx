@@ -1,4 +1,5 @@
-import { Card, Row, Col, Table, Alert, Badge } from 'react-bootstrap';
+import { useState } from 'react';
+import { Card, Row, Col, Table, Alert, Badge, Offcanvas, Button } from 'react-bootstrap';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
   LineChart, Line, RadialBarChart, RadialBar, PolarAngleAxis,
@@ -44,20 +45,43 @@ export default function ReportDashboard({
   const sps = sh.shop_performance_score ?? 0;
   const spsData = [{ name: 'SPS', value: sps > 0 ? (sps / 5) * 100 : 0, fill: spsColor(sps) }];
 
-  const renderComments = (section: CommentSection) => {
+  const [feedbackSection, setFeedbackSection] = useState<CommentSection | null>(null);
+
+  const sectionFeedbackCount = (section: CommentSection) =>
+    (commentsConfig?.comments ?? []).filter(c => c.section === section).length;
+
+  const sectionLabelFor: Record<CommentSection, string> = {
+    overall: 'Overall Performance',
+    top_creators: 'Top Creators',
+    top_videos: 'Top Videos',
+    video_performance: 'Video Performance',
+    gmv_max: 'GMV Max',
+    product_highlights: 'Product Highlights',
+    shop_health: 'Shop Health',
+    insights: 'Insights',
+  };
+
+  const FeedbackIcon = ({ section }: { section: CommentSection }) => {
     if (!commentsConfig) return null;
+    const n = sectionFeedbackCount(section);
+    // Authed: only show when feedback exists. Public: always show (clients can comment).
+    if (commentsConfig.mode === 'authed' && n === 0) return null;
     return (
-      <SectionComments
-        section={section}
-        comments={commentsConfig.comments}
-        mode={commentsConfig.mode}
-        currentAuthorName={commentsConfig.currentAuthorName}
-        defaultPublicName={commentsConfig.defaultPublicName}
-        onAdd={(body, name, parentId) => commentsConfig.onAdd(section, body, name, parentId)}
-        onDelete={commentsConfig.onDelete}
-      />
+      <Button size="sm" variant="outline-primary" className="ms-2 d-inline-flex align-items-center gap-1"
+        onClick={() => setFeedbackSection(section)}
+        title={commentsConfig.mode === 'authed' ? 'View client feedback' : 'View / add comments'}>
+        <i className="bi bi-chat-left-text" />
+        {n > 0 && <Badge bg="primary" pill>{n}</Badge>}
+      </Button>
     );
   };
+
+  const SectionHeader = ({ title, section }: { title: string; section: CommentSection }) => (
+    <div className="d-flex justify-content-between align-items-center w-100">
+      <span className="fw-semibold">{title}</span>
+      <FeedbackIcon section={section} />
+    </div>
+  );
 
   const renderCustomAt = (anchor: StandardSectionId) =>
     (c.custom_sections ?? []).filter(s => s.insert_after === anchor).map(s => (
@@ -69,6 +93,29 @@ export default function ReportDashboard({
       {!hasPrev && <Alert variant="warning" className="py-2">No previous week — single-week view (no comparison).</Alert>}
 
       {renderCustomAt('start')}
+
+      <Offcanvas show={!!feedbackSection} onHide={() => setFeedbackSection(null)} placement="end" style={{ width: 480 }}>
+        <Offcanvas.Header closeButton>
+          <Offcanvas.Title>
+            <i className="bi bi-chat-left-text me-2" />
+            {commentsConfig?.mode === 'authed' ? 'Client feedback' : 'Comments'}
+            {feedbackSection && <small className="text-muted ms-2 fw-normal">— {sectionLabelFor[feedbackSection]}</small>}
+          </Offcanvas.Title>
+        </Offcanvas.Header>
+        <Offcanvas.Body>
+          {feedbackSection && commentsConfig && (
+            <SectionComments
+              section={feedbackSection}
+              comments={commentsConfig.comments}
+              mode={commentsConfig.mode}
+              currentAuthorName={commentsConfig.currentAuthorName}
+              defaultPublicName={commentsConfig.defaultPublicName}
+              onAdd={(b, n, parentId) => commentsConfig.onAdd(feedbackSection, b, n, parentId)}
+              onDelete={commentsConfig.onDelete}
+            />
+          )}
+        </Offcanvas.Body>
+      </Offcanvas>
 
       {/* KPI cards */}
       <Row className="g-3 mb-4">
@@ -91,7 +138,7 @@ export default function ReportDashboard({
       <Row className="g-3 mb-4">
         <Col lg={8}>
           <Card className="h-100">
-            <Card.Header className="fw-semibold">Week-over-week comparison</Card.Header>
+            <Card.Header><SectionHeader title="Week-over-week comparison" section="overall" /></Card.Header>
             <Card.Body style={{ height: 340 }}>
               <ResponsiveContainer>
                 <BarChart data={compareData}>
@@ -109,7 +156,7 @@ export default function ReportDashboard({
         </Col>
         <Col lg={4}>
           <Card className="h-100">
-            <Card.Header className="fw-semibold">Shop Performance Score</Card.Header>
+            <Card.Header><SectionHeader title="Shop Performance Score" section="shop_health" /></Card.Header>
             <Card.Body style={{ height: 340, position: 'relative' }}>
               {sh.shop_performance_score == null ? (
                 <div className="d-flex align-items-center justify-content-center h-100 text-muted">
@@ -139,7 +186,7 @@ export default function ReportDashboard({
 
       {trendData.length > 1 && (
         <Card className="mb-4">
-          <Card.Header className="fw-semibold">GMV trend (last {trendData.length} weeks)</Card.Header>
+          <Card.Header><SectionHeader title={`GMV trend (last ${trendData.length} weeks)`} section="overall" /></Card.Header>
           <Card.Body style={{ height: 280 }}>
             <ResponsiveContainer>
               <LineChart data={trendData}>
@@ -156,12 +203,11 @@ export default function ReportDashboard({
         </Card>
       )}
 
-      {renderComments('overall')}
       {renderCustomAt('overall')}
 
       {/* Top Creators */}
       <Card className="mb-3">
-        <Card.Header className="fw-semibold">Top Creators</Card.Header>
+        <Card.Header><SectionHeader title="Top Creators" section="top_creators" /></Card.Header>
         <Card.Body className="p-0">
           {c.top_creators.length === 0 ? <p className="text-muted text-center py-3 mb-0 small">No creators</p> : (
             <Table size="sm" className="mb-0 align-middle">
@@ -183,14 +229,13 @@ export default function ReportDashboard({
           )}
         </Card.Body>
       </Card>
-      {renderComments('top_creators')}
       {renderCustomAt('top_creators')}
 
       {/* Top Videos: this + last side by side */}
       <Row className="g-3 mb-3">
         <Col lg={6}>
           <Card className="h-100">
-            <Card.Header className="fw-semibold">Top Videos — This Week</Card.Header>
+            <Card.Header><SectionHeader title="Top Videos — This Week" section="top_videos" /></Card.Header>
             <Card.Body className="p-0">
               <VideosTable rows={c.top_videos} />
             </Card.Body>
@@ -198,19 +243,18 @@ export default function ReportDashboard({
         </Col>
         <Col lg={6}>
           <Card className="h-100">
-            <Card.Header className="fw-semibold">Top Videos — Last Week</Card.Header>
+            <Card.Header><SectionHeader title="Top Videos — Last Week" section="top_videos" /></Card.Header>
             <Card.Body className="p-0">
               <VideosTable rows={prevTopVideos ?? []} />
             </Card.Body>
           </Card>
         </Col>
       </Row>
-      {renderComments('top_videos')}
       {renderCustomAt('top_videos')}
 
       {/* Video Performance */}
       <Card className="mb-3">
-        <Card.Header className="fw-semibold">Video Performance</Card.Header>
+        <Card.Header><SectionHeader title="Video Performance" section="video_performance" /></Card.Header>
         <Card.Body>
           <Row className="g-3">
             <MiniStat label="Total Videos" cur={vp.total_videos_posted} prev={pvp?.total_videos_posted} />
@@ -220,12 +264,11 @@ export default function ReportDashboard({
           </Row>
         </Card.Body>
       </Card>
-      {renderComments('video_performance')}
       {renderCustomAt('video_performance')}
 
       {/* GMV Max */}
       <Card className="mb-3">
-        <Card.Header className="fw-semibold">Overall GMV Max Performance</Card.Header>
+        <Card.Header><SectionHeader title="Overall GMV Max Performance" section="gmv_max" /></Card.Header>
         <Card.Body>
           {gm.not_yet_started ? (
             <Alert variant="secondary" className="mb-0">Not yet started.</Alert>
@@ -241,12 +284,11 @@ export default function ReportDashboard({
           )}
         </Card.Body>
       </Card>
-      {renderComments('gmv_max')}
       {renderCustomAt('gmv_max')}
 
       {/* Product Highlights */}
       <Card className="mb-3">
-        <Card.Header className="fw-semibold">Product Highlights</Card.Header>
+        <Card.Header><SectionHeader title="Product Highlights" section="product_highlights" /></Card.Header>
         <Card.Body className="p-0">
           {c.product_highlights.length === 0 ? <p className="text-muted text-center py-3 mb-0 small">No products</p> : (
             <Table size="sm" responsive className="mb-0 align-middle">
@@ -277,12 +319,11 @@ export default function ReportDashboard({
           )}
         </Card.Body>
       </Card>
-      {renderComments('product_highlights')}
       {renderCustomAt('product_highlights')}
 
       {/* Shop Health */}
       <Card className="mb-3">
-        <Card.Header className="fw-semibold">Shop Health</Card.Header>
+        <Card.Header><SectionHeader title="Shop Health" section="shop_health" /></Card.Header>
         <Card.Body>
           <Row className="g-3">
             <RatingCell label="Shop Performance" value={sh.shop_performance_score} />
@@ -296,19 +337,17 @@ export default function ReportDashboard({
           </Row>
         </Card.Body>
       </Card>
-      {renderComments('shop_health')}
       {renderCustomAt('shop_health')}
 
       {/* Insights */}
       {c.insights.summary && c.insights.summary.replace(/<[^>]*>/g,'').trim().length > 0 && (
         <Card className="mb-3">
-          <Card.Header className="fw-semibold">Insights</Card.Header>
+          <Card.Header><SectionHeader title="Insights" section="insights" /></Card.Header>
           <Card.Body>
             <div className="ac-rte-view" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(c.insights.summary) }} />
           </Card.Body>
         </Card>
       )}
-      {renderComments('insights')}
       {renderCustomAt('insights')}
 
       {/* Custom Sections */}
@@ -356,8 +395,8 @@ function renderValue(field: CustomField, value: any) {
   switch (field.type) {
     case 'number': return Number(value).toLocaleString();
     case 'url':    return <a href={String(value)} target="_blank" rel="noreferrer">{String(value)}</a>;
-    case 'richtext': return <div className="ac-rte-view" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(String(value)) }} />;
-    case 'textarea': return <span style={{ whiteSpace: 'pre-wrap' }}>{String(value)}</span>;
+    case 'richtext':
+    case 'textarea': return <div className="ac-rte-view" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(String(value)) }} />;
     case 'date': return new Date(String(value)).toLocaleDateString();
     default: return String(value);
   }

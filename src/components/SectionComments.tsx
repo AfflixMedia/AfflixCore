@@ -68,6 +68,14 @@ export default function SectionComments(props: SectionCommentsProps) {
     }
   };
 
+  const isAuthed = mode === 'authed';
+  // Hide entire panel for authed users when there's no client feedback to react to
+  if (isAuthed && sectionComments.length === 0) return null;
+
+  const headerLabel = isAuthed
+    ? `Client feedback on ${SECTION_LABELS[section]}`
+    : `Comments on ${SECTION_LABELS[section]}`;
+
   return (
     <Card className="mb-4 border-0" style={{ background: '#f8fafc' }}>
       <Card.Body className="py-3">
@@ -78,7 +86,7 @@ export default function SectionComments(props: SectionCommentsProps) {
           style={{ color: '#334155' }}
         >
           <i className="bi bi-chat-left-text" />
-          <span className="fw-semibold">Comments on {SECTION_LABELS[section]}</span>
+          <span className="fw-semibold">{headerLabel}</span>
           {sectionComments.length > 0 && <Badge bg="primary" pill>{sectionComments.length}</Badge>}
           <i className={`bi bi-chevron-${open ? 'up' : 'down'} ms-auto text-muted`} />
         </button>
@@ -104,42 +112,45 @@ export default function SectionComments(props: SectionCommentsProps) {
               </div>
             )}
 
-            <Form onSubmit={submit}>
-              {err && <Alert variant="danger" className="py-2 mb-2 small">{err}</Alert>}
-              {mode === 'public' && (!hasSavedName || editingName) && (
+            {/* Top-level compose form: only for public (clients). Authed users reply to existing feedback. */}
+            {!isAuthed && (
+              <Form onSubmit={submit}>
+                {err && <Alert variant="danger" className="py-2 mb-2 small">{err}</Alert>}
+                {(!hasSavedName || editingName) && (
+                  <Form.Control
+                    size="sm"
+                    className="mb-2"
+                    placeholder="Your name"
+                    value={name}
+                    onChange={e => setName(e.target.value)}
+                    required
+                    autoFocus={editingName}
+                  />
+                )}
                 <Form.Control
-                  size="sm"
-                  className="mb-2"
-                  placeholder="Your name"
-                  value={name}
-                  onChange={e => setName(e.target.value)}
+                  as="textarea"
+                  rows={2}
+                  placeholder={`Add a comment on ${SECTION_LABELS[section]}…`}
+                  value={body}
+                  onChange={e => setBody(e.target.value)}
                   required
-                  autoFocus={editingName}
                 />
-              )}
-              <Form.Control
-                as="textarea"
-                rows={2}
-                placeholder={`Add a comment on ${SECTION_LABELS[section]}…`}
-                value={body}
-                onChange={e => setBody(e.target.value)}
-                required
-              />
-              <div className="d-flex justify-content-between align-items-center mt-2">
-                {mode === 'public' && hasSavedName && !editingName ? (
-                  <small className="text-muted">
-                    Commenting as <strong>{defaultPublicName}</strong>
-                    <button type="button" className="btn btn-link btn-sm p-0 ms-2" onClick={() => { setName(defaultPublicName!); setEditingName(true); }}>
-                      change
-                    </button>
-                  </small>
-                ) : <span />}
-                <Button type="submit" size="sm" disabled={busy || !body.trim()}>
-                  <i className="bi bi-send me-1" />
-                  {busy ? 'Posting…' : 'Post comment'}
-                </Button>
-              </div>
-            </Form>
+                <div className="d-flex justify-content-between align-items-center mt-2">
+                  {hasSavedName && !editingName ? (
+                    <small className="text-muted">
+                      Commenting as <strong>{defaultPublicName}</strong>
+                      <button type="button" className="btn btn-link btn-sm p-0 ms-2" onClick={() => { setName(defaultPublicName!); setEditingName(true); }}>
+                        change
+                      </button>
+                    </small>
+                  ) : <span />}
+                  <Button type="submit" size="sm" disabled={busy || !body.trim()}>
+                    <i className="bi bi-send me-1" />
+                    {busy ? 'Posting…' : 'Post comment'}
+                  </Button>
+                </div>
+              </Form>
+            )}
           </div>
         )}
       </Card.Body>
@@ -228,7 +239,7 @@ function CommentNode(p: NodeProps) {
             )}
             <Form.Control
               as="textarea" rows={2}
-              placeholder={`Reply to ${comment.author_name}…`}
+              placeholder={mode === 'authed' ? `Reply to ${comment.author_name}'s feedback…` : `Reply to ${comment.author_name}…`}
               value={replyBody} onChange={e => setReplyBody(e.target.value)}
               required autoFocus
             />
