@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Spinner, Alert, Badge, Button } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/AuthContext';
+import { useNotifications } from '../notifications/NotificationsContext';
 import { addDays, formatRange, formatHuman } from '../lib/dates';
 import { WeeklyReportContent, normalizeContent } from '../lib/reportSchema';
 import ReportDashboard, { TrendPoint } from '../components/ReportDashboard';
@@ -18,6 +19,7 @@ export default function WeeklyReportView() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
   const { profile } = useAuth();
+  const { notifications, markRead } = useNotifications();
   const [report, setReport] = useState<ReportRow | null>(null);
   const [prev, setPrev] = useState<ReportRow | null>(null);
   const [brand, setBrand] = useState<Brand | null>(null);
@@ -25,6 +27,13 @@ export default function WeeklyReportView() {
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Mark all unread notifications for this report as read
+    notifications.forEach(n => {
+      if (!n.read_at && n.payload?.report_id === id) markRead(n.id);
+    });
+  }, [id, notifications, markRead]);
 
   useEffect(() => {
     (async () => {

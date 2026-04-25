@@ -3,6 +3,7 @@ import { Button, Card, Modal, Form, Table, Spinner, Alert, Badge, Row, Col } fro
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/AuthContext';
+import { useNotifications } from '../notifications/NotificationsContext';
 import { addDays, formatRange, fromISO, toISO } from '../lib/dates';
 
 function currentMonth() {
@@ -26,8 +27,21 @@ interface Report {
 
 export default function WeeklyReports() {
   const { profile, user } = useAuth();
+  const { notifications } = useNotifications();
   const nav = useNavigate();
   const isBob = profile?.role === 'bob';
+
+  // Build: reportId -> count of unread notifications
+  const unreadByReport = useMemo(() => {
+    const m = new Map<string, number>();
+    notifications.forEach(n => {
+      if (n.read_at) return;
+      const rid = n.payload?.report_id;
+      if (!rid) return;
+      m.set(rid, (m.get(rid) ?? 0) + 1);
+    });
+    return m;
+  }, [notifications]);
 
   const [brands, setBrands] = useState<Brand[]>([]);
   const [apcs, setApcs] = useState<ApcLite[]>([]);
@@ -330,9 +344,18 @@ export default function WeeklyReports() {
                 {filteredReports.map(r => {
                   const b = brandMap.get(r.brand_id);
                   const a = apcMap.get(r.created_by);
+                  const newCount = unreadByReport.get(r.id) ?? 0;
                   return (
-                    <tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => nav(`/reporting/weekly/${r.id}`)}>
-                      <td className="fw-semibold">{b?.name ?? '—'}</td>
+                    <tr key={r.id} style={{ cursor: 'pointer', background: newCount > 0 ? 'rgba(37,99,235,.04)' : undefined }}
+                      onClick={() => nav(`/reporting/weekly/${r.id}`)}>
+                      <td className="fw-semibold">
+                        {b?.name ?? '—'}
+                        {newCount > 0 && (
+                          <Badge bg="danger" pill className="ms-2" title={`${newCount} new client feedback`}>
+                            <i className="bi bi-chat-left-text me-1" />{newCount} new
+                          </Badge>
+                        )}
+                      </td>
                       <td>{b?.client ?? '—'}</td>
                       {isBob && <td>{a?.full_name || a?.email || (r.created_by === user?.id ? 'You' : '—')}</td>}
                       <td>#{r.week_number}</td>
