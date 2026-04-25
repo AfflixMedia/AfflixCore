@@ -41,8 +41,8 @@ export default function Login() {
               {busy ? 'Signing in…' : 'Sign in'}
             </Button>
           </Form>
-          <p className="text-center mt-3 mb-0 small">
-            No account? <Link to="/signup">Create one</Link>
+          <p className="text-center mt-3 mb-0 small text-muted">
+            Accounts are created by your administrator.
           </p>
         </Card.Body>
       </Card>
