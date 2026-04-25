@@ -31,6 +31,10 @@ export default function APCs() {
   const [pwErr, setPwErr] = useState<string | null>(null);
   const [pwOk, setPwOk] = useState(false);
 
+  const [delApc, setDelApc] = useState<APC | null>(null);
+  const [delBusy, setDelBusy] = useState(false);
+  const [delErr, setDelErr] = useState<string | null>(null);
+
   const load = async () => {
     setLoading(true); setErr(null);
     const [{ data: apcRows, error: e1 }, { data: brandRows, error: e2 }, { data: assigns, error: e3 }] = await Promise.all([
@@ -145,7 +149,7 @@ export default function APCs() {
                   <th>Name</th>
                   <th>Email</th>
                   <th>Assign Brands</th>
-                  <th style={{ width: 100 }}></th>
+                  <th style={{ width: 160 }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -158,13 +162,16 @@ export default function APCs() {
                         ? <span className="text-muted">None</span>
                         : a.brand_names!.map(n => <Badge key={n} bg="info" className="me-1">{n}</Badge>)}
                     </td>
-                    <td className="text-end">
+                    <td className="text-end text-nowrap">
                       <Button size="sm" variant="outline-secondary" className="me-2" onClick={() => { setPwApc(a); setNewPw(''); setPwErr(null); setPwOk(false); }}
                         title="Reset password">
                         <i className="bi bi-key" />
                       </Button>
-                      <Button size="sm" variant="outline-primary" onClick={() => openEdit(a)}>
+                      <Button size="sm" variant="outline-primary" className="me-2" onClick={() => openEdit(a)} title="Edit">
                         <i className="bi bi-pencil" />
+                      </Button>
+                      <Button size="sm" variant="outline-danger" onClick={() => { setDelApc(a); setDelErr(null); }} title="Delete APC">
+                        <i className="bi bi-trash" />
                       </Button>
                     </td>
                   </tr>
@@ -264,6 +271,37 @@ export default function APCs() {
             <Button type="submit" disabled={pwBusy || newPw.length < 6}>{pwBusy ? 'Updating…' : 'Reset password'}</Button>
           </Modal.Footer>
         </Form>
+      </Modal>
+
+      <Modal show={!!delApc} onHide={() => !delBusy && setDelApc(null)} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>Delete APC?</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {delErr && <Alert variant="danger">{delErr}</Alert>}
+          <p className="mb-2">This will permanently remove <strong>{delApc?.full_name || delApc?.email}</strong> and revoke their access. Their brand assignments will be cleared.</p>
+          <p className="text-muted small mb-0">Reports they created will remain. This cannot be undone.</p>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setDelApc(null)} disabled={delBusy}>Cancel</Button>
+          <Button variant="danger" disabled={delBusy} onClick={async () => {
+            if (!delApc) return;
+            setDelBusy(true); setDelErr(null);
+            try {
+              const { data, error } = await supabase.functions.invoke('delete-apc', {
+                body: { user_id: delApc.id },
+              });
+              if (error) throw error;
+              if ((data as any)?.error) throw new Error((data as any).error);
+              setDelApc(null);
+              await load();
+            } catch (e: any) {
+              setDelErr(e?.message ?? 'Failed to delete APC');
+            } finally {
+              setDelBusy(false);
+            }
+          }}>{delBusy ? 'Deleting…' : 'Delete APC'}</Button>
+        </Modal.Footer>
       </Modal>
     </>
   );
