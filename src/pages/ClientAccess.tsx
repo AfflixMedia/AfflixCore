@@ -5,7 +5,7 @@ import { useAuth } from '../auth/AuthContext';
 import { resourceIcon } from '../lib/resourceIcon';
 
 interface Client { id: string; name: string; }
-interface Brand  { id: string; name: string; client_id: string | null; }
+interface Brand  { id: string; name: string; client_id: string | null; share_enabled: boolean; }
 interface Resource { id: string; name: string; url: string; scope: 'general' | 'brand'; brand_id: string | null; }
 interface Link {
   id: string; token: string; label: string | null; client_id: string;
@@ -33,7 +33,7 @@ export default function ClientAccess() {
     setLoading(true); setErr(null);
     const [c, b, r, l] = await Promise.all([
       supabase.from('clients').select('id,name').order('name'),
-      supabase.from('brands').select('id,name,client_id').order('name'),
+      supabase.from('brands').select('id,name,client_id,share_enabled').order('name'),
       supabase.from('resources').select('id,name,url,scope,brand_id').order('name'),
       supabase.from('report_share_links').select('*').order('created_at', { ascending: false }),
     ]);
@@ -53,6 +53,14 @@ export default function ClientAccess() {
   const brandsForClient = useMemo(
     () => brands.filter(b => b.client_id === clientId),
     [brands, clientId],
+  );
+  const shareableForClient = useMemo(
+    () => brandsForClient.filter(b => b.share_enabled),
+    [brandsForClient],
+  );
+  const nonShareableForClient = useMemo(
+    () => brandsForClient.filter(b => !b.share_enabled),
+    [brandsForClient],
   );
 
   // resources tied to any of the selected brands + general
@@ -214,14 +222,26 @@ export default function ClientAccess() {
                   <Form.Label>Brands to share</Form.Label>
                   {brandsForClient.length === 0 ? (
                     <p className="text-muted small mb-0">No brands linked to this client yet. Edit a brand and assign this client first.</p>
+                  ) : shareableForClient.length === 0 ? (
+                    <Alert variant="warning" className="py-2 small mb-0">
+                      None of this client's brands have sharing enabled. Open a brand → Reporting tab and switch on "Sharing enabled" first.
+                    </Alert>
                   ) : (
                     <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid #dee2e6', borderRadius: 6, padding: 10 }}>
-                      {brandsForClient.map(b => (
+                      {shareableForClient.map(b => (
                         <Form.Check key={b.id} type="checkbox" id={`b-${b.id}`} label={b.name}
                           checked={brandIds.includes(b.id)} onChange={() => toggle(b.id)} />
                       ))}
+                      {nonShareableForClient.length > 0 && (
+                        <div className="text-muted small mt-2">
+                          {nonShareableForClient.length} brand{nonShareableForClient.length === 1 ? '' : 's'} hidden — sharing disabled on the brand page.
+                        </div>
+                      )}
                     </div>
                   )}
+                  <Form.Text className="text-muted">
+                    Only weekly reports flagged "Shareable" on each brand will appear in the link.
+                  </Form.Text>
                 </Form.Group>
 
                 {brandIds.length > 0 && (

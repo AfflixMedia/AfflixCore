@@ -72,9 +72,10 @@ export interface CustomSection {
   id: string;                 // uuid per section
   name: string;
   description?: string;
-  is_repeater: boolean;       // true => table of rows; false => single entry
-  fields: CustomField[];
-  rows: Record<string, any>[]; // each row: field.id => value; length==1 when not repeater
+  is_repeater: boolean;       // true => table mode (fields/rows); false => text mode (body)
+  body: string;               // text-mode HTML body (sanitized on render)
+  fields: CustomField[];      // table-mode columns
+  rows: Record<string, any>[]; // table-mode rows
   insert_after: StandardSectionId; // where to inject this section in form/dashboard order
 }
 
@@ -202,20 +203,38 @@ export function normalizeContent(raw: any): WeeklyReportContent {
       })) : [];
   const VALID_POS: StandardSectionId[] = ['start','overall','top_creators','top_videos','video_performance','gmv_max','product_highlights','shop_health','insights'];
   const custom_sections: CustomSection[] = Array.isArray(src.custom_sections)
-    ? src.custom_sections.map((s: any) => ({
-        id: str(s.id) || crypto.randomUUID(),
-        name: str(s.name),
-        description: str(s.description),
-        is_repeater: !!s.is_repeater,
-        fields: Array.isArray(s.fields) ? s.fields.map((f: any) => ({
+    ? src.custom_sections.map((s: any) => {
+        const fields: CustomField[] = Array.isArray(s.fields) ? s.fields.map((f: any) => ({
           id: str(f.id) || crypto.randomUUID(),
           label: str(f.label),
           type: (['text','number','textarea','richtext','date','url','select'].includes(f.type) ? f.type : 'text') as CustomFieldType,
           options: Array.isArray(f.options) ? f.options.map(str) : undefined,
-        })) : [],
-        rows: Array.isArray(s.rows) ? s.rows : [],
-        insert_after: VALID_POS.includes(s.insert_after) ? s.insert_after : 'insights',
-      }))
+        })) : [];
+        const rows: Record<string, any>[] = Array.isArray(s.rows) ? s.rows : [];
+        const isRepeater = !!s.is_repeater;
+        let body = str(s.body);
+        // Migrate legacy single-entry sections (fields + one row) into a body HTML blob
+        // so the new text-mode renderer keeps their content visible.
+        if (!isRepeater && !body && fields.length > 0 && rows[0]) {
+          body = fields.map(f => {
+            const v = rows[0][f.id];
+            if (v == null || v === '') return '';
+            if (f.type === 'richtext' || f.type === 'textarea') return `<h5>${escapeHtml(f.label)}</h5>${String(v)}`;
+            if (f.type === 'url')      return `<p><strong>${escapeHtml(f.label)}:</strong> <a href="${escapeAttr(String(v))}">${escapeHtml(String(v))}</a></p>`;
+            return `<p><strong>${escapeHtml(f.label)}:</strong> ${escapeHtml(String(v))}</p>`;
+          }).filter(Boolean).join('');
+        }
+        return {
+          id: str(s.id) || crypto.randomUUID(),
+          name: str(s.name),
+          description: str(s.description),
+          is_repeater: isRepeater,
+          body,
+          fields,
+          rows,
+          insert_after: VALID_POS.includes(s.insert_after) ? s.insert_after : 'insights',
+        };
+      })
     : [];
   return {
     overall,
@@ -232,3 +251,9 @@ export function normalizeContent(raw: any): WeeklyReportContent {
 
 function num(v: any): number { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 function str(v: any): string { return v == null ? '' : String(v); }
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function escapeAttr(s: string): string {
+  return escapeHtml(s).replace(/"/g, '&quot;');
+}

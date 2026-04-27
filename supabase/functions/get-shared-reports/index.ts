@@ -35,25 +35,32 @@ serve(async (req) => {
     if (brandIds.length === 0) return json({ error: 'No brands assigned to this link' }, 400);
 
     const resourceIds: string[] = link.resource_ids ?? [];
-    const [{ data: client }, { data: brands }, { data: reports }, { data: resources }] = await Promise.all([
+    const [{ data: client }, { data: allBrands }, { data: rawReports }, { data: resources }] = await Promise.all([
       admin.from('clients').select('id,name').eq('id', link.client_id).single(),
-      admin.from('brands').select('id,name,client,client_id').in('id', brandIds),
+      admin.from('brands').select('id,name,client,client_id,share_enabled').in('id', brandIds),
       admin.from('weekly_reports').select('*').in('brand_id', brandIds)
+        .eq('is_shared', true)
         .order('week_start', { ascending: false }),
       resourceIds.length > 0
         ? admin.from('resources').select('*').in('id', resourceIds)
         : Promise.resolve({ data: [] }),
     ]);
 
-    const reportIds = (reports ?? []).map((r: any) => r.id);
+    // Defense in depth: drop brands whose master share toggle is off (admin may have disabled it after the link was created).
+    const brands = (allBrands ?? []).filter((b: any) => b.share_enabled === true)
+      .map(({ share_enabled: _share, ...rest }: any) => rest);
+    const allowedBrandIds = new Set(brands.map((b: any) => b.id));
+    const reports = (rawReports ?? []).filter((r: any) => allowedBrandIds.has(r.brand_id));
+
+    const reportIds = reports.map((r: any) => r.id);
     const { data: comments } = reportIds.length > 0
       ? await admin.from('report_comments').select('*').in('report_id', reportIds).order('created_at', { ascending: true })
       : { data: [] };
 
     return json({
       client,
-      brands: brands ?? [],
-      reports: reports ?? [],
+      brands,
+      reports,
       resources: resources ?? [],
       comments: comments ?? [],
       label: link.label ?? null,

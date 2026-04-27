@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, Row, Col, Table, Alert, Badge, Offcanvas, Button } from 'react-bootstrap';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
@@ -16,11 +16,10 @@ export interface CommentsConfig {
   currentAuthorName?: string;
   defaultPublicName?: string;
   onAdd: (section: CommentSection, body: string, authorName: string, parentId?: string) => Promise<void>;
-  onDelete?: (id: string) => Promise<void>;
 }
 
 export default function ReportDashboard({
-  c, p, trendData, hasPrev, commentsConfig, prevTopVideos,
+  c, p, trendData, hasPrev, commentsConfig, prevTopVideos, openSectionOnLoad, highlightCommentId,
 }: {
   c: WeeklyReportContent;
   p: WeeklyReportContent | null;
@@ -28,6 +27,10 @@ export default function ReportDashboard({
   hasPrev: boolean;
   commentsConfig?: CommentsConfig;
   prevTopVideos?: WeeklyReportContent['top_videos'];
+  /** When set, opens the feedback offcanvas for that section on mount and scrolls to it. */
+  openSectionOnLoad?: CommentSection | null;
+  /** When set, highlights and scrolls to that comment id inside the offcanvas. */
+  highlightCommentId?: string | null;
 }) {
   const o = c.overall, po = p?.overall;
   const vp = c.video_performance, pvp = p?.video_performance;
@@ -47,10 +50,20 @@ export default function ReportDashboard({
 
   const [feedbackSection, setFeedbackSection] = useState<CommentSection | null>(null);
 
+  useEffect(() => {
+    if (!openSectionOnLoad) return;
+    setFeedbackSection(openSectionOnLoad);
+    // Scroll the section card into view if we tagged it with a data-section attribute
+    setTimeout(() => {
+      const el = document.querySelector(`[data-section="${CSS.escape(openSectionOnLoad)}"]`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+  }, [openSectionOnLoad]);
+
   const sectionFeedbackCount = (section: CommentSection) =>
     (commentsConfig?.comments ?? []).filter(c => c.section === section).length;
 
-  const sectionLabelFor: Record<CommentSection, string> = {
+  const standardLabelFor: Record<string, string> = {
     overall: 'Overall Performance',
     top_creators: 'Top Creators',
     top_videos: 'Top Videos',
@@ -59,6 +72,17 @@ export default function ReportDashboard({
     product_highlights: 'Product Highlights',
     shop_health: 'Shop Health',
     insights: 'Insights',
+  };
+
+  const customSectionFor = (section: CommentSection): CustomSection | null => {
+    if (!section.startsWith('cs:')) return null;
+    const id = section.slice(3);
+    return c.custom_sections.find(s => s.id === id) ?? null;
+  };
+  const labelFor = (section: CommentSection): string => {
+    const cs = customSectionFor(section);
+    if (cs) return cs.name || 'Custom Section';
+    return standardLabelFor[section] ?? section;
   };
 
   const FeedbackIcon = ({ section }: { section: CommentSection }) => {
@@ -85,7 +109,11 @@ export default function ReportDashboard({
 
   const renderCustomAt = (anchor: StandardSectionId) =>
     (c.custom_sections ?? []).filter(s => s.insert_after === anchor).map(s => (
-      <CustomSectionView key={s.id} section={s} />
+      <CustomSectionView
+        key={s.id}
+        section={s}
+        feedbackSlot={<FeedbackIcon section={`cs:${s.id}`} />}
+      />
     ));
 
   return (
@@ -99,19 +127,20 @@ export default function ReportDashboard({
           <Offcanvas.Title>
             <i className="bi bi-chat-left-text me-2" />
             {commentsConfig?.mode === 'authed' ? 'Client feedback' : 'Comments'}
-            {feedbackSection && <small className="text-muted ms-2 fw-normal">— {sectionLabelFor[feedbackSection]}</small>}
+            {feedbackSection && <small className="text-muted ms-2 fw-normal">— {labelFor(feedbackSection)}</small>}
           </Offcanvas.Title>
         </Offcanvas.Header>
         <Offcanvas.Body>
           {feedbackSection && commentsConfig && (
             <SectionComments
               section={feedbackSection}
+              sectionLabel={labelFor(feedbackSection)}
               comments={commentsConfig.comments}
               mode={commentsConfig.mode}
               currentAuthorName={commentsConfig.currentAuthorName}
               defaultPublicName={commentsConfig.defaultPublicName}
               onAdd={(b, n, parentId) => commentsConfig.onAdd(feedbackSection, b, n, parentId)}
-              onDelete={commentsConfig.onDelete}
+              highlightCommentId={highlightCommentId ?? undefined}
             />
           )}
         </Offcanvas.Body>
@@ -135,7 +164,7 @@ export default function ReportDashboard({
       </Row>
 
       {/* Comparison + SPS radial */}
-      <Row className="g-3 mb-4">
+      <Row className="g-3 mb-4" data-section="overall">
         <Col lg={8}>
           <Card className="h-100">
             <Card.Header><SectionHeader title="Week-over-week comparison" section="overall" /></Card.Header>
@@ -206,7 +235,7 @@ export default function ReportDashboard({
       {renderCustomAt('overall')}
 
       {/* Top Creators */}
-      <Card className="mb-3">
+      <Card className="mb-3" data-section="top_creators">
         <Card.Header><SectionHeader title="Top Creators" section="top_creators" /></Card.Header>
         <Card.Body className="p-0">
           {c.top_creators.length === 0 ? <p className="text-muted text-center py-3 mb-0 small">No creators</p> : (
@@ -232,7 +261,7 @@ export default function ReportDashboard({
       {renderCustomAt('top_creators')}
 
       {/* Top Videos: this + last side by side */}
-      <Row className="g-3 mb-3">
+      <Row className="g-3 mb-3" data-section="top_videos">
         <Col lg={6}>
           <Card className="h-100">
             <Card.Header><SectionHeader title="Top Videos — This Week" section="top_videos" /></Card.Header>
@@ -253,7 +282,7 @@ export default function ReportDashboard({
       {renderCustomAt('top_videos')}
 
       {/* Video Performance */}
-      <Card className="mb-3">
+      <Card className="mb-3" data-section="video_performance">
         <Card.Header><SectionHeader title="Video Performance" section="video_performance" /></Card.Header>
         <Card.Body>
           <Row className="g-3">
@@ -267,7 +296,7 @@ export default function ReportDashboard({
       {renderCustomAt('video_performance')}
 
       {/* GMV Max */}
-      <Card className="mb-3">
+      <Card className="mb-3" data-section="gmv_max">
         <Card.Header><SectionHeader title="Overall GMV Max Performance" section="gmv_max" /></Card.Header>
         <Card.Body>
           {gm.not_yet_started ? (
@@ -287,7 +316,7 @@ export default function ReportDashboard({
       {renderCustomAt('gmv_max')}
 
       {/* Product Highlights */}
-      <Card className="mb-3">
+      <Card className="mb-3" data-section="product_highlights">
         <Card.Header><SectionHeader title="Product Highlights" section="product_highlights" /></Card.Header>
         <Card.Body className="p-0">
           {c.product_highlights.length === 0 ? <p className="text-muted text-center py-3 mb-0 small">No products</p> : (
@@ -322,7 +351,7 @@ export default function ReportDashboard({
       {renderCustomAt('product_highlights')}
 
       {/* Shop Health */}
-      <Card className="mb-3">
+      <Card className="mb-3" data-section="shop_health">
         <Card.Header><SectionHeader title="Shop Health" section="shop_health" /></Card.Header>
         <Card.Body>
           <Row className="g-3">
@@ -341,7 +370,7 @@ export default function ReportDashboard({
 
       {/* Insights */}
       {c.insights.summary && c.insights.summary.replace(/<[^>]*>/g,'').trim().length > 0 && (
-        <Card className="mb-3">
+        <Card className="mb-3" data-section="insights">
           <Card.Header><SectionHeader title="Insights" section="insights" /></Card.Header>
           <Card.Body>
             <div className="ac-rte-view" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(c.insights.summary) }} />
@@ -355,14 +384,19 @@ export default function ReportDashboard({
   );
 }
 
-function CustomSectionView({ section }: { section: CustomSection }) {
-  if (section.fields.length === 0) return null;
+function CustomSectionView({ section, feedbackSlot }: { section: CustomSection; feedbackSlot?: React.ReactNode }) {
+  const isTable = section.is_repeater;
+  const hasContent = isTable ? (section.fields.length > 0) : (section.body && section.body.replace(/<[^>]*>/g, '').trim().length > 0);
+  if (!hasContent) return null;
   return (
-    <Card className="mb-3">
-      <Card.Header className="fw-semibold">{section.name || 'Custom Section'}</Card.Header>
+    <Card className="mb-3" data-section={`cs:${section.id}`}>
+      <Card.Header className="d-flex justify-content-between align-items-center">
+        <span className="fw-semibold">{section.name || 'Custom Section'}</span>
+        {feedbackSlot}
+      </Card.Header>
       <Card.Body>
         {section.description && <p className="text-muted small mb-3">{section.description}</p>}
-        {section.is_repeater ? (
+        {isTable ? (
           section.rows.length === 0 ? <p className="text-muted small mb-0">No data</p> : (
             <Table size="sm" responsive className="mb-0 align-middle">
               <thead><tr>{section.fields.map(f => <th key={f.id}>{f.label}</th>)}</tr></thead>
@@ -376,14 +410,7 @@ function CustomSectionView({ section }: { section: CustomSection }) {
             </Table>
           )
         ) : (
-          <Row className="g-3">
-            {section.fields.map(f => (
-              <Col md={f.type === 'textarea' || f.type === 'richtext' ? 12 : 4} key={f.id}>
-                <div className="text-muted small text-uppercase" style={{ letterSpacing: '.5px', fontSize: '.7rem' }}>{f.label}</div>
-                <div className="mt-1">{renderValue(f, section.rows[0]?.[f.id])}</div>
-              </Col>
-            ))}
-          </Row>
+          <div className="ac-rte-view" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(section.body) }} />
         )}
       </Card.Body>
     </Card>

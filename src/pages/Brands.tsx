@@ -1,6 +1,8 @@
 import { useEffect, useState, FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button, Card, Modal, Form, Table, Spinner, Alert, Badge } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../auth/AuthContext';
 
 interface Brand {
   id: string;
@@ -23,6 +25,11 @@ const empty = {
 };
 
 export default function Brands() {
+  const nav = useNavigate();
+  const { profile } = useAuth();
+  const isBob = profile?.role === 'bob';
+  const isApcEditor = profile?.role === 'apc' && !!profile?.can_edit_brands;
+  const canEditAny = isBob || isApcEditor;
   const [brands, setBrands] = useState<Brand[]>([]);
   const [clients, setClients] = useState<ClientLite[]>([]);
   const [loading, setLoading] = useState(true);
@@ -96,9 +103,11 @@ export default function Brands() {
     <>
       <div className="d-flex justify-content-between align-items-center mb-4">
         <h2 className="mb-0">Brands</h2>
-        <Button onClick={openAdd}>
-          <i className="bi bi-plus-lg me-1" /> Add Brand
-        </Button>
+        {isBob && (
+          <Button onClick={openAdd}>
+            <i className="bi bi-plus-lg me-1" /> Add Brand
+          </Button>
+        )}
       </div>
 
       <Card>
@@ -117,13 +126,16 @@ export default function Brands() {
                   <th>Client</th>
                   <th>GMV (Last 30 Days)</th>
                   <th>Tier</th>
-                  <th style={{ width: 140 }}></th>
+                  {canEditAny && <th style={{ width: 140 }}></th>}
                 </tr>
               </thead>
               <tbody>
                 {brands.map(b => (
-                  <tr key={b.id}>
-                    <td className="fw-semibold">{b.name}</td>
+                  <tr key={b.id} style={{ cursor: 'pointer' }} onClick={() => nav(`/brands/${b.id}`)}>
+                    <td className="fw-semibold">
+                      {b.name}
+                      <i className="bi bi-arrow-right-short ms-1 text-muted" />
+                    </td>
                     <td>{b.client}</td>
                     <td>${Number(b.last_month_gmv).toLocaleString()}</td>
                     <td>
@@ -131,14 +143,18 @@ export default function Brands() {
                         ? <Badge bg="success">Unlimited</Badge>
                         : <Badge bg="secondary">{b.tier_value ?? '—'}</Badge>}
                     </td>
-                    <td className="text-end">
-                      <Button size="sm" variant="outline-primary" className="me-2" onClick={() => openEdit(b)}>
-                        <i className="bi bi-pencil" />
-                      </Button>
-                      <Button size="sm" variant="outline-danger" onClick={() => remove(b)}>
-                        <i className="bi bi-trash" />
-                      </Button>
-                    </td>
+                    {canEditAny && (
+                      <td className="text-end" onClick={e => e.stopPropagation()}>
+                        <Button size="sm" variant="outline-primary" className="me-2" onClick={() => openEdit(b)} title="Edit brand">
+                          <i className="bi bi-pencil" />
+                        </Button>
+                        {isBob && (
+                          <Button size="sm" variant="outline-danger" onClick={() => remove(b)} title="Delete brand">
+                            <i className="bi bi-trash" />
+                          </Button>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

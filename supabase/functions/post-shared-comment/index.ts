@@ -12,7 +12,11 @@ const cors = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const SECTIONS = ['overall','top_creators','top_videos','video_performance','gmv_max','product_highlights','shop_health','insights'];
+const STANDARD_SECTIONS = ['overall','top_creators','top_videos','video_performance','gmv_max','product_highlights','shop_health','insights'];
+const CUSTOM_SECTION_RE = /^cs:[0-9a-f-]{16,64}$/i;
+function isValidSection(s: string): boolean {
+  return STANDARD_SECTIONS.includes(s) || CUSTOM_SECTION_RE.test(s);
+}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
@@ -25,7 +29,7 @@ serve(async (req) => {
     if (!token || !report_id || !section || !author_name || !body) {
       return json({ error: 'token, report_id, section, author_name, body required' }, 400);
     }
-    if (!SECTIONS.includes(section)) return json({ error: 'Invalid section' }, 400);
+    if (!isValidSection(section)) return json({ error: 'Invalid section' }, 400);
     if (String(body).trim().length === 0) return json({ error: 'Empty comment' }, 400);
 
     const { data: link } = await admin.from('report_share_links')
@@ -34,10 +38,15 @@ serve(async (req) => {
     if (link.revoked_at) return json({ error: 'Link revoked' }, 410);
 
     const { data: report } = await admin.from('weekly_reports')
-      .select('id,brand_id').eq('id', report_id).maybeSingle();
+      .select('id,brand_id,content,is_shared').eq('id', report_id).maybeSingle();
     if (!report) return json({ error: 'Report not found' }, 404);
     const brandIds: string[] = link.brand_ids ?? [];
     if (!brandIds.includes(report.brand_id)) return json({ error: 'Not allowed' }, 403);
+    if (report.is_shared === false) return json({ error: 'This report is no longer shared' }, 403);
+
+    const { data: brand } = await admin.from('brands')
+      .select('id,share_enabled').eq('id', report.brand_id).maybeSingle();
+    if (!brand?.share_enabled) return json({ error: 'Sharing is disabled for this brand' }, 403);
 
     if (parent_id) {
       const { data: parent } = await admin.from('report_comments')
@@ -65,6 +74,15 @@ serve(async (req) => {
         video_performance: 'Video Performance', gmv_max: 'GMV Max',
         product_highlights: 'Product Highlights', shop_health: 'Shop Health', insights: 'Insights',
       };
+      const labelFor = (s: string): string => {
+        if (sectionLabel[s]) return sectionLabel[s];
+        if (s.startsWith('cs:')) {
+          const id = s.slice(3);
+          const cs = (report.content?.custom_sections ?? []).find((x: any) => x?.id === id);
+          if (cs?.name) return String(cs.name);
+        }
+        return s;
+      };
       const [{ data: brand }, { data: bobs }, { data: apcRows }] = await Promise.all([
         admin.from('brands').select('id,name').eq('id', report.brand_id).single(),
         admin.from('profiles').select('id').eq('role', 'bob'),
@@ -75,8 +93,8 @@ serve(async (req) => {
       (apcRows ?? []).forEach((r: any) => recipientIds.add(r.apc_id));
 
       const title = `New comment on ${brand?.name ?? 'brand'} report`;
-      const bodyText = `${cleanName} commented on ${sectionLabel[section] ?? section}: "${cleanBody.slice(0, 140)}${cleanBody.length > 140 ? '…' : ''}"`;
-      const link = `/reporting/weekly/${report_id}`;
+      const bodyText = `${cleanName} commented on ${labelFor(section)}: "${cleanBody.slice(0, 140)}${cleanBody.length > 140 ? '…' : ''}"`;
+      const link = `/reporting/weekly/${report_id}?section=${encodeURIComponent(section)}&comment=${(inserted as any).id}`;
       const payload = {
         report_id, brand_id: report.brand_id, section, comment_id: (inserted as any).id,
       };

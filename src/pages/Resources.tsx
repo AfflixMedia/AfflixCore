@@ -38,7 +38,9 @@ function brandInitials(name: string) {
 }
 
 export default function Resources() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const isBob = profile?.role === 'bob';
+  const isApc = profile?.role === 'apc';
   const [items, setItems] = useState<Resource[]>([]);
   const [brands, setBrands] = useState<BrandLite[]>([]);
   const [loading, setLoading] = useState(true);
@@ -113,8 +115,11 @@ export default function Resources() {
 
   const openAdd = () => {
     setEditing(null);
-    // if currently inside a folder, prefill that scope
-    if (openFolder === GENERAL_KEY) {
+    // APCs can only add brand-scoped resources for their brands
+    if (isApc) {
+      const defaultBrand = openFolder && openFolder !== GENERAL_KEY ? openFolder : (brands[0]?.id ?? '');
+      setForm({ name: '', url: '', description: '', scope: 'brand', brand_id: defaultBrand });
+    } else if (openFolder === GENERAL_KEY) {
       setForm({ name: '', url: '', description: '', scope: 'general', brand_id: '' });
     } else if (openFolder) {
       setForm({ name: '', url: '', description: '', scope: 'brand', brand_id: openFolder });
@@ -122,6 +127,14 @@ export default function Resources() {
       setForm({ name: '', url: '', description: '', scope: 'general', brand_id: '' });
     }
     setErr(null); setShow(true);
+  };
+
+  const canEditResource = (r: Resource) => {
+    if (isBob) return true;
+    if (isApc && r.scope === 'brand' && r.brand_id) {
+      return brands.some(b => b.id === r.brand_id);
+    }
+    return false;
   };
 
   const openEdit = (r: Resource) => {
@@ -317,14 +330,16 @@ export default function Resources() {
                                 <a href={r.url} target="_blank" rel="noreferrer" className="btn btn-sm btn-outline-primary">
                                   Open <i className="bi bi-box-arrow-up-right ms-1" />
                                 </a>
-                                <div>
-                                  <Button size="sm" variant="outline-secondary" className="me-2" onClick={() => openEdit(r)}>
-                                    <i className="bi bi-pencil" />
-                                  </Button>
-                                  <Button size="sm" variant="outline-danger" onClick={() => remove(r)}>
-                                    <i className="bi bi-trash" />
-                                  </Button>
-                                </div>
+                                {canEditResource(r) && (
+                                  <div>
+                                    <Button size="sm" variant="outline-secondary" className="me-2" onClick={() => openEdit(r)}>
+                                      <i className="bi bi-pencil" />
+                                    </Button>
+                                    <Button size="sm" variant="outline-danger" onClick={() => remove(r)}>
+                                      <i className="bi bi-trash" />
+                                    </Button>
+                                  </div>
+                                )}
                               </div>
                             </Card.Body>
                           </Card>
@@ -382,34 +397,36 @@ export default function Resources() {
               <div className="text-end small text-muted mt-1">{form.description.length} / {DESC_MAX}</div>
             </Form.Group>
 
-            <Form.Group className="mb-2">
-              <div className="d-flex justify-content-between">
-                <Form.Label className="fw-semibold mb-1">Scope</Form.Label>
-                <small className="text-muted">
-                  {form.scope === 'general' ? 'Visible across the workspace' : 'Visible to users of this brand'}
-                </small>
-              </div>
-              <Row className="g-2">
-                <Col>
-                  <ScopeOption
-                    active={form.scope === 'brand'}
-                    onClick={() => setForm({ ...form, scope: 'brand' })}
-                    icon="bi-star"
-                    title="Brand"
-                    sub="Brand-specific"
-                  />
-                </Col>
-                <Col>
-                  <ScopeOption
-                    active={form.scope === 'general'}
-                    onClick={() => setForm({ ...form, scope: 'general', brand_id: '' })}
-                    icon="bi-globe"
-                    title="General"
-                    sub="All brands"
-                  />
-                </Col>
-              </Row>
-            </Form.Group>
+            {!isApc && (
+              <Form.Group className="mb-2">
+                <div className="d-flex justify-content-between">
+                  <Form.Label className="fw-semibold mb-1">Scope</Form.Label>
+                  <small className="text-muted">
+                    {form.scope === 'general' ? 'Visible across the workspace' : 'Visible to users of this brand'}
+                  </small>
+                </div>
+                <Row className="g-2">
+                  <Col>
+                    <ScopeOption
+                      active={form.scope === 'brand'}
+                      onClick={() => setForm({ ...form, scope: 'brand' })}
+                      icon="bi-star"
+                      title="Brand"
+                      sub="Brand-specific"
+                    />
+                  </Col>
+                  <Col>
+                    <ScopeOption
+                      active={form.scope === 'general'}
+                      onClick={() => setForm({ ...form, scope: 'general', brand_id: '' })}
+                      icon="bi-globe"
+                      title="General"
+                      sub="All brands"
+                    />
+                  </Col>
+                </Row>
+              </Form.Group>
+            )}
 
             {form.scope === 'brand' && (
               <Form.Group>
@@ -418,6 +435,11 @@ export default function Resources() {
                   <option value="">— Choose brand —</option>
                   {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                 </Form.Select>
+                {isApc && (
+                  <Form.Text className="text-muted">
+                    APCs can add resources only for brands assigned to them.
+                  </Form.Text>
+                )}
               </Form.Group>
             )}
           </Modal.Body>

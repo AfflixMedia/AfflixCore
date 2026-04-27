@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Spinner, Alert, Badge, Button } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/AuthContext';
@@ -18,6 +18,9 @@ interface Brand { id: string; name: string; client: string; }
 export default function WeeklyReportView() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
+  const [params] = useSearchParams();
+  const openSection = params.get('section') as CommentSection | null;
+  const highlightCommentId = params.get('comment');
   const { profile } = useAuth();
   const { notifications, markRead } = useNotifications();
   const [report, setReport] = useState<ReportRow | null>(null);
@@ -84,12 +87,6 @@ export default function WeeklyReportView() {
     setComments(prev => [...prev, data as Comment]);
   };
 
-  const delComment = async (cid: string) => {
-    const prevState = comments;
-    setComments(comments.filter(x => x.id !== cid));
-    const { error } = await supabase.from('report_comments').delete().eq('id', cid);
-    if (error) { alert(error.message); setComments(prevState); }
-  };
 
   if (loading) return <div className="text-center py-5"><Spinner animation="border" /></div>;
   if (err || !report || !brand) return <Alert variant="danger">{err ?? 'Not found'}</Alert>;
@@ -129,12 +126,13 @@ export default function WeeklyReportView() {
         trendData={trendData}
         hasPrev={!!prev}
         prevTopVideos={p?.top_videos}
+        openSectionOnLoad={openSection}
+        highlightCommentId={highlightCommentId}
         commentsConfig={{
           mode: 'authed',
           comments,
           currentAuthorName: profile?.full_name || profile?.email || 'User',
           onAdd: addComment,
-          onDelete: delComment,
         }}
       />
     </>

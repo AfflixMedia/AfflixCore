@@ -73,3 +73,15 @@ body { background: #f5f6fa; }
 .ac-rte-view h1 { font-size: 1.6rem; margin: .8rem 0 .4rem; }
 .ac-rte-view h2 { font-size: 1.35rem; margin: .8rem 0 .4rem; }
 .ac-rte-view h3 { font-size: 1.15rem; margin: .8rem 0 .4rem; }
+.ac-rte-view hr { border: 0; border-top: 1px solid #cbd5e1; margin: 1rem 0; }
+
+/* Custom Quill toolbar button: divider */
+.ac-rte .ql-toolbar .ql-divider { width: 28px; }
+.ac-rte .ql-toolbar .ql-divider::after {
+  content: '—';
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  color: #475569;
+}
+.ac-rte .ql-toolbar .ql-divider:hover::after { color: #2563eb; }

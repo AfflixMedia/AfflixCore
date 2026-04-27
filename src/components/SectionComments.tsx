@@ -1,7 +1,9 @@
-import { useState, FormEvent } from 'react';
+import { useEffect, useRef, useState, FormEvent } from 'react';
 import { Card, Form, Button, Alert, Badge } from 'react-bootstrap';
 
-export type CommentSection = 'overall' | 'top_creators' | 'top_videos' | 'video_performance' | 'gmv_max' | 'product_highlights' | 'shop_health' | 'insights';
+// Standard section ids + custom section ids prefixed with `cs:` (e.g. `cs:<uuid>`).
+export type CommentSection = string;
+export type StandardCommentSection = 'overall' | 'top_creators' | 'top_videos' | 'video_performance' | 'gmv_max' | 'product_highlights' | 'shop_health' | 'insights';
 
 export interface Comment {
   id: string;
@@ -16,15 +18,19 @@ export interface Comment {
 
 export interface SectionCommentsProps {
   section: CommentSection;
+  /** Display label for the section. Falls back to a built-in lookup for standard sections. */
+  sectionLabel?: string;
   comments: Comment[];
   mode: 'authed' | 'public';
   currentAuthorName?: string;
   defaultPublicName?: string;
   onAdd: (body: string, authorName: string, parentId?: string) => Promise<void>;
   onDelete?: (id: string) => Promise<void>;
+  /** When set and matching a comment in this section, scroll to + flash-highlight that comment. */
+  highlightCommentId?: string;
 }
 
-const SECTION_LABELS: Record<CommentSection, string> = {
+const STANDARD_LABELS: Record<StandardCommentSection, string> = {
   overall: 'Overall Performance',
   top_creators: 'Top Creators',
   top_videos: 'Top Videos',
@@ -35,8 +41,12 @@ const SECTION_LABELS: Record<CommentSection, string> = {
   insights: 'Insights',
 };
 
+const labelFor = (section: CommentSection, override?: string) =>
+  override ?? STANDARD_LABELS[section as StandardCommentSection] ?? 'this section';
+
 export default function SectionComments(props: SectionCommentsProps) {
-  const { section, comments, mode, currentAuthorName, defaultPublicName, onAdd, onDelete } = props;
+  const { section, sectionLabel, comments, mode, currentAuthorName, defaultPublicName, onAdd, highlightCommentId } = props;
+  const SECTION_LABEL = labelFor(section, sectionLabel);
   const [body, setBody] = useState('');
   const [name, setName] = useState(defaultPublicName ?? '');
   const [editingName, setEditingName] = useState(false);
@@ -47,6 +57,15 @@ export default function SectionComments(props: SectionCommentsProps) {
   const hasSavedName = mode === 'public' && !!defaultPublicName;
   const sectionComments = comments.filter(c => c.section === section);
   const roots = sectionComments.filter(c => !c.parent_id);
+
+  // If we're asked to highlight a specific comment in this section, force-open the panel
+  // so it gets rendered, then the per-node effect scrolls to it.
+  const highlightInThisSection = highlightCommentId
+    ? sectionComments.some(c => c.id === highlightCommentId)
+    : false;
+  useEffect(() => {
+    if (highlightInThisSection) setOpen(true);
+  }, [highlightInThisSection]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -73,8 +92,8 @@ export default function SectionComments(props: SectionCommentsProps) {
   if (isAuthed && sectionComments.length === 0) return null;
 
   const headerLabel = isAuthed
-    ? `Client feedback on ${SECTION_LABELS[section]}`
-    : `Comments on ${SECTION_LABELS[section]}`;
+    ? `Client feedback on ${SECTION_LABEL}`
+    : `Comments on ${SECTION_LABEL}`;
 
   return (
     <Card className="mb-4 border-0" style={{ background: '#f8fafc' }}>
@@ -106,7 +125,7 @@ export default function SectionComments(props: SectionCommentsProps) {
                     defaultPublicName={defaultPublicName}
                     hasSavedName={hasSavedName}
                     onAdd={onAdd}
-                    onDelete={onDelete}
+                    highlightCommentId={highlightCommentId}
                   />
                 ))}
               </div>
@@ -130,7 +149,7 @@ export default function SectionComments(props: SectionCommentsProps) {
                 <Form.Control
                   as="textarea"
                   rows={2}
-                  placeholder={`Add a comment on ${SECTION_LABELS[section]}…`}
+                  placeholder={`Add a comment on ${SECTION_LABEL}…`}
                   value={body}
                   onChange={e => setBody(e.target.value)}
                   required
@@ -167,11 +186,25 @@ interface NodeProps {
   defaultPublicName?: string;
   hasSavedName: boolean;
   onAdd: (body: string, authorName: string, parentId?: string) => Promise<void>;
-  onDelete?: (id: string) => Promise<void>;
+  highlightCommentId?: string;
 }
 
 function CommentNode(p: NodeProps) {
-  const { comment, all, depth, mode, currentAuthorName, defaultPublicName, hasSavedName, onAdd, onDelete } = p;
+  const { comment, all, depth, mode, currentAuthorName, defaultPublicName, hasSavedName, onAdd, highlightCommentId } = p;
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const isHighlight = highlightCommentId === comment.id;
+  const [flash, setFlash] = useState(isHighlight);
+
+  useEffect(() => {
+    if (!isHighlight || !cardRef.current) return;
+    // Wait a tick so the offcanvas has finished mounting before scrolling.
+    const t = setTimeout(() => {
+      cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 120);
+    setFlash(true);
+    const off = setTimeout(() => setFlash(false), 2400);
+    return () => { clearTimeout(t); clearTimeout(off); };
+  }, [isHighlight]);
   const children = all.filter(c => c.parent_id === comment.id);
   const [replying, setReplying] = useState(false);
   const [replyBody, setReplyBody] = useState('');
@@ -201,7 +234,16 @@ function CommentNode(p: NodeProps) {
 
   return (
     <div className={depth === 0 ? 'mb-2' : 'mb-2'}>
-      <div className="p-3 rounded" style={{ background: 'white', border: '1px solid #e5e7eb' }}>
+      <div
+        ref={cardRef}
+        className="p-3 rounded"
+        style={{
+          background: flash ? '#fef3c7' : 'white',
+          border: `1px solid ${flash ? '#f59e0b' : '#e5e7eb'}`,
+          boxShadow: flash ? '0 0 0 3px rgba(245,158,11,.25)' : undefined,
+          transition: 'background .25s ease, border-color .25s ease, box-shadow .25s ease',
+        }}
+      >
         <div className="d-flex justify-content-between align-items-start mb-1">
           <div className="d-flex align-items-center gap-2 flex-wrap">
             <span className="fw-semibold">{comment.author_name}</span>
@@ -211,12 +253,7 @@ function CommentNode(p: NodeProps) {
             </Badge>
             <small className="text-muted">{formatTime(comment.created_at)}</small>
           </div>
-          {onDelete && mode === 'authed' && (
-            <button type="button" className="btn btn-sm btn-link text-danger p-0"
-              onClick={() => { if (confirm('Delete this comment and all its replies?')) onDelete(comment.id); }}>
-              <i className="bi bi-trash" />
-            </button>
-          )}
+          {/* Comment deletion is intentionally disabled — feedback history is permanent. */}
         </div>
         <div style={{ whiteSpace: 'pre-wrap' }}>{comment.body}</div>
         <div className="mt-2">

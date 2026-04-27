@@ -8,6 +8,8 @@ interface APC {
   full_name: string | null;
   role: string;
   created_at: string;
+  can_edit_brands: boolean;
+  can_manage_gmv_max: boolean;
   brand_ids?: string[];
   brand_names?: string[];
 }
@@ -22,7 +24,7 @@ export default function APCs() {
 
   const [show, setShow] = useState(false);
   const [editApc, setEditApc] = useState<APC | null>(null);
-  const [form, setForm] = useState({ email: '', password: '', full_name: '', brand_ids: [] as string[] });
+  const [form, setForm] = useState({ email: '', password: '', full_name: '', brand_ids: [] as string[], can_edit_brands: false, can_manage_gmv_max: false });
   const [saving, setSaving] = useState(false);
 
   const [pwApc, setPwApc] = useState<APC | null>(null);
@@ -38,7 +40,7 @@ export default function APCs() {
   const load = async () => {
     setLoading(true); setErr(null);
     const [{ data: apcRows, error: e1 }, { data: brandRows, error: e2 }, { data: assigns, error: e3 }] = await Promise.all([
-      supabase.from('profiles').select('id,email,full_name,role,created_at').eq('role', 'apc').order('created_at', { ascending: false }),
+      supabase.from('profiles').select('id,email,full_name,role,created_at,can_edit_brands,can_manage_gmv_max').eq('role', 'apc').order('created_at', { ascending: false }),
       supabase.from('brands').select('id,name').order('name'),
       supabase.from('apc_brands').select('apc_id,brand_id'),
     ]);
@@ -56,6 +58,8 @@ export default function APCs() {
     setBrands(brandRows ?? []);
     setApcs((apcRows ?? []).map(a => ({
       ...a,
+      can_edit_brands: !!a.can_edit_brands,
+      can_manage_gmv_max: !!a.can_manage_gmv_max,
       brand_ids: assignMap.get(a.id) ?? [],
       brand_names: (assignMap.get(a.id) ?? []).map(id => brandMap.get(id) ?? '?'),
     })));
@@ -66,14 +70,14 @@ export default function APCs() {
 
   const openAdd = () => {
     setEditApc(null);
-    setForm({ email: '', password: '', full_name: '', brand_ids: [] });
+    setForm({ email: '', password: '', full_name: '', brand_ids: [], can_edit_brands: false, can_manage_gmv_max: false });
     setErr(null);
     setShow(true);
   };
 
   const openEdit = (a: APC) => {
     setEditApc(a);
-    setForm({ email: a.email, password: '', full_name: a.full_name ?? '', brand_ids: a.brand_ids ?? [] });
+    setForm({ email: a.email, password: '', full_name: a.full_name ?? '', brand_ids: a.brand_ids ?? [], can_edit_brands: a.can_edit_brands, can_manage_gmv_max: a.can_manage_gmv_max });
     setErr(null);
     setShow(true);
   };
@@ -90,9 +94,13 @@ export default function APCs() {
     setSaving(true); setErr(null);
     try {
       if (editApc) {
-        // Update name + reassign brands (cannot change email/password here)
+        // Update name, permissions + reassign brands (cannot change email/password here)
         const { error: pErr } = await supabase.from('profiles')
-          .update({ full_name: form.full_name }).eq('id', editApc.id);
+          .update({
+            full_name: form.full_name,
+            can_edit_brands: form.can_edit_brands,
+            can_manage_gmv_max: form.can_manage_gmv_max,
+          }).eq('id', editApc.id);
         if (pErr) throw pErr;
         const { error: dErr } = await supabase.from('apc_brands').delete().eq('apc_id', editApc.id);
         if (dErr) throw dErr;
@@ -110,6 +118,8 @@ export default function APCs() {
             password: form.password,
             full_name: form.full_name,
             brand_ids: form.brand_ids,
+            can_edit_brands: form.can_edit_brands,
+            can_manage_gmv_max: form.can_manage_gmv_max,
           },
           headers: { Authorization: `Bearer ${session?.access_token}` },
         });
@@ -161,6 +171,16 @@ export default function APCs() {
                       {(a.brand_names ?? []).length === 0
                         ? <span className="text-muted">None</span>
                         : a.brand_names!.map(n => <Badge key={n} bg="info" className="me-1">{n}</Badge>)}
+                      {a.can_edit_brands && (
+                        <Badge bg="warning" text="dark" className="ms-1" title="Can edit brand details">
+                          <i className="bi bi-pencil-square" /> editor
+                        </Badge>
+                      )}
+                      {a.can_manage_gmv_max && (
+                        <Badge bg="primary" className="ms-1" title="Can manage GMV Max budgets">
+                          <i className="bi bi-graph-up" /> gmv max
+                        </Badge>
+                      )}
                     </td>
                     <td className="text-end text-nowrap">
                       <Button size="sm" variant="outline-secondary" className="me-2" onClick={() => { setPwApc(a); setNewPw(''); setPwErr(null); setPwOk(false); }}
@@ -207,6 +227,30 @@ export default function APCs() {
                 <Form.Text className="text-muted">Share this with the APC.</Form.Text>
               </Form.Group>
             )}
+            <Form.Group className="mb-3">
+              <Form.Label className="fw-semibold mb-1">Permissions</Form.Label>
+              <div className="border rounded p-2">
+                <Form.Check
+                  type="switch"
+                  id="can-edit-brands"
+                  label={<><strong>Edit brand details</strong> <span className="text-muted small">— name, client, GMV, tier on assigned brands</span></>}
+                  checked={form.can_edit_brands}
+                  onChange={e => setForm({ ...form, can_edit_brands: e.target.checked })}
+                />
+                <Form.Check
+                  type="switch"
+                  className="mt-2"
+                  id="can-manage-gmv-max"
+                  label={<><strong>Manage GMV Max</strong> <span className="text-muted small">— monthly budgets and weekly entries on assigned brands</span></>}
+                  checked={form.can_manage_gmv_max}
+                  onChange={e => setForm({ ...form, can_manage_gmv_max: e.target.checked })}
+                />
+              </div>
+              <Form.Text className="text-muted">
+                Bob can always do everything; these toggles only widen what an APC can do.
+              </Form.Text>
+            </Form.Group>
+
             <Form.Group className="mb-2">
               <Form.Label>Assign brands</Form.Label>
               {brands.length === 0 ? (

@@ -1,6 +1,6 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Card, Form, Button, Row, Col, Table, Spinner, Alert, Badge, Modal, Offcanvas } from 'react-bootstrap';
+import { Card, Form, Button, Row, Col, Table, Spinner, Alert, Badge, Modal, Offcanvas, Dropdown } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import { formatRange } from '../lib/dates';
 import {
@@ -13,6 +13,7 @@ import { useAuth } from '../auth/AuthContext';
 import RichTextEditor from '../components/RichTextEditor';
 import { CustomSectionInline, CustomSectionDefModal, customSectionsAt, newSection } from '../components/CustomSectionEditor';
 import { CustomSection, StandardSectionId } from '../lib/reportSchema';
+import NumberInput from '../components/NumberInput';
 
 const SECTION_LABELS: Record<string, string> = {
   overall: 'Overall Performance',
@@ -55,6 +56,20 @@ export default function WeeklyReportEdit() {
 
   const [feedbackSection, setFeedbackSection] = useState<CommentSection | null>(null);
 
+  const [fetchingGmv, setFetchingGmv] = useState(false);
+  const [gmvFetchMsg, setGmvFetchMsg] = useState<{ kind: 'success' | 'warning' | 'danger'; text: string } | null>(null);
+
+  interface PresetRow { id: string; name: string; payload: any; created_by: string | null; created_at: string; }
+  const [presets, setPresets] = useState<PresetRow[]>([]);
+  const [presetSavingId, setPresetSavingId] = useState<string | null>(null);
+  const [presetMsg, setPresetMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!presetMsg) return;
+    const t = setTimeout(() => setPresetMsg(null), 3500);
+    return () => clearTimeout(t);
+  }, [presetMsg]);
+
   useEffect(() => {
     (async () => {
       const { data, error } = await supabase.from('weekly_reports').select('*').eq('id', id).single();
@@ -72,9 +87,61 @@ export default function WeeklyReportEdit() {
       const { data: cm } = await supabase.from('report_comments')
         .select('*').eq('report_id', r.id).order('created_at', { ascending: true });
       setComments((cm as Comment[]) ?? []);
+      const { data: pr } = await supabase.from('section_presets')
+        .select('id,name,payload,created_by,created_at').order('created_at', { ascending: false });
+      setPresets((pr as PresetRow[]) ?? []);
       setLoading(false);
     })();
   }, [id]);
+
+  const addCustomFromPreset = (preset: PresetRow) => {
+    const p = preset.payload ?? {};
+    const cs: CustomSection = {
+      id: crypto.randomUUID(),
+      name: String(p.name ?? preset.name ?? ''),
+      description: String(p.description ?? ''),
+      is_repeater: !!p.is_repeater,
+      body: '',
+      fields: Array.isArray(p.fields) ? p.fields.map((f: any) => ({
+        id: crypto.randomUUID(),
+        label: String(f.label ?? ''),
+        type: f.type ?? 'text',
+        options: Array.isArray(f.options) ? f.options : undefined,
+      })) : [],
+      rows: [],
+      insert_after: p.insert_after ?? 'insights',
+    };
+    setC(prev => ({ ...prev, custom_sections: [...prev.custom_sections, cs] }));
+    setPresetMsg(`Added "${cs.name}" from preset.`);
+  };
+
+  const saveSectionAsPreset = async (s: CustomSection) => {
+    const name = window.prompt('Save this section as a preset. Name:', s.name || 'Untitled section');
+    if (!name) return;
+    setPresetSavingId(s.id);
+    const payload = {
+      name: s.name,
+      description: s.description,
+      is_repeater: s.is_repeater,
+      insert_after: s.insert_after,
+      fields: s.fields.map(f => ({ label: f.label, type: f.type, options: f.options })),
+    };
+    const { data, error } = await supabase.from('section_presets')
+      .insert({ name: name.trim(), payload, created_by: profile?.id ?? null })
+      .select().single();
+    setPresetSavingId(null);
+    if (error) { alert(error.message); return; }
+    setPresets(prev => [data as PresetRow, ...prev]);
+    setPresetMsg(`Saved preset "${(data as PresetRow).name}".`);
+  };
+
+  const removePreset = async (p: PresetRow) => {
+    if (!confirm(`Delete preset "${p.name}" from the shared library?`)) return;
+    const prev = presets;
+    setPresets(presets.filter(x => x.id !== p.id));
+    const { error } = await supabase.from('section_presets').delete().eq('id', p.id);
+    if (error) { alert(error.message); setPresets(prev); }
+  };
 
   const addComment = async (section: CommentSection, body: string, authorName: string, parentId?: string) => {
     if (!report || !profile) return;
@@ -88,12 +155,6 @@ export default function WeeklyReportEdit() {
     }).select().single();
     if (error) throw error;
     setComments(prev => [...prev, data as Comment]);
-  };
-  const delComment = async (cid: string) => {
-    const prevState = comments;
-    setComments(comments.filter(x => x.id !== cid));
-    const { error } = await supabase.from('report_comments').delete().eq('id', cid);
-    if (error) { alert(error.message); setComments(prevState); }
   };
 
   const o = c.overall;
@@ -120,6 +181,40 @@ export default function WeeklyReportEdit() {
     const arr = [...(c[key] as any[])];
     arr.splice(i, 1);
     setC({ ...c, [key]: arr });
+  };
+
+  const fetchGmvMaxFromBrand = async () => {
+    if (!report) return;
+    setFetchingGmv(true); setGmvFetchMsg(null);
+    const { data, error } = await supabase
+      .from('brand_gmv_max_weekly')
+      .select('*')
+      .eq('brand_id', report.brand_id)
+      .eq('week_start', report.week_start)
+      .maybeSingle();
+    setFetchingGmv(false);
+    if (error) { setGmvFetchMsg({ kind: 'danger', text: error.message }); return; }
+    if (!data) {
+      setGmvFetchMsg({
+        kind: 'warning',
+        text: `No GMV Max weekly entry exists for ${formatRange(report.week_start, report.week_end)} on this brand. Add it on the brand's GMV Max tab first.`,
+      });
+      return;
+    }
+    const w: any = data;
+    setC(prev => ({
+      ...prev,
+      gmv_max: {
+        not_yet_started: false,
+        ad_spend: Number(w.ad_spend) || 0,
+        roi: Number(w.roi) || 0,
+        orders: Number(w.orders) || 0,
+        cpo: Number(w.cpo) || 0,
+        gmv: Number(w.gmv) || 0,
+        notes: String(w.notes ?? ''),
+      },
+    }));
+    setGmvFetchMsg({ kind: 'success', text: `Pulled GMV Max for ${formatRange(report.week_start, report.week_end)} from brand. Don't forget to save.` });
   };
 
   const submit = async (e: FormEvent, status: 'draft' | 'submitted') => {
@@ -214,8 +309,25 @@ export default function WeeklyReportEdit() {
         onChange={(patch) => updateCustomData(s.id, patch)}
         onEditDef={() => openEditCustom(s)}
         onRemove={() => removeCustom(s.id)}
+        headerExtra={
+          <>
+            <Button size="sm" variant="outline-info" disabled={presetSavingId === s.id}
+              onClick={() => saveSectionAsPreset(s)} title="Save this section as a reusable preset">
+              <i className="bi bi-bookmark-plus" />
+            </Button>
+            <FeedbackButton section={`cs:${s.id}` as CommentSection} />
+          </>
+        }
       />
     ));
+
+  const customSectionLabel = (section: CommentSection): string | undefined => {
+    if (!section.startsWith('cs:')) return undefined;
+    const id = section.slice(3);
+    return c.custom_sections.find(s => s.id === id)?.name;
+  };
+  const labelForFeedback = (section: CommentSection): string =>
+    customSectionLabel(section) ?? SECTION_LABELS[section] ?? section;
 
   return (
     <>
@@ -233,6 +345,33 @@ export default function WeeklyReportEdit() {
               <i className="bi bi-chat-left-text me-1" /> Load previous comments
             </Button>
           )}
+          <Dropdown>
+            <Dropdown.Toggle variant="outline-info" title="Insert a saved section preset">
+              <i className="bi bi-bookmark me-1" /> Add from preset
+              {presets.length > 0 && <Badge bg="info" pill className="ms-1">{presets.length}</Badge>}
+            </Dropdown.Toggle>
+            <Dropdown.Menu align="end" style={{ minWidth: 280, maxHeight: 320, overflowY: 'auto' }}>
+              {presets.length === 0 ? (
+                <Dropdown.ItemText className="text-muted small">No saved presets yet.</Dropdown.ItemText>
+              ) : presets.map(p => (
+                <div key={p.id} className="d-flex align-items-center px-2 py-1" style={{ gap: 4 }}>
+                  <Dropdown.Item as="button" className="flex-grow-1 px-2 py-1" onClick={() => addCustomFromPreset(p)}>
+                    <div className="fw-semibold">{p.name}</div>
+                    <small className="text-muted">
+                      {p.payload?.is_repeater ? 'Table' : 'Long text'} · {p.payload?.fields?.length ?? 0} field{(p.payload?.fields?.length ?? 0) === 1 ? '' : 's'}
+                    </small>
+                  </Dropdown.Item>
+                  {(p.created_by === profile?.id || profile?.role === 'bob') && (
+                    <Button size="sm" variant="link" className="text-danger p-0 px-2"
+                      onClick={(e) => { e.stopPropagation(); e.preventDefault(); removePreset(p); }}
+                      title="Delete preset">
+                      <i className="bi bi-trash" />
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </Dropdown.Menu>
+          </Dropdown>
           <Button variant="outline-success" onClick={openAddCustom}>
             <i className="bi bi-plus-square me-1" /> Add custom section
           </Button>
@@ -243,6 +382,7 @@ export default function WeeklyReportEdit() {
       </div>
 
       {err && <Alert variant="danger">{err}</Alert>}
+      {presetMsg && <Alert variant="info" className="py-2 small" dismissible onClose={() => setPresetMsg(null)}>{presetMsg}</Alert>}
 
       {renderCustomAt('start')}
 
@@ -252,16 +392,16 @@ export default function WeeklyReportEdit() {
         <Card.Body>
           <Row className="g-3">
             <Col md={3}><Form.Label className="small">Total GMV ($)</Form.Label>
-              <Form.Control type="number" step="0.01" value={o.total_gmv || ''} onChange={e => setOverall('total_gmv', num(e.target.value))} /></Col>
+              <NumberInput step="0.01" value={o.total_gmv} onChange={n => setOverall('total_gmv', n)} /></Col>
             <Col md={3}><Form.Label className="small">Affiliate GMV ($)</Form.Label>
-              <Form.Control type="number" step="0.01" value={o.affiliate_gmv || ''} onChange={e => setOverall('affiliate_gmv', num(e.target.value))} /></Col>
+              <NumberInput step="0.01" value={o.affiliate_gmv} onChange={n => setOverall('affiliate_gmv', n)} /></Col>
             <Col md={3}><Form.Label className="small">Orders</Form.Label>
-              <Form.Control type="number" value={o.orders || ''} onChange={e => setOverall('orders', num(e.target.value))} /></Col>
+              <NumberInput value={o.orders} onChange={n => setOverall('orders', n)} /></Col>
             <Col md={3}><Form.Label className="small">Pending Collabs</Form.Label>
-              <Form.Control type="number" value={o.pending_collabs || ''} onChange={e => setOverall('pending_collabs', num(e.target.value))} /></Col>
+              <NumberInput value={o.pending_collabs} onChange={n => setOverall('pending_collabs', n)} /></Col>
 
             <Col md={3}><Form.Label className="small">Samples Approved</Form.Label>
-              <Form.Control type="number" value={o.samples_approved || ''} onChange={e => setOverall('samples_approved', num(e.target.value))} /></Col>
+              <NumberInput value={o.samples_approved} onChange={n => setOverall('samples_approved', n)} /></Col>
             <Col md={6}><Form.Label className="small">Samples note (e.g. MTD Approved: 38)</Form.Label>
               <Form.Control value={o.samples_approved_note} onChange={e => setOverall('samples_approved_note', e.target.value)} /></Col>
 
@@ -274,7 +414,7 @@ export default function WeeklyReportEdit() {
             </Col>
             {!o.ad_spend_not_started && (
               <Col md={4}><Form.Label className="small">Ad Spend ($)</Form.Label>
-                <Form.Control type="number" step="0.01" value={o.ad_spend || ''} onChange={e => setOverall('ad_spend', num(e.target.value))} /></Col>
+                <NumberInput step="0.01" value={o.ad_spend} onChange={n => setOverall('ad_spend', n)} /></Col>
             )}
             <Col md={o.ad_spend_not_started ? 8 : 4}>
               <Form.Label className="small">Target (e.g. "Target: $5,000")</Form.Label>
@@ -300,9 +440,9 @@ export default function WeeklyReportEdit() {
             {c.top_creators.map((r, i) => (
               <tr key={i}>
                 <td><Form.Control size="sm" value={r.name} onChange={e => updRow('top_creators', i, { name: e.target.value })} /></td>
-                <td><Form.Control size="sm" type="number" value={r.videos || ''} onChange={e => updRow('top_creators', i, { videos: num(e.target.value) })} /></td>
-                <td><Form.Control size="sm" type="number" value={r.items_sold || ''} onChange={e => updRow('top_creators', i, { items_sold: num(e.target.value) })} /></td>
-                <td><Form.Control size="sm" type="number" step="0.01" value={r.gmv || ''} onChange={e => updRow('top_creators', i, { gmv: num(e.target.value) })} /></td>
+                <td><NumberInput size="sm" value={r.videos} onChange={n => updRow('top_creators', i, { videos: n })} /></td>
+                <td><NumberInput size="sm" value={r.items_sold} onChange={n => updRow('top_creators', i, { items_sold: n })} /></td>
+                <td><NumberInput size="sm" step="0.01" value={r.gmv} onChange={n => updRow('top_creators', i, { gmv: n })} /></td>
                 <td><Form.Control size="sm" value={r.notes} onChange={e => updRow('top_creators', i, { notes: e.target.value })} /></td>
                 <td><Button size="sm" variant="outline-danger" onClick={() => delRow('top_creators', i)}><i className="bi bi-trash" /></Button></td>
               </tr>
@@ -327,8 +467,8 @@ export default function WeeklyReportEdit() {
               <tr key={i}>
                 <td><Form.Control size="sm" value={r.creator_name} onChange={e => updRow('top_videos', i, { creator_name: e.target.value })} /></td>
                 <td><Form.Control size="sm" placeholder="https://…" value={r.video_url} onChange={e => updRow('top_videos', i, { video_url: e.target.value })} /></td>
-                <td><Form.Control size="sm" type="number" value={r.items_sold || ''} onChange={e => updRow('top_videos', i, { items_sold: num(e.target.value) })} /></td>
-                <td><Form.Control size="sm" type="number" step="0.01" value={r.gmv || ''} onChange={e => updRow('top_videos', i, { gmv: num(e.target.value) })} /></td>
+                <td><NumberInput size="sm" value={r.items_sold} onChange={n => updRow('top_videos', i, { items_sold: n })} /></td>
+                <td><NumberInput size="sm" step="0.01" value={r.gmv} onChange={n => updRow('top_videos', i, { gmv: n })} /></td>
                 <td><Button size="sm" variant="outline-danger" onClick={() => delRow('top_videos', i)}><i className="bi bi-trash" /></Button></td>
               </tr>
             ))}
@@ -343,13 +483,13 @@ export default function WeeklyReportEdit() {
         <Card.Body>
           <Row className="g-3">
             <Col md={3}><Form.Label className="small">Total Videos Posted</Form.Label>
-              <Form.Control type="number" value={vp.total_videos_posted || ''} onChange={e => setVP('total_videos_posted', num(e.target.value))} /></Col>
+              <NumberInput value={vp.total_videos_posted} onChange={n => setVP('total_videos_posted', n)} /></Col>
             <Col md={3}><Form.Label className="small">Video Views</Form.Label>
-              <Form.Control type="number" value={vp.video_views || ''} onChange={e => setVP('video_views', num(e.target.value))} /></Col>
+              <NumberInput value={vp.video_views} onChange={n => setVP('video_views', n)} /></Col>
             <Col md={3}><Form.Label className="small">CTR (%)</Form.Label>
-              <Form.Control type="number" step="0.01" value={vp.ctr || ''} onChange={e => setVP('ctr', num(e.target.value))} /></Col>
+              <NumberInput step="0.01" value={vp.ctr} onChange={n => setVP('ctr', n)} /></Col>
             <Col md={3}><Form.Label className="small">CTOR (%)</Form.Label>
-              <Form.Control type="number" step="0.01" value={vp.ctor || ''} onChange={e => setVP('ctor', num(e.target.value))} /></Col>
+              <NumberInput step="0.01" value={vp.ctor} onChange={n => setVP('ctor', n)} /></Col>
           </Row>
         </Card.Body>
       </Card>
@@ -357,8 +497,20 @@ export default function WeeklyReportEdit() {
 
       {/* GMV Max */}
       <Card className="mb-4">
-        <Card.Header><HeaderWithFeedback title="Overall GMV Max Performance" section="gmv_max" /></Card.Header>
+        <Card.Header><HeaderWithFeedback title="Overall GMV Max Performance" section="gmv_max" extra={
+          <Button size="sm" variant="outline-info" disabled={fetchingGmv}
+            onClick={fetchGmvMaxFromBrand}
+            title={`Pull weekly entry from the brand's GMV Max page for ${formatRange(report.week_start, report.week_end)}`}>
+            <i className="bi bi-cloud-download me-1" />
+            {fetchingGmv ? 'Fetching…' : 'Fetch from brand'}
+          </Button>
+        } /></Card.Header>
         <Card.Body>
+          {gmvFetchMsg && (
+            <Alert variant={gmvFetchMsg.kind} className="py-2 small mb-3" onClose={() => setGmvFetchMsg(null)} dismissible>
+              {gmvFetchMsg.text}
+            </Alert>
+          )}
           <Row className="g-3">
             <Col md={3}>
               <Form.Check type="switch" id="gm-not-started"
@@ -369,15 +521,15 @@ export default function WeeklyReportEdit() {
             {!gm.not_yet_started && (
               <>
                 <Col md={3}><Form.Label className="small">Ad Spend ($)</Form.Label>
-                  <Form.Control type="number" step="0.01" value={gm.ad_spend || ''} onChange={e => setGM('ad_spend', num(e.target.value))} /></Col>
+                  <NumberInput step="0.01" value={gm.ad_spend} onChange={n => setGM('ad_spend', n)} /></Col>
                 <Col md={3}><Form.Label className="small">ROI</Form.Label>
-                  <Form.Control type="number" step="0.01" value={gm.roi || ''} onChange={e => setGM('roi', num(e.target.value))} /></Col>
+                  <NumberInput step="0.01" value={gm.roi} onChange={n => setGM('roi', n)} /></Col>
                 <Col md={3}><Form.Label className="small">Orders</Form.Label>
-                  <Form.Control type="number" value={gm.orders || ''} onChange={e => setGM('orders', num(e.target.value))} /></Col>
+                  <NumberInput value={gm.orders} onChange={n => setGM('orders', n)} /></Col>
                 <Col md={3}><Form.Label className="small">CPO ($)</Form.Label>
-                  <Form.Control type="number" step="0.01" value={gm.cpo || ''} onChange={e => setGM('cpo', num(e.target.value))} /></Col>
+                  <NumberInput step="0.01" value={gm.cpo} onChange={n => setGM('cpo', n)} /></Col>
                 <Col md={3}><Form.Label className="small">GMV ($)</Form.Label>
-                  <Form.Control type="number" step="0.01" value={gm.gmv || ''} onChange={e => setGM('gmv', num(e.target.value))} /></Col>
+                  <NumberInput step="0.01" value={gm.gmv} onChange={n => setGM('gmv', n)} /></Col>
                 <Col md={6}><Form.Label className="small">Notes</Form.Label>
                   <Form.Control value={gm.notes} onChange={e => setGM('notes', e.target.value)} /></Col>
               </>
@@ -405,10 +557,10 @@ export default function WeeklyReportEdit() {
               <tr key={i}>
                 <td><Form.Control size="sm" value={r.product_name} onChange={e => updRow('product_highlights', i, { product_name: e.target.value })} /></td>
                 <td><Form.Control size="sm" value={r.product_id} onChange={e => updRow('product_highlights', i, { product_id: e.target.value })} /></td>
-                <td><Form.Control size="sm" type="number" value={r.total_units_sold || ''} onChange={e => updRow('product_highlights', i, { total_units_sold: num(e.target.value) })} /></td>
-                <td><Form.Control size="sm" type="number" value={r.affiliate_units_sold || ''} onChange={e => updRow('product_highlights', i, { affiliate_units_sold: num(e.target.value) })} /></td>
-                <td><Form.Control size="sm" type="number" step="0.01" value={r.total_gmv || ''} onChange={e => updRow('product_highlights', i, { total_gmv: num(e.target.value) })} /></td>
-                <td><Form.Control size="sm" type="number" value={r.videos_posted || ''} onChange={e => updRow('product_highlights', i, { videos_posted: num(e.target.value) })} /></td>
+                <td><NumberInput size="sm" value={r.total_units_sold} onChange={n => updRow('product_highlights', i, { total_units_sold: n })} /></td>
+                <td><NumberInput size="sm" value={r.affiliate_units_sold} onChange={n => updRow('product_highlights', i, { affiliate_units_sold: n })} /></td>
+                <td><NumberInput size="sm" step="0.01" value={r.total_gmv} onChange={n => updRow('product_highlights', i, { total_gmv: n })} /></td>
+                <td><NumberInput size="sm" value={r.videos_posted} onChange={n => updRow('product_highlights', i, { videos_posted: n })} /></td>
                 <td>
                   <Form.Select size="sm" value={r.listing_quality}
                     onChange={e => updRow('product_highlights', i, { listing_quality: e.target.value as ListingQuality })}>
@@ -500,18 +652,18 @@ export default function WeeklyReportEdit() {
           <Offcanvas.Title>
             <i className="bi bi-chat-left-text me-2" />
             Client feedback
-            {feedbackSection && <small className="text-muted ms-2 fw-normal">— {SECTION_LABELS[feedbackSection]}</small>}
+            {feedbackSection && <small className="text-muted ms-2 fw-normal">— {labelForFeedback(feedbackSection)}</small>}
           </Offcanvas.Title>
         </Offcanvas.Header>
         <Offcanvas.Body>
           {feedbackSection && (
             <SectionComments
               section={feedbackSection}
+              sectionLabel={labelForFeedback(feedbackSection)}
               comments={comments}
               mode="authed"
               currentAuthorName={profile?.full_name || profile?.email || 'User'}
               onAdd={(b, n, parentId) => addComment(feedbackSection, b, n, parentId)}
-              onDelete={delComment}
             />
           )}
         </Offcanvas.Body>

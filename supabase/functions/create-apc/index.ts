@@ -37,7 +37,7 @@ serve(async (req) => {
     }
 
     // 2. Parse + validate body
-    const { email, password, full_name, brand_ids } = await req.json();
+    const { email, password, full_name, brand_ids, can_edit_brands, can_manage_gmv_max } = await req.json();
     if (!email || !password || !Array.isArray(brand_ids)) {
       return json({ error: 'email, password, brand_ids required' }, 400);
     }
@@ -62,6 +62,8 @@ serve(async (req) => {
         email,
         full_name: full_name ?? '',
         role: 'apc',
+        can_edit_brands: !!can_edit_brands,
+        can_manage_gmv_max: !!can_manage_gmv_max,
       });
     if (profErr) return json({ error: profErr.message }, 400);
 

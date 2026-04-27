@@ -2,6 +2,7 @@ import { useState, FormEvent } from 'react';
 import { Card, Form, Button, Row, Col, Table, Modal, Badge } from 'react-bootstrap';
 import { CustomField, CustomFieldType, CustomSection, StandardSectionId } from '../lib/reportSchema';
 import RichTextEditor from './RichTextEditor';
+import NumberInput from './NumberInput';
 
 const TYPE_LABELS: Partial<Record<CustomFieldType, string>> = {
   text: 'Short text', number: 'Number', textarea: 'Long text',
@@ -23,12 +24,13 @@ export const POSITION_LABELS: Record<StandardSectionId, string> = {
 /* ------------------ Inline render of one custom section ------------------ */
 
 export function CustomSectionInline({
-  section, onChange, onEditDef, onRemove,
+  section, onChange, onEditDef, onRemove, headerExtra,
 }: {
   section: CustomSection;
   onChange: (patch: Partial<CustomSection>) => void;
   onEditDef: () => void;
   onRemove: () => void;
+  headerExtra?: React.ReactNode;
 }) {
   const addRow = () => {
     const row: Record<string, any> = {};
@@ -42,13 +44,6 @@ export function CustomSectionInline({
     onChange({ rows: section.rows.filter((_, idx) => idx !== i) });
   };
 
-  // Ensure single-entry sections have exactly one row
-  if (!section.is_repeater && section.rows.length === 0) {
-    const row: Record<string, any> = {};
-    section.fields.forEach(f => { row[f.id] = f.type === 'number' ? 0 : ''; });
-    setTimeout(() => onChange({ rows: [row] }), 0);
-  }
-
   return (
     <Card className="mb-4">
       <Card.Header className="d-flex justify-content-between align-items-center">
@@ -56,7 +51,7 @@ export function CustomSectionInline({
           <span className="fw-semibold">{section.name}</span>
           {section.description && <div className="text-muted small">{section.description}</div>}
         </div>
-        <div className="d-flex gap-2">
+        <div className="d-flex gap-2 align-items-center">
           {section.is_repeater && (
             <Button size="sm" variant="outline-primary" onClick={addRow}>
               <i className="bi bi-plus-lg me-1" />Add row
@@ -68,6 +63,7 @@ export function CustomSectionInline({
           <Button size="sm" variant="outline-danger" onClick={onRemove} title="Delete section">
             <i className="bi bi-trash" />
           </Button>
+          {headerExtra}
         </div>
       </Card.Header>
       <Card.Body className={section.is_repeater ? 'p-2' : undefined}>
@@ -101,18 +97,12 @@ export function CustomSectionInline({
                 </tbody>
               </Table>
         ) : (
-          <Row className="g-3">
-            {section.fields.map(f => (
-              <Col md={f.type === 'textarea' || f.type === 'richtext' ? 12 : 4} key={f.id}>
-                <Form.Label className="small">{f.label}</Form.Label>
-                <FieldInput
-                  field={f}
-                  value={section.rows[0]?.[f.id]}
-                  onChange={v => onChange({ rows: [{ ...(section.rows[0] ?? {}), [f.id]: v }] })}
-                />
-              </Col>
-            ))}
-          </Row>
+          <RichTextEditor
+            value={section.body ?? ''}
+            onChange={html => onChange({ body: html })}
+            placeholder={`Write ${section.name || 'this section'}…`}
+            minHeight={200}
+          />
         )}
       </Card.Body>
     </Card>
@@ -130,7 +120,7 @@ function FieldInput({ field, value, onChange, size }: {
   const common = { size } as any;
   switch (field.type) {
     case 'number':
-      return <Form.Control {...common} type="number" step="0.01" value={value || ''} onChange={e => onChange(e.target.value === '' ? 0 : Number(e.target.value))} />;
+      return <NumberInput {...common} step="0.01" value={typeof value === 'number' ? value : (value === '' || value == null ? 0 : Number(value))} onChange={n => onChange(n)} />;
     case 'date':
       return <Form.Control {...common} type="date" value={value ?? ''} onChange={e => onChange(e.target.value)} />;
     case 'url':
@@ -182,7 +172,9 @@ export function CustomSectionDefModal({
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!draft.name.trim()) { alert('Section name is required.'); return; }
-    if (draft.fields.length === 0) { alert('Add at least one field.'); return; }
+    if (draft.is_repeater && draft.fields.length === 0) {
+      alert('Table sections need at least one column.'); return;
+    }
     // Finalize options: parse raw text strings now
     const cleanedFields: CustomField[] = draft.fields.map(f => {
       if (f.type !== 'select') return { ...f, options: undefined };
@@ -205,10 +197,10 @@ export function CustomSectionDefModal({
               <Form.Control required placeholder="e.g. Offsite Data" value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} />
             </Col>
             <Col md={6}>
-              <Form.Label className="small">Entry mode</Form.Label>
-              <Form.Select value={draft.is_repeater ? 'repeater' : 'single'} onChange={e => setDraft({ ...draft, is_repeater: e.target.value === 'repeater' })}>
-                <option value="single">Single entry (one set of fields)</option>
-                <option value="repeater">Repeater — multiple rows (like a table)</option>
+              <Form.Label className="small">Section type</Form.Label>
+              <Form.Select value={draft.is_repeater ? 'table' : 'text'} onChange={e => setDraft({ ...draft, is_repeater: e.target.value === 'table' })}>
+                <option value="text">Long text — heading + rich-text body (like Insights)</option>
+                <option value="table">Table — multiple rows with custom columns</option>
               </Form.Select>
             </Col>
             <Col md={12}>
@@ -227,7 +219,9 @@ export function CustomSectionDefModal({
             </Col>
           </Row>
 
-          <h6 className="mt-3">Fields</h6>
+          {draft.is_repeater && (
+            <>
+          <h6 className="mt-3">Columns</h6>
           <Table size="sm" className="align-middle">
             <thead>
               <tr>
@@ -263,7 +257,15 @@ export function CustomSectionDefModal({
               ))}
             </tbody>
           </Table>
-          <Button size="sm" variant="outline-primary" onClick={addField}><i className="bi bi-plus-lg me-1" />Add field</Button>
+          <Button size="sm" variant="outline-primary" onClick={addField}><i className="bi bi-plus-lg me-1" />Add column</Button>
+            </>
+          )}
+          {!draft.is_repeater && (
+            <p className="text-muted small mt-3 mb-0">
+              <i className="bi bi-info-circle me-1" />
+              This section will show as a heading + a rich-text body (similar to Insights). You can edit the body when filling out a report.
+            </p>
+          )}
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={onHide}>Cancel</Button>
@@ -282,6 +284,7 @@ export function newSection(insertAfter: StandardSectionId = 'insights'): CustomS
     name: '',
     description: '',
     is_repeater: false,
+    body: '',
     fields: [],
     rows: [],
     insert_after: insertAfter,

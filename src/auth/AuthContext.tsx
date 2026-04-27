@@ -9,6 +9,8 @@ export interface Profile {
   email: string;
   full_name: string | null;
   role: AppRole;
+  can_edit_brands?: boolean;
+  can_manage_gmv_max?: boolean;
 }
 
 interface AuthCtx {
