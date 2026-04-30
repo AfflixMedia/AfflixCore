@@ -117,7 +117,7 @@ export default function ReportDashboard({
     ));
 
   return (
-    <>
+    <div className="ac-themed">
       {!hasPrev && <Alert variant="warning" className="py-2">No previous week — single-week view (no comparison).</Alert>}
 
       {renderCustomAt('start')}
@@ -176,8 +176,8 @@ export default function ReportDashboard({
                   <YAxis />
                   <Tooltip />
                   <Legend />
-                  <Bar dataKey="This Week" fill="#2563eb" radius={[6,6,0,0]} />
-                  <Bar dataKey="Last Week" fill="#94a3b8" radius={[6,6,0,0]} />
+                  <Bar dataKey="This Week" fill="#e8862e" radius={[6,6,0,0]} />
+                  <Bar dataKey="Last Week" fill="#6e6e80" radius={[6,6,0,0]} />
                 </BarChart>
               </ResponsiveContainer>
             </Card.Body>
@@ -224,8 +224,8 @@ export default function ReportDashboard({
                 <YAxis />
                 <Tooltip />
                 <Legend />
-                <Line type="monotone" dataKey="GMV" stroke="#2563eb" strokeWidth={3} dot={{ r: 4 }} />
-                <Line type="monotone" dataKey="Affiliate GMV" stroke="#10b981" strokeWidth={3} dot={{ r: 4 }} />
+                <Line type="monotone" dataKey="GMV" stroke="#e8862e" strokeWidth={3} dot={{ r: 4 }} />
+                <Line type="monotone" dataKey="Affiliate GMV" stroke="#ffbe76" strokeWidth={3} dot={{ r: 4 }} />
               </LineChart>
             </ResponsiveContainer>
           </Card.Body>
@@ -241,16 +241,21 @@ export default function ReportDashboard({
           {c.top_creators.length === 0 ? <p className="text-muted text-center py-3 mb-0 small">No creators</p> : (
             <Table size="sm" className="mb-0 align-middle">
               <thead><tr>
-                <th>Creator</th><th className="text-end">Videos</th><th className="text-end">Items</th><th className="text-end">GMV</th><th>Notes</th>
+                <th>Creator</th><th className="text-end">Videos</th><th className="text-end">Items sold</th><th className="text-end">GMV</th>
               </tr></thead>
               <tbody>
                 {c.top_creators.map((r, i) => (
                   <tr key={i}>
-                    <td className="fw-semibold">{r.name}</td>
+                    <td className="fw-semibold">
+                      {r.name ? (
+                        <a href={tiktokLink(r.name)} target="_blank" rel="noreferrer" title="Open creator on TikTok">
+                          {r.name}
+                        </a>
+                      ) : '—'}
+                    </td>
                     <td className="text-end">{r.videos}</td>
                     <td className="text-end">{r.items_sold}</td>
                     <td className="text-end">${r.gmv.toLocaleString()}</td>
-                    <td className="small text-muted">{r.notes}</td>
                   </tr>
                 ))}
               </tbody>
@@ -380,7 +385,7 @@ export default function ReportDashboard({
       {renderCustomAt('insights')}
 
       {/* Custom Sections */}
-    </>
+    </div>
   );
 }
 
@@ -434,7 +439,7 @@ function VideosTable({ rows }: { rows: WeeklyReportContent['top_videos'] }) {
   return (
     <Table size="sm" className="mb-0 align-middle">
       <thead><tr>
-        <th>Creator</th><th className="text-end">Items</th><th className="text-end">GMV</th>
+        <th>Creator</th><th className="text-end">Items sold</th><th className="text-end">GMV</th>
       </tr></thead>
       <tbody>
         {rows.map((r, i) => (
@@ -451,10 +456,15 @@ function VideosTable({ rows }: { rows: WeeklyReportContent['top_videos'] }) {
   );
 }
 
+function tiktokLink(handle: string): string {
+  const clean = handle.trim().replace(/^@+/, '').replace(/\s+/g, '');
+  return `https://www.tiktok.com/@${encodeURIComponent(clean)}`;
+}
+
 function spsColor(v: number) {
-  if (v >= 4.5) return '#10b981';
-  if (v >= 3.5) return '#f59e0b';
-  if (v > 0)    return '#ef4444';
+  if (v >= 4.5) return '#10b981';   // success
+  if (v >= 3.5) return '#e8862e';   // brand orange (afflixmedia.com)
+  if (v > 0)    return '#ef4444';   // warning
   return '#cbd5e1';
 }
 
@@ -464,9 +474,9 @@ function KpiCard({ label, value, prev, cur, money, dec, sub }: {
 }) {
   return (
     <Col md={4} lg={2}>
-      <Card className="h-100 shadow-sm" style={{ borderLeft: '4px solid #2563eb' }}>
+      <Card className="h-100 shadow-sm" style={{ borderLeft: '4px solid #e8862e' }}>
         <Card.Body className="py-3">
-          <div className="text-muted small text-uppercase" style={{ letterSpacing: '.5px', fontSize: '.7rem' }}>{label}</div>
+          <div className="ac-label">{label}</div>
           <div className="fs-4 fw-bold mt-1">{value}</div>
           <Delta cur={cur} prev={prev} money={money} dec={dec} />
           {sub && <small className="text-muted d-block mt-1">{sub}</small>}
@@ -487,7 +497,7 @@ function MiniStat({ label, cur, prev, money, dec, suffix }: {
   return (
     <Col md={3}>
       <div className="p-3 rounded" style={{ background: '#f8fafc', border: '1px solid #e5e7eb' }}>
-        <div className="text-muted small text-uppercase" style={{ letterSpacing: '.5px', fontSize: '.7rem' }}>{label}</div>
+        <div className="ac-label">{label}</div>
         <div className="fs-5 fw-semibold mt-1">{fmt(cur)}</div>
         <Delta cur={cur} prev={prev} money={money} dec={dec} />
       </div>
@@ -527,7 +537,7 @@ function RatingCell({ label, value }: { label: string; value: number | null }) {
   return (
     <Col md={3}>
       <div className="p-3 rounded h-100" style={{ background: '#f8fafc', border: '1px solid #e5e7eb' }}>
-        <div className="text-muted small">{label}</div>
+        <div className="ac-mini-label">{label}</div>
         {value == null
           ? <div className="text-muted small mt-1">Not yet rated</div>
           : <div className="fs-4 fw-bold mt-1" style={{ color: spsColor(value) }}>{value.toFixed(1)}<small className="text-muted fs-6 ms-1">/5</small></div>}
@@ -546,7 +556,7 @@ function StatusCell({ label, value }: { label: string; value: 'yes' | 'no' | 'no
   return (
     <Col md={3}>
       <div className="p-3 rounded h-100" style={{ background: '#f8fafc', border: '1px solid #e5e7eb' }}>
-        <div className="text-muted small">{label}</div>
+        <div className="ac-mini-label">{label}</div>
         <div className="mt-1">
           <Badge bg={m.bg} className="fs-6"><i className={`bi ${m.icon} me-1`} />{m.text}</Badge>
         </div>
@@ -559,7 +569,7 @@ function FlagCell({ label, on }: { label: string; on: boolean }) {
   return (
     <Col md={3}>
       <div className="p-3 rounded h-100" style={{ background: '#f8fafc', border: '1px solid #e5e7eb' }}>
-        <div className="text-muted small">{label}</div>
+        <div className="ac-mini-label">{label}</div>
         <div className="mt-1">
           <Badge bg={on ? 'danger' : 'success'} className="fs-6">
             <i className={`bi ${on ? 'bi-exclamation-triangle' : 'bi-check-circle'} me-1`} />{on ? 'Yes' : 'No'}

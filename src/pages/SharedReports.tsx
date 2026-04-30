@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Card, Spinner, Alert, Form, Row, Col, Badge, Button, Tab, Nav } from 'react-bootstrap';
+import { Card, Spinner, Alert, Form, Row, Col, Badge, Button, Tab, Nav, Offcanvas } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import { addDays, formatRange, formatHuman, fromISO } from '../lib/dates';
 import { WeeklyReportContent, normalizeContent } from '../lib/reportSchema';
 import ReportDashboard, { TrendPoint } from '../components/ReportDashboard';
 import { Comment, CommentSection } from '../components/SectionComments';
 import { resourceIcon } from '../lib/resourceIcon';
+import ResourceComments, { ResourceComment } from '../components/ResourceComments';
 
 interface Brand { id: string; name: string; client: string | null; client_id: string | null; }
 interface Report {
@@ -22,6 +23,8 @@ export default function SharedReports() {
   const [reports, setReports] = useState<Report[]>([]);
   const [resources, setResources] = useState<SharedResource[]>([]);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [resourceComments, setResourceComments] = useState<ResourceComment[]>([]);
+  const [feedbackResource, setFeedbackResource] = useState<SharedResource | null>(null);
   const [publicName, setPublicName] = useState<string>(localStorage.getItem('ac_public_name') ?? '');
   const [label, setLabel] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -31,6 +34,9 @@ export default function SharedReports() {
   const [activeTab, setActiveTab] = useState<'reporting' | 'resources'>('reporting');
   const [month, setMonth] = useState(currentMonth());
   const [openId, setOpenId] = useState<string | null>(null);
+  const [includeReports, setIncludeReports] = useState(true);
+  const [includeResources, setIncludeResources] = useState(true);
+  const [linkMode, setLinkMode] = useState<'brand' | 'general'>('brand');
 
   useEffect(() => {
     (async () => {
@@ -46,7 +52,15 @@ export default function SharedReports() {
         setReports(data.reports);
         setResources(data.resources ?? []);
         setComments(data.comments ?? []);
+        setResourceComments(data.resource_comments ?? []);
         setLabel(data.label);
+        const ir = data.include_reports !== false;
+        const ix = data.include_resources !== false;
+        setIncludeReports(ir);
+        setIncludeResources(ix);
+        setLinkMode(data.link_mode === 'general' ? 'general' : 'brand');
+        // If reports are excluded, default landing tab to resources
+        if (!ir && ix) setActiveTab('resources');
         if (data.brands?.length > 0) setActiveBrandId(data.brands[0].id);
       } catch (e: any) {
         setErr(e?.message ?? 'Failed to load');
@@ -111,16 +125,35 @@ export default function SharedReports() {
 
   const reportComments = openReport ? comments.filter(c => c.report_id === openReport.id) : [];
 
+  const addResourceComment = async (body: string, authorName: string, parentId?: string) => {
+    if (!feedbackResource) return;
+    const { data, error } = await supabase.functions.invoke('post-shared-resource-comment', {
+      body: { token, resource_id: feedbackResource.id, author_name: authorName, body, parent_id: parentId },
+    });
+    if (error) throw error;
+    if ((data as any)?.error) throw new Error((data as any).error);
+    setResourceComments(prev => [...prev, (data as any).comment as ResourceComment]);
+    setPublicName(authorName);
+  };
+  const resourceCommentCount = (rid: string) => resourceComments.filter(c => c.resource_id === rid).length;
+
   // Report detail view
   if (openReport && activeBrand) {
+    // Reports for this brand are sorted desc by week_start (newest first).
+    const sameBrand = reports.filter(r => r.brand_id === activeBrand.id);
+    const idx = sameBrand.findIndex(r => r.id === openReport.id);
+    const newer = idx > 0 ? sameBrand[idx - 1] : null;          // index-1 is more recent
+    const older = idx >= 0 && idx < sameBrand.length - 1 ? sameBrand[idx + 1] : null;
     return (
       <PublicShell clientName={clientName}>
-        <div className="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
-          <div>
+        <div className="d-flex align-items-start gap-3 mb-4 flex-wrap">
+          <button type="button" className="ac-back-btn" onClick={() => setOpenId(null)}>
+            <i className="bi bi-arrow-left" /> Back
+          </button>
+          <div className="flex-grow-1 min-w-0">
             <div className="text-muted small">{activeBrand.name}</div>
             <h4 className="mb-0">Week #{openReport.week_number} — {formatRange(openReport.week_start, openReport.week_end)}</h4>
           </div>
-          <Button variant="outline-secondary" onClick={() => setOpenId(null)}>← Back</Button>
         </div>
         <ReportDashboard
           c={normalizeContent(openReport.content)}
@@ -135,6 +168,32 @@ export default function SharedReports() {
             onAdd: addComment,
           }}
         />
+        <div className="ac-report-nav">
+          <button
+            type="button"
+            className="ac-nav-arrow-btn"
+            onClick={() => older && setOpenId(older.id)}
+            disabled={!older}
+          >
+            <i className="bi bi-arrow-left" />
+            <span className="ac-nav-arrow-label">
+              <span className="ac-nav-arrow-hint">Previous</span>
+              <span>{older ? `Week #${older.week_number}` : 'No earlier report'}</span>
+            </span>
+          </button>
+          <button
+            type="button"
+            className="ac-nav-arrow-btn"
+            onClick={() => newer && setOpenId(newer.id)}
+            disabled={!newer}
+          >
+            <span className="ac-nav-arrow-label" style={{ alignItems: 'flex-end' }}>
+              <span className="ac-nav-arrow-hint">Next</span>
+              <span>{newer ? `Week #${newer.week_number}` : 'No later report'}</span>
+            </span>
+            <i className="bi bi-arrow-right" />
+          </button>
+        </div>
       </PublicShell>
     );
   }
@@ -142,6 +201,96 @@ export default function SharedReports() {
   const brandReportCount = (brandId: string) => reports.filter(r => r.brand_id === brandId).length;
   const brandResourceCount = (brandId: string) =>
     resources.filter(r => (r.scope === 'brand' && r.brand_id === brandId) || r.scope === 'general').length;
+
+  // General-mode: a flat shared-files page (no brand tiles, no tabs).
+  if (linkMode === 'general') {
+    return (
+      <PublicShell clientName={clientName}>
+        {label && <div className="text-muted small mb-3">{label}</div>}
+        <Card className="shadow-sm border-0">
+          <Card.Header className="bg-white border-0 pt-3 pb-2">
+            <h5 className="mb-0">
+              <i className="bi bi-folder2-open me-2" /> Shared files
+              <Badge bg="secondary" className="ms-2">{resources.length}</Badge>
+            </h5>
+            <small className="text-muted">Click a file to open it. Use Comment to leave feedback.</small>
+          </Card.Header>
+          <Card.Body>
+            {resources.length === 0 ? (
+              <div className="text-center py-5 text-muted">
+                <i className="bi bi-folder-x" style={{ fontSize: '2rem' }} /><br />
+                Nothing shared on this link yet.
+              </div>
+            ) : (
+              <Row className="g-3">
+                {resources.map(r => {
+                  const ic = resourceIcon(r.url);
+                  const cmtCount = resourceCommentCount(r.id);
+                  return (
+                    <Col md={6} lg={4} key={r.id}>
+                      <div
+                        className="d-flex flex-column gap-2 p-3 rounded h-100"
+                        style={{ background: 'white', border: '1px solid #e5e7eb' }}
+                      >
+                        <div className="d-flex align-items-center gap-3">
+                          <div style={{
+                            width: 44, height: 44, borderRadius: 10,
+                            background: `${ic.color}15`,
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            flexShrink: 0,
+                          }}>
+                            <i className={`bi ${ic.icon}`} style={{ color: ic.color, fontSize: '1.3rem' }} />
+                          </div>
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div className="fw-semibold text-truncate">{r.name}</div>
+                            <small className="text-muted">{ic.label}</small>
+                            {r.description && (
+                              <small className="text-muted d-block mt-1 text-truncate">{r.description}</small>
+                            )}
+                          </div>
+                        </div>
+                        <div className="d-flex justify-content-between align-items-center mt-1">
+                          <a href={r.url} target="_blank" rel="noreferrer" className="btn btn-sm btn-outline-primary">
+                            Open <i className="bi bi-box-arrow-up-right ms-1" />
+                          </a>
+                          <Button size="sm" variant="outline-info" onClick={() => setFeedbackResource(r)}>
+                            <i className="bi bi-chat-left-text me-1" />
+                            {cmtCount > 0 ? `${cmtCount} comment${cmtCount === 1 ? '' : 's'}` : 'Comment'}
+                          </Button>
+                        </div>
+                      </div>
+                    </Col>
+                  );
+                })}
+              </Row>
+            )}
+          </Card.Body>
+        </Card>
+
+        <Offcanvas show={!!feedbackResource} onHide={() => setFeedbackResource(null)} placement="end" style={{ width: 480 }}>
+          <Offcanvas.Header closeButton>
+            <Offcanvas.Title>
+              <i className="bi bi-chat-left-text me-2" />
+              Comments
+              {feedbackResource && <small className="text-muted ms-2 fw-normal">— {feedbackResource.name}</small>}
+            </Offcanvas.Title>
+          </Offcanvas.Header>
+          <Offcanvas.Body>
+            {feedbackResource && (
+              <ResourceComments
+                resourceId={feedbackResource.id}
+                resourceName={feedbackResource.name}
+                comments={resourceComments}
+                mode="public"
+                defaultPublicName={publicName}
+                onAdd={addResourceComment}
+              />
+            )}
+          </Offcanvas.Body>
+        </Offcanvas>
+      </PublicShell>
+    );
+  }
 
   return (
     <PublicShell clientName={clientName}>
@@ -186,18 +335,22 @@ export default function SharedReports() {
           <Card className="shadow-sm border-0">
             <Card.Header className="bg-white border-0 pt-3 pb-0">
               <Nav variant="tabs" className="border-0">
-                <Nav.Item>
-                  <Nav.Link eventKey="reporting" className="d-flex align-items-center gap-2 px-3">
-                    <i className="bi bi-bar-chart-line" /> Reporting
-                    <Badge bg="secondary">{brandReports.length}</Badge>
-                  </Nav.Link>
-                </Nav.Item>
-                <Nav.Item>
-                  <Nav.Link eventKey="resources" className="d-flex align-items-center gap-2 px-3">
-                    <i className="bi bi-folder2" /> Resources
-                    <Badge bg="secondary">{brandResources.length}</Badge>
-                  </Nav.Link>
-                </Nav.Item>
+                {includeReports && (
+                  <Nav.Item>
+                    <Nav.Link eventKey="reporting" className="d-flex align-items-center gap-2 px-3">
+                      <i className="bi bi-bar-chart-line" /> Reporting
+                      <Badge bg="secondary">{brandReports.length}</Badge>
+                    </Nav.Link>
+                  </Nav.Item>
+                )}
+                {includeResources && (
+                  <Nav.Item>
+                    <Nav.Link eventKey="resources" className="d-flex align-items-center gap-2 px-3">
+                      <i className="bi bi-folder2" /> Resources
+                      <Badge bg="secondary">{brandResources.length}</Badge>
+                    </Nav.Link>
+                  </Nav.Item>
+                )}
               </Nav>
             </Card.Header>
             <Card.Body>
@@ -265,10 +418,11 @@ export default function SharedReports() {
                     <Row className="g-3">
                       {brandResources.map(r => {
                         const ic = resourceIcon(r.url);
+                        const cmtCount = resourceCommentCount(r.id);
                         return (
                           <Col md={6} lg={4} key={r.id}>
-                            <a href={r.url} target="_blank" rel="noreferrer"
-                              className="d-flex align-items-center gap-3 p-3 rounded text-decoration-none text-dark h-100"
+                            <div
+                              className="d-flex flex-column gap-2 p-3 rounded h-100"
                               style={{
                                 background: 'white',
                                 border: '1px solid #e5e7eb',
@@ -287,26 +441,37 @@ export default function SharedReports() {
                                 el.style.borderColor = '#e5e7eb';
                               }}
                             >
-                              <div style={{
-                                width: 44, height: 44, borderRadius: 10,
-                                background: `${ic.color}15`,
-                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                                flexShrink: 0,
-                              }}>
-                                <i className={`bi ${ic.icon}`} style={{ color: ic.color, fontSize: '1.3rem' }} />
-                              </div>
-                              <div style={{ minWidth: 0, flex: 1 }}>
-                                <div className="fw-semibold text-truncate">{r.name}</div>
-                                <div className="d-flex align-items-center gap-2 mt-1">
-                                  <small className="text-muted">{ic.label}</small>
-                                  {r.scope === 'general' && <><span className="text-muted">·</span><small className="text-muted">General</small></>}
+                              <div className="d-flex align-items-center gap-3">
+                                <div style={{
+                                  width: 44, height: 44, borderRadius: 10,
+                                  background: `${ic.color}15`,
+                                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                  flexShrink: 0,
+                                }}>
+                                  <i className={`bi ${ic.icon}`} style={{ color: ic.color, fontSize: '1.3rem' }} />
                                 </div>
-                                {r.description && (
-                                  <small className="text-muted d-block mt-1 text-truncate">{r.description}</small>
-                                )}
+                                <div style={{ minWidth: 0, flex: 1 }}>
+                                  <div className="fw-semibold text-truncate">{r.name}</div>
+                                  <div className="d-flex align-items-center gap-2 mt-1">
+                                    <small className="text-muted">{ic.label}</small>
+                                    {r.scope === 'general' && <><span className="text-muted">·</span><small className="text-muted">General</small></>}
+                                  </div>
+                                  {r.description && (
+                                    <small className="text-muted d-block mt-1 text-truncate">{r.description}</small>
+                                  )}
+                                </div>
                               </div>
-                              <i className="bi bi-arrow-up-right-square text-muted" style={{ fontSize: '1.1rem' }} />
-                            </a>
+                              <div className="d-flex justify-content-between align-items-center mt-1">
+                                <a href={r.url} target="_blank" rel="noreferrer" className="btn btn-sm btn-outline-primary">
+                                  Open <i className="bi bi-box-arrow-up-right ms-1" />
+                                </a>
+                                <Button size="sm" variant="outline-info" onClick={() => setFeedbackResource(r)}
+                                  title={cmtCount > 0 ? `${cmtCount} comment${cmtCount === 1 ? '' : 's'}` : 'Add a comment'}>
+                                  <i className="bi bi-chat-left-text me-1" />
+                                  {cmtCount > 0 ? `${cmtCount} comment${cmtCount === 1 ? '' : 's'}` : 'Comment'}
+                                </Button>
+                              </div>
+                            </div>
                           </Col>
                         );
                       })}
@@ -318,6 +483,28 @@ export default function SharedReports() {
           </Card>
         </Tab.Container>
       )}
+
+      <Offcanvas show={!!feedbackResource} onHide={() => setFeedbackResource(null)} placement="end" style={{ width: 480 }}>
+        <Offcanvas.Header closeButton>
+          <Offcanvas.Title>
+            <i className="bi bi-chat-left-text me-2" />
+            Comments
+            {feedbackResource && <small className="text-muted ms-2 fw-normal">— {feedbackResource.name}</small>}
+          </Offcanvas.Title>
+        </Offcanvas.Header>
+        <Offcanvas.Body>
+          {feedbackResource && (
+            <ResourceComments
+              resourceId={feedbackResource.id}
+              resourceName={feedbackResource.name}
+              comments={resourceComments}
+              mode="public"
+              defaultPublicName={publicName}
+              onAdd={addResourceComment}
+            />
+          )}
+        </Offcanvas.Body>
+      </Offcanvas>
     </PublicShell>
   );
 }

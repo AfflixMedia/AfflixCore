@@ -11,3 +11,7 @@ dist
 tsconfig.tsbuildinfo
 
 .vercel
+
+# Supabase CLI artefacts
+supabase/.temp/
+supabase/.branches/

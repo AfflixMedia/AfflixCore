@@ -5,7 +5,7 @@ import { useNotifications } from '../notifications/NotificationsContext';
 import { requestNotificationPermission, subscribePush } from '../notifications/swSetup';
 import { useEffect, useState } from 'react';
 
-export default function Topbar() {
+export default function Topbar({ collapsed, onToggleSidebar }: { collapsed: boolean; onToggleSidebar: () => void }) {
   const { profile, user, signOut } = useAuth();
   const { notifications, unreadCount, markRead, markAllRead } = useNotifications();
   const nav = useNavigate();
@@ -24,7 +24,19 @@ export default function Topbar() {
 
   return (
     <div className="ac-topbar">
-      <div className="fw-semibold">Welcome{profile?.full_name ? `, ${profile.full_name}` : ''}</div>
+      <div className="d-flex align-items-center gap-3">
+        <Button
+          variant="light"
+          size="sm"
+          onClick={onToggleSidebar}
+          aria-label={collapsed ? 'Expand menu' : 'Collapse menu'}
+          title={collapsed ? 'Expand menu' : 'Collapse menu'}
+          className="ac-sidebar-toggle"
+        >
+          <i className={`bi ${collapsed ? 'bi-list' : 'bi-layout-sidebar-inset'}`} />
+        </Button>
+        <div className="fw-semibold">Welcome{profile?.full_name ? `, ${profile.full_name}` : ''}</div>
+      </div>
       <div className="d-flex align-items-center gap-2">
         <Dropdown align="end">
           <Dropdown.Toggle variant="light" size="sm" id="notif-bell" className="position-relative">

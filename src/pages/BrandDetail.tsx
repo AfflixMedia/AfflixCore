@@ -96,7 +96,7 @@ export default function BrandDetail() {
   }
 
   return (
-    <>
+    <div className="ac-themed">
       <div className="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
         <div className="d-flex align-items-center gap-2">
           <Button size="sm" variant="outline-secondary" onClick={() => nav('/brands')} title="Back to brands">
@@ -132,6 +132,6 @@ export default function BrandDetail() {
       {currentTab === 'reporting'   && <BrandReportingTab brand={brand} isBob={isBob} onShareEnabledChanged={onShareEnabledChanged} />}
       {currentTab === 'gmv-max'     && <BrandGmvMaxTab brandId={brand.id} canEdit={isBob || canManageGmvMax} />}
       {currentTab === 'paid-collab' && <BrandPaidCollabTab />}
-    </>
+    </div>
   );
 }

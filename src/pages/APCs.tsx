@@ -1,6 +1,7 @@
-import { useEffect, useState, FormEvent } from 'react';
-import { Button, Card, Modal, Form, Table, Spinner, Alert, Badge } from 'react-bootstrap';
+import { useEffect, useMemo, useState, FormEvent } from 'react';
+import { Button, Card, Modal, Form, Spinner, Alert } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
+import Avatar from '../components/Avatar';
 
 interface APC {
   id: string;
@@ -21,6 +22,7 @@ export default function APCs() {
   const [brands, setBrands] = useState<BrandLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
 
   const [show, setShow] = useState(false);
   const [editApc, setEditApc] = useState<APC | null>(null);
@@ -68,6 +70,16 @@ export default function APCs() {
 
   useEffect(() => { load(); }, []);
 
+  const filteredApcs = useMemo(() => {
+    if (!search.trim()) return apcs;
+    const q = search.trim().toLowerCase();
+    return apcs.filter(a =>
+      `${a.full_name ?? ''} ${a.email} ${(a.brand_names ?? []).join(' ')}`.toLowerCase().includes(q)
+    );
+  }, [apcs, search]);
+
+  const totalAssignments = apcs.reduce((s, a) => s + (a.brand_ids?.length ?? 0), 0);
+
   const openAdd = () => {
     setEditApc(null);
     setForm({ email: '', password: '', full_name: '', brand_ids: [], can_edit_brands: false, can_manage_gmv_max: false });
@@ -94,7 +106,6 @@ export default function APCs() {
     setSaving(true); setErr(null);
     try {
       if (editApc) {
-        // Update name, permissions + reassign brands (cannot change email/password here)
         const { error: pErr } = await supabase.from('profiles')
           .update({
             full_name: form.full_name,
@@ -110,7 +121,6 @@ export default function APCs() {
           if (iErr) throw iErr;
         }
       } else {
-        // Call edge function to create user
         const { data: { session } } = await supabase.auth.getSession();
         const { data, error } = await supabase.functions.invoke('create-apc', {
           body: {
@@ -137,70 +147,113 @@ export default function APCs() {
 
   return (
     <>
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <h2 className="mb-0">APCs</h2>
+      <div className="ac-page-header">
+        <div className="d-flex align-items-center gap-3 flex-wrap">
+          <h2>APCs</h2>
+          <span className="ac-stat-pill">
+            <span className="ac-stat-num">{apcs.length}</span>
+            <span className="ac-stat-label">account manager{apcs.length === 1 ? '' : 's'}</span>
+          </span>
+          {totalAssignments > 0 && (
+            <span className="ac-stat-pill">
+              <span className="ac-stat-num">{totalAssignments}</span>
+              <span className="ac-stat-label">brand assignment{totalAssignments === 1 ? '' : 's'}</span>
+            </span>
+          )}
+        </div>
         <Button onClick={openAdd}>
           <i className="bi bi-person-plus me-1" /> Add APC
         </Button>
       </div>
 
-      <Card>
-        <Card.Body>
-          {loading ? (
-            <div className="text-center py-4"><Spinner animation="border" /></div>
-          ) : err && apcs.length === 0 ? (
-            <Alert variant="danger">{err}</Alert>
-          ) : apcs.length === 0 ? (
-            <p className="text-muted mb-0 text-center py-4">No APCs yet. Add your first one.</p>
-          ) : (
-            <Table hover responsive className="align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Assign Brands</th>
-                  <th style={{ width: 160 }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {apcs.map(a => (
-                  <tr key={a.id}>
-                    <td className="fw-semibold">{a.full_name || '—'}</td>
-                    <td>{a.email}</td>
-                    <td>
-                      {(a.brand_names ?? []).length === 0
-                        ? <span className="text-muted">None</span>
-                        : a.brand_names!.map(n => <Badge key={n} bg="info" className="me-1">{n}</Badge>)}
-                      {a.can_edit_brands && (
-                        <Badge bg="warning" text="dark" className="ms-1" title="Can edit brand details">
-                          <i className="bi bi-pencil-square" /> editor
-                        </Badge>
-                      )}
-                      {a.can_manage_gmv_max && (
-                        <Badge bg="primary" className="ms-1" title="Can manage GMV Max budgets">
-                          <i className="bi bi-graph-up" /> gmv max
-                        </Badge>
-                      )}
-                    </td>
-                    <td className="text-end text-nowrap">
-                      <Button size="sm" variant="outline-secondary" className="me-2" onClick={() => { setPwApc(a); setNewPw(''); setPwErr(null); setPwOk(false); }}
-                        title="Reset password">
-                        <i className="bi bi-key" />
-                      </Button>
-                      <Button size="sm" variant="outline-primary" className="me-2" onClick={() => openEdit(a)} title="Edit">
-                        <i className="bi bi-pencil" />
-                      </Button>
-                      <Button size="sm" variant="outline-danger" onClick={() => { setDelApc(a); setDelErr(null); }} title="Delete APC">
-                        <i className="bi bi-trash" />
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
+      {apcs.length > 0 && (
+        <div className="ac-search mb-3">
+          <i className="bi bi-search" />
+          <input
+            placeholder="Search by name, email, or brand…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+          {search && (
+            <button type="button" className="btn btn-link p-0 text-muted" onClick={() => setSearch('')}>
+              <i className="bi bi-x-lg" />
+            </button>
           )}
-        </Card.Body>
-      </Card>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="text-center py-4"><Spinner animation="border" /></div>
+      ) : err && apcs.length === 0 ? (
+        <Alert variant="danger">{err}</Alert>
+      ) : apcs.length === 0 ? (
+        <Card>
+          <Card.Body>
+            <div className="ac-empty">
+              <div className="ac-empty-icon"><i className="bi bi-people" /></div>
+              <h5>No APCs yet</h5>
+              <p>Add your first account manager. They'll be able to sign in and manage the brands you assign to them.</p>
+              <Button className="mt-3" onClick={openAdd}>
+                <i className="bi bi-person-plus me-1" /> Add APC
+              </Button>
+            </div>
+          </Card.Body>
+        </Card>
+      ) : filteredApcs.length === 0 ? (
+        <Card body className="text-muted text-center py-4">
+          No APCs match "{search}".
+        </Card>
+      ) : (
+        <div className="ac-list">
+          {filteredApcs.map(a => {
+            const display = a.full_name || a.email;
+            return (
+              <div className="ac-list-row" key={a.id}>
+                <Avatar name={display} size="lg" />
+                <div className="ac-row-main">
+                  <div className="ac-row-name">{a.full_name || <span className="text-muted">No name</span>}</div>
+                  <div className="ac-row-sub d-flex align-items-center flex-wrap gap-2">
+                    <span><i className="bi bi-envelope me-1" />{a.email}</span>
+                    {a.can_edit_brands && (
+                      <span className="ac-chip warning" title="Can edit brand details">
+                        <i className="bi bi-pencil-square" /> Brand editor
+                      </span>
+                    )}
+                    {a.can_manage_gmv_max && (
+                      <span className="ac-chip" title="Can manage GMV Max budgets">
+                        <i className="bi bi-graph-up" /> GMV Max
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-2 ac-chip-group">
+                    {(a.brand_names ?? []).length === 0 ? (
+                      <span className="text-muted small fst-italic">No brands assigned</span>
+                    ) : a.brand_names!.map(n => (
+                      <span key={n} className="ac-chip neutral">
+                        <i className="bi bi-shop" /> {n}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="ac-row-actions">
+                  <button className="ac-icon-btn"
+                    onClick={() => { setPwApc(a); setNewPw(''); setPwErr(null); setPwOk(false); }}
+                    title="Reset password">
+                    <i className="bi bi-key" />
+                  </button>
+                  <button className="ac-icon-btn" onClick={() => openEdit(a)} title="Edit">
+                    <i className="bi bi-pencil" />
+                  </button>
+                  <button className="ac-icon-btn danger"
+                    onClick={() => { setDelApc(a); setDelErr(null); }} title="Delete APC">
+                    <i className="bi bi-trash" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <Modal show={show} onHide={() => setShow(false)} centered>
         <Form onSubmit={submit}>

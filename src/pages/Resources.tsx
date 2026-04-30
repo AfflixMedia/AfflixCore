@@ -1,10 +1,13 @@
 import { useEffect, useState, FormEvent, useMemo } from 'react';
-import { Button, Card, Modal, Form, Spinner, Alert, Badge, Row, Col, InputGroup } from 'react-bootstrap';
+import { useSearchParams } from 'react-router-dom';
+import { Button, Card, Modal, Form, Spinner, Alert, Badge, Row, Col, InputGroup, Offcanvas, Dropdown } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/AuthContext';
 import { resourceIcon } from '../lib/resourceIcon';
+import { useNotifications } from '../notifications/NotificationsContext';
+import ResourceComments, { ResourceComment } from '../components/ResourceComments';
 
-interface BrandLite { id: string; name: string; }
+interface BrandLite { id: string; name: string; share_enabled: boolean; }
 interface Resource {
   id: string;
   name: string;
@@ -12,13 +15,24 @@ interface Resource {
   description: string | null;
   scope: 'general' | 'brand';
   brand_id: string | null;
+  general_folder: string | null;
+  is_shared: boolean;
   created_at: string;
 }
 
 const DESC_MAX = 240;
-const GENERAL_KEY = '__general__';
+const DEFAULT_GENERAL_FOLDER = 'General';
 
-type FolderKey = string; // brand id, or GENERAL_KEY
+// Folder key encoding:
+//   b:<brand_id>   — brand folder
+//   g:<folder>     — general folder (named by Bob)
+type FolderKey = string;
+const brandKey = (id: string) => `b:${id}`;
+const generalKey = (folder: string) => `g:${folder}`;
+const folderForResource = (r: Pick<Resource, 'scope' | 'brand_id' | 'general_folder'>): FolderKey =>
+  r.scope === 'brand' && r.brand_id
+    ? brandKey(r.brand_id)
+    : generalKey((r.general_folder && r.general_folder.trim()) || DEFAULT_GENERAL_FOLDER);
 
 function brandColor(id: string) {
   // deterministic pastel from id
@@ -41,6 +55,8 @@ export default function Resources() {
   const { user, profile } = useAuth();
   const isBob = profile?.role === 'bob';
   const isApc = profile?.role === 'apc';
+  const { notifications, markRead } = useNotifications();
+  const [params, setParams] = useSearchParams();
   const [items, setItems] = useState<Resource[]>([]);
   const [brands, setBrands] = useState<BrandLite[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,20 +64,35 @@ export default function Resources() {
 
   const [show, setShow] = useState(false);
   const [editing, setEditing] = useState<Resource | null>(null);
-  const [form, setForm] = useState({ name: '', url: '', description: '', scope: 'general' as 'general' | 'brand', brand_id: '' });
+  const [form, setForm] = useState({
+    name: '', url: '', description: '',
+    scope: 'general' as 'general' | 'brand',
+    brand_id: '',
+    general_folder: '',
+  });
   const [saving, setSaving] = useState(false);
 
   const [search, setSearch] = useState('');
   const [openFolder, setOpenFolder] = useState<FolderKey | null>(null);
 
+  const [feedbackResource, setFeedbackResource] = useState<Resource | null>(null);
+  const [comments, setComments] = useState<ResourceComment[]>([]);
+  const [highlightCommentId, setHighlightCommentId] = useState<string | null>(null);
+
   const load = async () => {
     setLoading(true); setErr(null);
-    const [r, b] = await Promise.all([
+    const [r, b, c] = await Promise.all([
       supabase.from('resources').select('*').order('created_at', { ascending: false }),
-      supabase.from('brands').select('id,name').order('name'),
+      supabase.from('brands').select('id,name,share_enabled').order('name'),
+      supabase.from('resource_comments').select('*').order('created_at', { ascending: true }),
     ]);
     setBrands((b.data as BrandLite[]) ?? []);
-    setItems((r.data as Resource[]) ?? []);
+    setItems(((r.data as any[]) ?? []).map(x => ({
+      ...x,
+      is_shared: !!x.is_shared,
+      general_folder: x.general_folder ?? null,
+    })) as Resource[]);
+    setComments((c.data as ResourceComment[]) ?? []);
     if (r.error && !r.error.message?.includes('does not exist')) setErr(r.error.message);
     else if (r.error) setErr('Run the resources SQL migration in Supabase (schema_resources.sql).');
     else if (b.error) setErr(b.error.message);
@@ -70,19 +101,93 @@ export default function Resources() {
 
   useEffect(() => { load(); }, []);
 
+  // Realtime: pick up new client comments without a refresh.
+  // Dedup by id since addComment already optimistically appends the row Bob/APC just posted.
+  useEffect(() => {
+    const ch = supabase
+      .channel('resource_comments_changes')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'resource_comments' },
+        (payload) => setComments(prev => {
+          const next = payload.new as ResourceComment;
+          if (prev.some(c => c.id === next.id)) return prev;
+          return [...prev, next];
+        }))
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, []);
+
+  // Deep-link: ?resource=<id>&comment=<id> opens that resource's feedback panel
+  useEffect(() => {
+    if (loading) return;
+    const rid = params.get('resource');
+    const cid = params.get('comment');
+    if (!rid) return;
+    const r = items.find(x => x.id === rid);
+    if (!r) return;
+    setOpenFolder(folderForResource(r));
+    setFeedbackResource(r);
+    setHighlightCommentId(cid);
+    // mark related notifications read
+    notifications.forEach(n => {
+      if (!n.read_at && n.payload?.resource_id === rid) markRead(n.id);
+    });
+    // strip params so refresh doesn't re-fire
+    const next = new URLSearchParams(params);
+    next.delete('resource'); next.delete('comment');
+    setParams(next, { replace: true });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, items]);
+
+  const addComment = async (body: string, authorName: string, parentId?: string) => {
+    if (!feedbackResource || !profile) return;
+    const { data, error } = await supabase.from('resource_comments').insert({
+      resource_id: feedbackResource.id,
+      parent_id: parentId ?? null,
+      author_type: profile.role === 'bob' ? 'bob' : 'apc',
+      author_name: authorName,
+      body,
+    }).select().single();
+    if (error) throw error;
+    setComments(prev => [...prev, data as ResourceComment]);
+  };
+
+  const commentCountFor = (id: string) => comments.filter(c => c.resource_id === id).length;
+
+  const toggleShared = async (r: Resource, next: boolean) => {
+    const prev = items;
+    setItems(items.map(x => x.id === r.id ? { ...x, is_shared: next } : x));
+    const { error } = await supabase.from('resources').update({ is_shared: next }).eq('id', r.id);
+    if (error) { alert(error.message); setItems(prev); }
+  };
+
   const brandMap = useMemo(() => new Map(brands.map(b => [b.id, b.name])), [brands]);
 
   // counts per folder
   const counts = useMemo(() => {
     const m = new Map<FolderKey, number>();
     items.forEach(r => {
-      const key: FolderKey = r.scope === 'general' ? GENERAL_KEY : (r.brand_id ?? GENERAL_KEY);
+      const key = folderForResource(r);
       m.set(key, (m.get(key) ?? 0) + 1);
     });
     return m;
   }, [items]);
 
-  const folderName = (key: FolderKey) => key === GENERAL_KEY ? 'General' : (brandMap.get(key) ?? 'Brand');
+  // Distinct general-folder names — used for the folder grid AND the combobox in the add modal.
+  const generalFolderNames = useMemo(() => {
+    const set = new Set<string>();
+    items.forEach(r => {
+      if (r.scope === 'general') {
+        set.add((r.general_folder && r.general_folder.trim()) || DEFAULT_GENERAL_FOLDER);
+      }
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [items]);
+
+  const folderName = (key: FolderKey) => {
+    if (key.startsWith('b:')) return brandMap.get(key.slice(2)) ?? 'Brand';
+    if (key.startsWith('g:')) return key.slice(2);
+    return 'Folder';
+  };
 
   const matches = (r: Resource, q: string) =>
     `${r.name} ${r.url} ${r.description ?? ''}`.toLowerCase().includes(q);
@@ -91,40 +196,47 @@ export default function Resources() {
   const visibleItems = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (openFolder !== null) {
-      const inFolder = items.filter(r => {
-        const k = r.scope === 'general' ? GENERAL_KEY : r.brand_id;
-        return k === openFolder;
-      });
+      const inFolder = items.filter(r => folderForResource(r) === openFolder);
       return q ? inFolder.filter(r => matches(r, q)) : inFolder;
     }
     // folder-grid mode: when searching, flatten across folders
     return q ? items.filter(r => matches(r, q)) : [];
   }, [items, openFolder, search]);
 
-  // folders to show in grid (all brands user can see + general; brand-only if it has items OR always? show all so user can add into any brand)
+  // Folder grid: one folder per brand + one folder per distinct general-folder name (kind = 'brand' | 'general').
   const folders = useMemo(() => {
-    const list: { key: FolderKey; name: string; count: number; color: string }[] = [];
-    list.push({ key: GENERAL_KEY, name: 'General', count: counts.get(GENERAL_KEY) ?? 0, color: '#64748b' });
+    const list: { key: FolderKey; name: string; count: number; color: string; kind: 'brand' | 'general' }[] = [];
+    // Always show every general folder Bob has created
+    generalFolderNames.forEach(n => {
+      const k = generalKey(n);
+      list.push({ key: k, name: n, count: counts.get(k) ?? 0, color: '#64748b', kind: 'general' });
+    });
+    // Always show every brand the current user can see (so APCs can add into their brands even with no items yet)
     brands.forEach(b => {
-      list.push({ key: b.id, name: b.name, count: counts.get(b.id) ?? 0, color: brandColor(b.id) });
+      const k = brandKey(b.id);
+      list.push({ key: k, name: b.name, count: counts.get(k) ?? 0, color: brandColor(b.id), kind: 'brand' });
     });
     const q = search.trim().toLowerCase();
     if (!q) return list;
     return list.filter(f => f.name.toLowerCase().includes(q) || f.count > 0);
-  }, [brands, counts, search]);
+  }, [brands, counts, generalFolderNames, search]);
 
   const openAdd = () => {
     setEditing(null);
-    // APCs can only add brand-scoped resources for their brands
+    // Default the modal's scope/brand/folder based on which folder is currently open.
+    const inBrandFolder = openFolder?.startsWith('b:');
+    const inGeneralFolder = openFolder?.startsWith('g:');
+    const baseForm = { name: '', url: '', description: '', scope: 'general' as 'general' | 'brand', brand_id: '', general_folder: '' };
+
     if (isApc) {
-      const defaultBrand = openFolder && openFolder !== GENERAL_KEY ? openFolder : (brands[0]?.id ?? '');
-      setForm({ name: '', url: '', description: '', scope: 'brand', brand_id: defaultBrand });
-    } else if (openFolder === GENERAL_KEY) {
-      setForm({ name: '', url: '', description: '', scope: 'general', brand_id: '' });
-    } else if (openFolder) {
-      setForm({ name: '', url: '', description: '', scope: 'brand', brand_id: openFolder });
+      const defaultBrand = inBrandFolder ? openFolder!.slice(2) : (brands[0]?.id ?? '');
+      setForm({ ...baseForm, scope: 'brand', brand_id: defaultBrand });
+    } else if (inBrandFolder) {
+      setForm({ ...baseForm, scope: 'brand', brand_id: openFolder!.slice(2) });
+    } else if (inGeneralFolder) {
+      setForm({ ...baseForm, scope: 'general', general_folder: openFolder!.slice(2) });
     } else {
-      setForm({ name: '', url: '', description: '', scope: 'general', brand_id: '' });
+      setForm({ ...baseForm, scope: 'general', general_folder: DEFAULT_GENERAL_FOLDER });
     }
     setErr(null); setShow(true);
   };
@@ -145,6 +257,7 @@ export default function Resources() {
       description: r.description ?? '',
       scope: r.scope,
       brand_id: r.brand_id ?? '',
+      general_folder: (r.general_folder && r.general_folder.trim()) || (r.scope === 'general' ? DEFAULT_GENERAL_FOLDER : ''),
     });
     setErr(null); setShow(true);
   };
@@ -153,16 +266,21 @@ export default function Resources() {
     e.preventDefault();
     setSaving(true); setErr(null);
     const fullUrl = form.url.startsWith('http') ? form.url : `https://${form.url}`;
+    const folderName = form.general_folder.trim() || DEFAULT_GENERAL_FOLDER;
     const payload = {
       name: form.name.trim(),
       url: fullUrl.trim(),
       description: form.description.trim() || null,
       scope: form.scope,
       brand_id: form.scope === 'brand' ? (form.brand_id || null) : null,
+      general_folder: form.scope === 'general' ? folderName : null,
       created_by: user?.id,
     };
     if (form.scope === 'brand' && !payload.brand_id) {
       setErr('Pick a brand or switch to General.'); setSaving(false); return;
+    }
+    if (form.scope === 'general' && !folderName) {
+      setErr('Folder name is required for General resources.'); setSaving(false); return;
     }
     const res = editing
       ? await supabase.from('resources').update(payload).eq('id', editing.id)
@@ -267,8 +385,8 @@ export default function Resources() {
                               position: 'relative',
                             }}
                           >
-                            {f.key === GENERAL_KEY
-                              ? <i className="bi bi-globe" style={{ fontSize: '1.4rem' }} />
+                            {f.kind === 'general'
+                              ? <i className="bi bi-folder2-open" style={{ fontSize: '1.4rem' }} />
                               : brandInitials(f.name)}
                             <i className="bi bi-folder-fill" style={{
                               position: 'absolute', bottom: -6, right: -6,
@@ -315,10 +433,17 @@ export default function Resources() {
                                 <div style={{ fontSize: '1.8rem', color: ic.color, lineHeight: 1 }}>
                                   <i className={`bi ${ic.icon}`} />
                                 </div>
-                                <div className="text-end">
+                                <div className="text-end d-flex flex-column align-items-end gap-1">
                                   {r.scope === 'general'
-                                    ? <Badge bg="secondary">General</Badge>
+                                    ? <Badge bg="secondary">{(r.general_folder && r.general_folder.trim()) || DEFAULT_GENERAL_FOLDER}</Badge>
                                     : <Badge bg="info">{brandMap.get(r.brand_id!) ?? 'Brand'}</Badge>}
+                                  {r.is_shared
+                                    ? <Badge bg="success" className="d-inline-flex align-items-center gap-1">
+                                        <i className="bi bi-globe" /> Shared
+                                      </Badge>
+                                    : <Badge bg="light" text="dark" className="d-inline-flex align-items-center gap-1">
+                                        <i className="bi bi-lock" /> Private
+                                      </Badge>}
                                 </div>
                               </div>
                               <h6 className="mb-1">{r.name}</h6>
@@ -326,20 +451,50 @@ export default function Resources() {
                                 <i className="bi bi-link-45deg" /> {ic.label}
                               </div>
                               {r.description && <p className="small text-muted mb-2" style={{ whiteSpace: 'pre-wrap' }}>{r.description}</p>}
-                              <div className="d-flex justify-content-between align-items-center mt-3">
+                              {isBob && (
+                                <div className="mb-2">
+                                  <Form.Check
+                                    type="switch"
+                                    id={`share-${r.id}`}
+                                    label={
+                                      <small className="text-muted">
+                                        Share with clients
+                                        {r.scope === 'brand' && !brands.find(b => b.id === r.brand_id)?.share_enabled && (
+                                          <span className="text-warning ms-1" title="Brand sharing is off — turn on the brand's master switch first.">
+                                            <i className="bi bi-exclamation-triangle-fill" />
+                                          </span>
+                                        )}
+                                      </small>
+                                    }
+                                    checked={!!r.is_shared}
+                                    onChange={e => toggleShared(r, e.target.checked)}
+                                  />
+                                </div>
+                              )}
+                              <div className="d-flex justify-content-between align-items-center mt-3 gap-2">
                                 <a href={r.url} target="_blank" rel="noreferrer" className="btn btn-sm btn-outline-primary">
                                   Open <i className="bi bi-box-arrow-up-right ms-1" />
                                 </a>
+                                <div className="d-flex gap-2 align-items-center">
+                                  <Button size="sm" variant="outline-info"
+                                    onClick={() => { setFeedbackResource(r); setHighlightCommentId(null); }}
+                                    title="View / add comments">
+                                    <i className="bi bi-chat-left-text" />
+                                    {commentCountFor(r.id) > 0 && (
+                                      <Badge bg="primary" pill className="ms-1">{commentCountFor(r.id)}</Badge>
+                                    )}
+                                  </Button>
                                 {canEditResource(r) && (
-                                  <div>
-                                    <Button size="sm" variant="outline-secondary" className="me-2" onClick={() => openEdit(r)}>
+                                  <>
+                                    <Button size="sm" variant="outline-secondary" onClick={() => openEdit(r)}>
                                       <i className="bi bi-pencil" />
                                     </Button>
                                     <Button size="sm" variant="outline-danger" onClick={() => remove(r)}>
                                       <i className="bi bi-trash" />
                                     </Button>
-                                  </div>
+                                  </>
                                 )}
+                                </div>
                               </div>
                             </Card.Body>
                           </Card>
@@ -442,6 +597,42 @@ export default function Resources() {
                 )}
               </Form.Group>
             )}
+            {form.scope === 'general' && (
+              <Form.Group>
+                <div className="d-flex justify-content-between">
+                  <Form.Label className="small fw-semibold mb-1">Folder</Form.Label>
+                  <small className="text-muted">Pick existing or type a new name</small>
+                </div>
+                <InputGroup>
+                  <Form.Control
+                    required
+                    value={form.general_folder}
+                    onChange={e => setForm({ ...form, general_folder: e.target.value })}
+                    placeholder="e.g. Brand Guidelines, Templates, SOPs"
+                  />
+                  <Dropdown align="end">
+                    <Dropdown.Toggle variant="outline-secondary" id="general-folder-picker"
+                      title="Pick an existing folder">
+                      <i className="bi bi-folder2-open" />
+                    </Dropdown.Toggle>
+                    <Dropdown.Menu style={{ minWidth: 240, maxHeight: 280, overflowY: 'auto' }}>
+                      <Dropdown.Header>Existing folders</Dropdown.Header>
+                      {generalFolderNames.length === 0 ? (
+                        <Dropdown.ItemText className="text-muted small">No folders yet — type a new name above.</Dropdown.ItemText>
+                      ) : generalFolderNames.map(n => (
+                        <Dropdown.Item key={n} onClick={() => setForm({ ...form, general_folder: n })}
+                          active={form.general_folder === n}>
+                          <i className="bi bi-folder me-2" />{n}
+                        </Dropdown.Item>
+                      ))}
+                    </Dropdown.Menu>
+                  </Dropdown>
+                </InputGroup>
+                <Form.Text className="text-muted">
+                  Resources are grouped by folder name. New names create a new folder on save.
+                </Form.Text>
+              </Form.Group>
+            )}
           </Modal.Body>
           <Modal.Footer>
             <Button variant="secondary" onClick={() => setShow(false)} disabled={saving}>Cancel</Button>
@@ -452,6 +643,29 @@ export default function Resources() {
           </Modal.Footer>
         </Form>
       </Modal>
+
+      <Offcanvas show={!!feedbackResource} onHide={() => { setFeedbackResource(null); setHighlightCommentId(null); }} placement="end" style={{ width: 480 }}>
+        <Offcanvas.Header closeButton>
+          <Offcanvas.Title>
+            <i className="bi bi-chat-left-text me-2" />
+            Client feedback
+            {feedbackResource && <small className="text-muted ms-2 fw-normal">— {feedbackResource.name}</small>}
+          </Offcanvas.Title>
+        </Offcanvas.Header>
+        <Offcanvas.Body>
+          {feedbackResource && (
+            <ResourceComments
+              resourceId={feedbackResource.id}
+              resourceName={feedbackResource.name}
+              comments={comments}
+              mode="authed"
+              currentAuthorName={profile?.full_name || profile?.email || 'User'}
+              onAdd={addComment}
+              highlightCommentId={highlightCommentId ?? undefined}
+            />
+          )}
+        </Offcanvas.Body>
+      </Offcanvas>
 
       <style>{`
         .folder-card:hover { transform: translateY(-2px); box-shadow: 0 .5rem 1rem rgba(0,0,0,.08) !important; }

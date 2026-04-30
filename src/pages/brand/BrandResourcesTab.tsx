@@ -11,13 +11,15 @@ interface Resource {
   description: string | null;
   scope: 'general' | 'brand';
   brand_id: string | null;
+  is_shared: boolean;
   created_at: string;
 }
 
 const DESC_MAX = 240;
 
 export default function BrandResourcesTab({ brandId, brandName }: { brandId: string; brandName: string }) {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const isBob = profile?.role === 'bob';
   const [items, setItems] = useState<Resource[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -33,8 +35,15 @@ export default function BrandResourcesTab({ brandId, brandName }: { brandId: str
     const { data, error } = await supabase.from('resources').select('*')
       .eq('brand_id', brandId).order('created_at', { ascending: false });
     if (error) setErr(error.message);
-    else setItems((data as Resource[]) ?? []);
+    else setItems(((data as any[]) ?? []).map(x => ({ ...x, is_shared: !!x.is_shared })) as Resource[]);
     setLoading(false);
+  };
+
+  const toggleShared = async (r: Resource, next: boolean) => {
+    const prev = items;
+    setItems(items.map(x => x.id === r.id ? { ...x, is_shared: next } : x));
+    const { error } = await supabase.from('resources').update({ is_shared: next }).eq('id', r.id);
+    if (error) { alert(error.message); setItems(prev); }
   };
   useEffect(() => { load(); }, [brandId]);
 
@@ -127,13 +136,33 @@ export default function BrandResourcesTab({ brandId, brandName }: { brandId: str
                         <div style={{ fontSize: '1.8rem', color: ic.color, lineHeight: 1 }}>
                           <i className={`bi ${ic.icon}`} />
                         </div>
-                        <Badge bg="info">{brandName}</Badge>
+                        <div className="d-flex flex-column align-items-end gap-1">
+                          <Badge bg="info">{brandName}</Badge>
+                          {r.is_shared
+                            ? <Badge bg="success" className="d-inline-flex align-items-center gap-1">
+                                <i className="bi bi-globe" /> Shared
+                              </Badge>
+                            : <Badge bg="light" text="dark" className="d-inline-flex align-items-center gap-1">
+                                <i className="bi bi-lock" /> Private
+                              </Badge>}
+                        </div>
                       </div>
                       <h6 className="mb-1">{r.name}</h6>
                       <div className="text-muted small text-truncate mb-2">
                         <i className="bi bi-link-45deg" /> {ic.label}
                       </div>
                       {r.description && <p className="small text-muted mb-2" style={{ whiteSpace: 'pre-wrap' }}>{r.description}</p>}
+                      {isBob && (
+                        <div className="mb-2">
+                          <Form.Check
+                            type="switch"
+                            id={`share-${r.id}`}
+                            checked={!!r.is_shared}
+                            onChange={e => toggleShared(r, e.target.checked)}
+                            label={<small className="text-muted">Share with clients</small>}
+                          />
+                        </div>
+                      )}
                       <div className="d-flex justify-content-between align-items-center mt-3">
                         <a href={r.url} target="_blank" rel="noreferrer" className="btn btn-sm btn-outline-primary">
                           Open <i className="bi bi-box-arrow-up-right ms-1" />

@@ -1,4 +1,4 @@
-import { useEffect, useState, FormEvent } from 'react';
+import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card, Form, Button, Row, Col, Table, Spinner, Alert, Badge, Modal, Offcanvas, Dropdown } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
@@ -59,7 +59,15 @@ export default function WeeklyReportEdit() {
   const [fetchingGmv, setFetchingGmv] = useState(false);
   const [gmvFetchMsg, setGmvFetchMsg] = useState<{ kind: 'success' | 'warning' | 'danger'; text: string } | null>(null);
 
-  interface PresetRow { id: string; name: string; payload: any; created_by: string | null; created_at: string; }
+  interface PresetRow {
+    id: string;
+    name: string;
+    payload: any;
+    kind: 'custom' | 'standard';
+    section_id: string | null;
+    created_by: string | null;
+    created_at: string;
+  }
   const [presets, setPresets] = useState<PresetRow[]>([]);
   const [presetSavingId, setPresetSavingId] = useState<string | null>(null);
   const [presetMsg, setPresetMsg] = useState<string | null>(null);
@@ -88,8 +96,12 @@ export default function WeeklyReportEdit() {
         .select('*').eq('report_id', r.id).order('created_at', { ascending: true });
       setComments((cm as Comment[]) ?? []);
       const { data: pr } = await supabase.from('section_presets')
-        .select('id,name,payload,created_by,created_at').order('created_at', { ascending: false });
-      setPresets((pr as PresetRow[]) ?? []);
+        .select('id,name,payload,kind,section_id,created_by,created_at').order('created_at', { ascending: false });
+      setPresets(((pr as any[]) ?? []).map(p => ({
+        ...p,
+        kind: p.kind ?? 'custom',
+        section_id: p.section_id ?? null,
+      })) as PresetRow[]);
       setLoading(false);
     })();
   }, [id]);
@@ -141,6 +153,52 @@ export default function WeeklyReportEdit() {
     setPresets(presets.filter(x => x.id !== p.id));
     const { error } = await supabase.from('section_presets').delete().eq('id', p.id);
     if (error) { alert(error.message); setPresets(prev); }
+  };
+
+  // Standard-section presets — snapshot a section's current data and reapply later.
+  const customPresets: PresetRow[] = useMemo(
+    () => presets.filter((p: PresetRow) => p.kind === 'custom'),
+    [presets]
+  );
+  const standardPresetsFor = (sectionId: string): PresetRow[] =>
+    presets.filter((p: PresetRow) => p.kind === 'standard' && p.section_id === sectionId);
+
+  const standardSectionData = (sectionId: string): any => {
+    switch (sectionId) {
+      case 'overall':            return c.overall;
+      case 'top_creators':       return c.top_creators;
+      case 'top_videos':         return c.top_videos;
+      case 'video_performance':  return c.video_performance;
+      case 'gmv_max':            return c.gmv_max;
+      case 'product_highlights': return c.product_highlights;
+      case 'shop_health':        return c.shop_health;
+      case 'insights':           return c.insights;
+      default: return null;
+    }
+  };
+
+  const applyStandardPreset = (sectionId: string, data: any) => {
+    setC(prev => ({ ...prev, [sectionId]: data }));
+    setPresetMsg(`Loaded preset into ${SECTION_LABELS[sectionId] ?? sectionId}.`);
+  };
+
+  const saveStandardPreset = async (sectionId: string) => {
+    const sectionLabel = SECTION_LABELS[sectionId] ?? sectionId;
+    const name = window.prompt(`Save "${sectionLabel}" as a preset. Name:`, `${brand?.name ?? ''} — ${sectionLabel}`.trim());
+    if (!name) return;
+    const data = standardSectionData(sectionId);
+    if (data == null) return;
+    const { data: row, error } = await supabase.from('section_presets')
+      .insert({
+        name: name.trim(),
+        kind: 'standard',
+        section_id: sectionId,
+        payload: { data },
+        created_by: profile?.id ?? null,
+      }).select().single();
+    if (error) { alert(error.message); return; }
+    setPresets(prev => [row as PresetRow, ...prev]);
+    setPresetMsg(`Saved preset "${(row as PresetRow).name}".`);
   };
 
   const addComment = async (section: CommentSection, body: string, authorName: string, parentId?: string) => {
@@ -274,12 +332,51 @@ export default function WeeklyReportEdit() {
     );
   };
 
-  // Wrap a header label so it sits at left and the feedback icon at right
-  const HeaderWithFeedback = ({ title, section, extra }: { title: string; section: CommentSection; extra?: React.ReactNode }) => (
+  // Per-standard-section preset menu: save current values, load saved preset, delete a preset.
+  const StdPresetMenu = ({ sectionId }: { sectionId: string }) => {
+    const list = standardPresetsFor(sectionId);
+    return (
+      <Dropdown align="end" onClick={(e) => e.stopPropagation()}>
+        <Dropdown.Toggle size="sm" variant="outline-info" title="Save / load section preset">
+          <i className="bi bi-bookmark" />
+          {list.length > 0 && <Badge bg="info" pill className="ms-1">{list.length}</Badge>}
+        </Dropdown.Toggle>
+        <Dropdown.Menu style={{ minWidth: 260, maxHeight: 320, overflowY: 'auto' }}>
+          <Dropdown.Item as="button" onClick={() => saveStandardPreset(sectionId)}>
+            <i className="bi bi-bookmark-plus me-2" /> Save current as preset
+          </Dropdown.Item>
+          {list.length > 0 && <Dropdown.Divider />}
+          {list.map(p => (
+            <div key={p.id} className="d-flex align-items-center px-2 py-1" style={{ gap: 4 }}>
+              <Dropdown.Item as="button" className="flex-grow-1 px-2 py-1"
+                onClick={() => applyStandardPreset(sectionId, p.payload?.data)}>
+                <div className="fw-semibold small">{p.name}</div>
+                <small className="text-muted">{new Date(p.created_at).toLocaleDateString()}</small>
+              </Dropdown.Item>
+              {(p.created_by === profile?.id || profile?.role === 'bob') && (
+                <Button size="sm" variant="link" className="text-danger p-0 px-2"
+                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); removePreset(p); }}
+                  title="Delete preset">
+                  <i className="bi bi-trash" />
+                </Button>
+              )}
+            </div>
+          ))}
+        </Dropdown.Menu>
+      </Dropdown>
+    );
+  };
+
+  // Wrap a header label so it sits at left, with optional extras + feedback icon on the right.
+  // For standard sections, automatically attaches a preset save/load menu.
+  const HeaderWithFeedback = ({ title, section, extra, sectionId }: {
+    title: string; section: CommentSection; extra?: React.ReactNode; sectionId?: string;
+  }) => (
     <div className="d-flex justify-content-between align-items-center">
       <span className="fw-semibold">{title}</span>
       <div className="d-flex align-items-center gap-2">
         {extra}
+        {sectionId && <StdPresetMenu sectionId={sectionId} />}
         <FeedbackButton section={section} />
       </div>
     </div>
@@ -330,7 +427,7 @@ export default function WeeklyReportEdit() {
     customSectionLabel(section) ?? SECTION_LABELS[section] ?? section;
 
   return (
-    <>
+    <div className="ac-themed">
       <div className="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
         <div>
           <h2 className="mb-1">{brand.name} <small className="text-muted fs-6">— {brand.client}</small></h2>
@@ -346,14 +443,14 @@ export default function WeeklyReportEdit() {
             </Button>
           )}
           <Dropdown>
-            <Dropdown.Toggle variant="outline-info" title="Insert a saved section preset">
+            <Dropdown.Toggle variant="outline-info" title="Insert a saved custom-section preset">
               <i className="bi bi-bookmark me-1" /> Add from preset
-              {presets.length > 0 && <Badge bg="info" pill className="ms-1">{presets.length}</Badge>}
+              {customPresets.length > 0 && <Badge bg="info" pill className="ms-1">{customPresets.length}</Badge>}
             </Dropdown.Toggle>
             <Dropdown.Menu align="end" style={{ minWidth: 280, maxHeight: 320, overflowY: 'auto' }}>
-              {presets.length === 0 ? (
-                <Dropdown.ItemText className="text-muted small">No saved presets yet.</Dropdown.ItemText>
-              ) : presets.map(p => (
+              {customPresets.length === 0 ? (
+                <Dropdown.ItemText className="text-muted small">No saved custom-section presets yet.</Dropdown.ItemText>
+              ) : customPresets.map(p => (
                 <div key={p.id} className="d-flex align-items-center px-2 py-1" style={{ gap: 4 }}>
                   <Dropdown.Item as="button" className="flex-grow-1 px-2 py-1" onClick={() => addCustomFromPreset(p)}>
                     <div className="fw-semibold">{p.name}</div>
@@ -388,7 +485,7 @@ export default function WeeklyReportEdit() {
 
       {/* Overall Performance */}
       <Card className="mb-4">
-        <Card.Header><HeaderWithFeedback title="Overall Performance" section="overall" /></Card.Header>
+        <Card.Header><HeaderWithFeedback title="Overall Performance" section="overall" sectionId="overall" /></Card.Header>
         <Card.Body>
           <Row className="g-3">
             <Col md={3}><Form.Label className="small">Total GMV ($)</Form.Label>
@@ -426,14 +523,13 @@ export default function WeeklyReportEdit() {
       {renderCustomAt('overall')}
 
       {/* Top Creators */}
-      <Section title="Top Creators" onAdd={() => addRow('top_creators', emptyTopCreator)} empty={c.top_creators.length === 0} headerRight={<FeedbackButton section="top_creators" />}>
+      <Section title="Top Creators" onAdd={() => addRow('top_creators', emptyTopCreator)} empty={c.top_creators.length === 0} headerRight={<><StdPresetMenu sectionId="top_creators" /><FeedbackButton section="top_creators" /></>}>
         <Table size="sm" className="mb-0 align-middle">
           <thead><tr>
             <th>Creator Name</th>
             <th style={{width:130}}>Videos Posted</th>
-            <th style={{width:110}}>Items Sold</th>
+            <th style={{width:120}}>Items sold</th>
             <th style={{width:140}}>GMV Generated ($)</th>
-            <th>Notes</th>
             <th style={{width:50}}></th>
           </tr></thead>
           <tbody>
@@ -443,7 +539,6 @@ export default function WeeklyReportEdit() {
                 <td><NumberInput size="sm" value={r.videos} onChange={n => updRow('top_creators', i, { videos: n })} /></td>
                 <td><NumberInput size="sm" value={r.items_sold} onChange={n => updRow('top_creators', i, { items_sold: n })} /></td>
                 <td><NumberInput size="sm" step="0.01" value={r.gmv} onChange={n => updRow('top_creators', i, { gmv: n })} /></td>
-                <td><Form.Control size="sm" value={r.notes} onChange={e => updRow('top_creators', i, { notes: e.target.value })} /></td>
                 <td><Button size="sm" variant="outline-danger" onClick={() => delRow('top_creators', i)}><i className="bi bi-trash" /></Button></td>
               </tr>
             ))}
@@ -453,12 +548,12 @@ export default function WeeklyReportEdit() {
       {renderCustomAt('top_creators')}
 
       {/* Top Videos — current week only; last week auto-shown in dashboard */}
-      <Section title="Top Videos (this week)" onAdd={() => addRow('top_videos', emptyTopVideo)} empty={c.top_videos.length === 0} headerRight={<FeedbackButton section="top_videos" />}>
+      <Section title="Top Videos (this week)" onAdd={() => addRow('top_videos', emptyTopVideo)} empty={c.top_videos.length === 0} headerRight={<><StdPresetMenu sectionId="top_videos" /><FeedbackButton section="top_videos" /></>}>
         <Table size="sm" className="mb-0 align-middle">
           <thead><tr>
             <th>Creator Name</th>
             <th>Video URL</th>
-            <th style={{width:110}}>Items Sold</th>
+            <th style={{width:120}}>Items sold</th>
             <th style={{width:140}}>GMV Generated ($)</th>
             <th style={{width:50}}></th>
           </tr></thead>
@@ -479,7 +574,7 @@ export default function WeeklyReportEdit() {
 
       {/* Video Performance */}
       <Card className="mb-4">
-        <Card.Header><HeaderWithFeedback title="Video Performance" section="video_performance" /></Card.Header>
+        <Card.Header><HeaderWithFeedback title="Video Performance" section="video_performance" sectionId="video_performance" /></Card.Header>
         <Card.Body>
           <Row className="g-3">
             <Col md={3}><Form.Label className="small">Total Videos Posted</Form.Label>
@@ -497,7 +592,7 @@ export default function WeeklyReportEdit() {
 
       {/* GMV Max */}
       <Card className="mb-4">
-        <Card.Header><HeaderWithFeedback title="Overall GMV Max Performance" section="gmv_max" extra={
+        <Card.Header><HeaderWithFeedback title="Overall GMV Max Performance" section="gmv_max" sectionId="gmv_max" extra={
           <Button size="sm" variant="outline-info" disabled={fetchingGmv}
             onClick={fetchGmvMaxFromBrand}
             title={`Pull weekly entry from the brand's GMV Max page for ${formatRange(report.week_start, report.week_end)}`}>
@@ -540,7 +635,7 @@ export default function WeeklyReportEdit() {
       {renderCustomAt('gmv_max')}
 
       {/* Product Highlights */}
-      <Section title="Product Highlights" onAdd={() => addRow('product_highlights', emptyProduct)} empty={c.product_highlights.length === 0} headerRight={<FeedbackButton section="product_highlights" />}>
+      <Section title="Product Highlights" onAdd={() => addRow('product_highlights', emptyProduct)} empty={c.product_highlights.length === 0} headerRight={<><StdPresetMenu sectionId="product_highlights" /><FeedbackButton section="product_highlights" /></>}>
         <Table size="sm" className="mb-0 align-middle">
           <thead><tr>
             <th>Product Name</th>
@@ -581,7 +676,7 @@ export default function WeeklyReportEdit() {
 
       {/* Shop Health */}
       <Card className="mb-4">
-        <Card.Header><HeaderWithFeedback title="Shop Health" section="shop_health" /></Card.Header>
+        <Card.Header><HeaderWithFeedback title="Shop Health" section="shop_health" sectionId="shop_health" /></Card.Header>
         <Card.Body>
           <Row className="g-3">
             <Col md={3}><Form.Label className="small">Shop Performance Score (out of 5)</Form.Label>
@@ -626,7 +721,7 @@ export default function WeeklyReportEdit() {
 
       {/* Insights */}
       <Card className="mb-4">
-        <Card.Header><HeaderWithFeedback title="Insights" section="insights" /></Card.Header>
+        <Card.Header><HeaderWithFeedback title="Insights" section="insights" sectionId="insights" /></Card.Header>
         <Card.Body>
           <RichTextEditor
             value={c.insights.summary}
@@ -732,7 +827,7 @@ export default function WeeklyReportEdit() {
           <Button variant="secondary" onClick={() => setShowComments(false)}>Close</Button>
         </Modal.Footer>
       </Modal>
-    </>
+    </div>
   );
 }
 

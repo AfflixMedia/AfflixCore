@@ -6,10 +6,14 @@ import { resourceIcon } from '../lib/resourceIcon';
 
 interface Client { id: string; name: string; }
 interface Brand  { id: string; name: string; client_id: string | null; share_enabled: boolean; }
-interface Resource { id: string; name: string; url: string; scope: 'general' | 'brand'; brand_id: string | null; }
+interface Resource { id: string; name: string; url: string; scope: 'general' | 'brand'; brand_id: string | null; is_shared: boolean; general_folder: string | null; }
+type LinkMode = 'brand' | 'general';
 interface Link {
   id: string; token: string; label: string | null; client_id: string;
-  brand_ids: string[]; resource_ids: string[]; created_at: string; revoked_at: string | null;
+  brand_ids: string[]; resource_ids: string[];
+  include_reports: boolean; include_resources: boolean;
+  link_mode: LinkMode;
+  created_at: string; revoked_at: string | null;
 }
 
 export default function ClientAccess() {
@@ -25,8 +29,11 @@ export default function ClientAccess() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [clientId, setClientId] = useState('');
   const [brandIds, setBrandIds] = useState<string[]>([]);
-  const [resourceIds, setResourceIds] = useState<string[]>([]);
   const [label, setLabel] = useState('');
+  const [includeReports, setIncludeReports] = useState(true);
+  const [includeResources, setIncludeResources] = useState(true);
+  const [linkMode, setLinkMode] = useState<LinkMode>('brand');
+  const [pickedResourceIds, setPickedResourceIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
   const load = async () => {
@@ -34,7 +41,7 @@ export default function ClientAccess() {
     const [c, b, r, l] = await Promise.all([
       supabase.from('clients').select('id,name').order('name'),
       supabase.from('brands').select('id,name,client_id,share_enabled').order('name'),
-      supabase.from('resources').select('id,name,url,scope,brand_id').order('name'),
+      supabase.from('resources').select('id,name,url,scope,brand_id,is_shared,general_folder').order('name'),
       supabase.from('report_share_links').select('*').order('created_at', { ascending: false }),
     ]);
     const e = c.error ?? b.error ?? r.error ?? l.error;
@@ -63,45 +70,81 @@ export default function ClientAccess() {
     [brandsForClient],
   );
 
-  // resources tied to any of the selected brands + general
-  const relevantResources = useMemo(() => {
+  // Resources auto-included on this link: any is_shared resource that's general OR scoped to a linked brand.
+  const autoIncludedResources = useMemo(() => {
     return resources.filter(r =>
-      r.scope === 'general' || (r.brand_id && brandIds.includes(r.brand_id))
+      r.is_shared && (r.scope === 'general' || (r.brand_id && brandIds.includes(r.brand_id)))
     );
   }, [resources, brandIds]);
 
   const openAdd = () => {
     setEditingId(null);
-    setClientId(''); setBrandIds([]); setResourceIds([]); setLabel(''); setErr(null); setShow(true);
+    setClientId(''); setBrandIds([]); setLabel('');
+    setIncludeReports(true); setIncludeResources(true);
+    setLinkMode('brand'); setPickedResourceIds([]);
+    setErr(null); setShow(true);
   };
 
   const openEdit = (l: Link) => {
     setEditingId(l.id);
     setClientId(l.client_id);
     setBrandIds(l.brand_ids ?? []);
-    setResourceIds(l.resource_ids ?? []);
     setLabel(l.label ?? '');
+    setIncludeReports(l.include_reports !== false);
+    setIncludeResources(l.include_resources !== false);
+    setLinkMode((l.link_mode as LinkMode) ?? 'brand');
+    setPickedResourceIds(l.resource_ids ?? []);
     setErr(null);
     setShow(true);
   };
 
+  const togglePickedResource = (id: string) => {
+    setPickedResourceIds(arr => arr.includes(id) ? arr.filter(x => x !== id) : [...arr, id]);
+  };
+
+  const generalResources = useMemo(
+    () => resources.filter(r => r.scope === 'general'),
+    [resources]
+  );
+
   const toggle = (id: string) => {
     setBrandIds(arr => arr.includes(id) ? arr.filter(x => x !== id) : [...arr, id]);
-  };
-  const toggleResource = (id: string) => {
-    setResourceIds(arr => arr.includes(id) ? arr.filter(x => x !== id) : [...arr, id]);
   };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setSaving(true); setErr(null);
-    if (brandIds.length === 0) { setErr('Pick at least one brand'); setSaving(false); return; }
-    const payload = {
-      label: label.trim() || null,
-      client_id: clientId,
-      brand_ids: brandIds,
-      resource_ids: resourceIds,
-    };
+    if (linkMode === 'brand') {
+      if (brandIds.length === 0) { setErr('Pick at least one brand'); setSaving(false); return; }
+      if (!includeReports && !includeResources) {
+        setErr('Pick at least one of Reports or Resources to share — otherwise the client sees nothing.');
+        setSaving(false); return;
+      }
+    } else if (linkMode === 'general') {
+      if (pickedResourceIds.length === 0) {
+        setErr('Pick at least one general resource to share.');
+        setSaving(false); return;
+      }
+    }
+    const payload = linkMode === 'brand'
+      ? {
+          label: label.trim() || null,
+          client_id: clientId,
+          link_mode: 'brand' as LinkMode,
+          brand_ids: brandIds,
+          resource_ids: [] as string[],   // auto-include drives brand-mode resource visibility
+          include_reports: includeReports,
+          include_resources: includeResources,
+        }
+      : {
+          label: label.trim() || null,
+          client_id: clientId,
+          link_mode: 'general' as LinkMode,
+          brand_ids: [] as string[],
+          resource_ids: pickedResourceIds,
+          include_reports: false,
+          include_resources: true,
+        };
     const res = editingId
       ? await supabase.from('report_share_links').update(payload).eq('id', editingId).select().single()
       : await supabase.from('report_share_links').insert({ ...payload, token: generateToken(), created_by: user?.id }).select().single();
@@ -154,19 +197,39 @@ export default function ClientAccess() {
             : (
               <Table hover responsive className="align-middle mb-0">
                 <thead><tr>
-                  <th>Label</th><th>Client</th><th>Brands</th><th>URL</th><th>Status</th><th style={{width:160}}></th>
+                  <th>Label</th><th>Client</th><th>Mode</th><th>Scope</th><th>Includes</th><th>URL</th><th>Status</th><th style={{width:160}}></th>
                 </tr></thead>
                 <tbody>
                   {links.map(l => {
                     const cl = clientMap.get(l.client_id);
+                    const mode: LinkMode = (l.link_mode as LinkMode) ?? 'brand';
                     return (
                       <tr key={l.id}>
                         <td className="fw-semibold">{l.label || '—'}</td>
                         <td>{cl?.name ?? '—'}</td>
                         <td>
-                          {l.brand_ids.map(id => (
-                            <Badge key={id} bg="info" className="me-1">{brandMap.get(id)?.name ?? '?'}</Badge>
-                          ))}
+                          {mode === 'general'
+                            ? <Badge bg="dark"><i className="bi bi-folder2-open me-1" />General files</Badge>
+                            : <Badge bg="primary"><i className="bi bi-shop me-1" />Brand</Badge>}
+                        </td>
+                        <td>
+                          {mode === 'general' ? (
+                            <Badge bg="secondary">{l.resource_ids?.length ?? 0} file{(l.resource_ids?.length ?? 0) === 1 ? '' : 's'}</Badge>
+                          ) : (
+                            l.brand_ids.map(id => (
+                              <Badge key={id} bg="info" className="me-1">{brandMap.get(id)?.name ?? '?'}</Badge>
+                            ))
+                          )}
+                        </td>
+                        <td>
+                          {mode === 'general'
+                            ? <Badge bg="warning" text="dark"><i className="bi bi-folder2 me-1" />Files only</Badge>
+                            : (
+                              <>
+                                {l.include_reports !== false && <Badge bg="success" className="me-1"><i className="bi bi-bar-chart me-1" />Reports</Badge>}
+                                {l.include_resources !== false && <Badge bg="warning" text="dark" className="me-1"><i className="bi bi-folder2 me-1" />Resources</Badge>}
+                              </>
+                            )}
                         </td>
                         <td>
                           <InputGroup size="sm">
@@ -205,6 +268,27 @@ export default function ClientAccess() {
           <Modal.Header closeButton><Modal.Title>{editingId ? 'Edit Share Link' : 'Create Share Link'}</Modal.Title></Modal.Header>
           <Modal.Body>
             {err && <Alert variant="danger">{err}</Alert>}
+
+            <Form.Group className="mb-3">
+              <Form.Label className="fw-semibold">Sharing mode</Form.Label>
+              <div className="d-flex gap-2 flex-wrap">
+                <ModePill
+                  active={linkMode === 'brand'}
+                  onClick={() => setLinkMode('brand')}
+                  icon="bi-shop"
+                  title="Brand sharing"
+                  sub="Pick brands; reports & resources auto-include"
+                />
+                <ModePill
+                  active={linkMode === 'general'}
+                  onClick={() => setLinkMode('general')}
+                  icon="bi-folder2-open"
+                  title="General file sharing"
+                  sub="Pick specific general resources to share"
+                />
+              </div>
+            </Form.Group>
+
             <Form.Group className="mb-3">
               <Form.Label>Label (internal note)</Form.Label>
               <Form.Control value={label} onChange={e => setLabel(e.target.value)} placeholder="e.g. Q2 review for Acme" />
@@ -216,7 +300,55 @@ export default function ClientAccess() {
                 {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </Form.Select>
             </Form.Group>
-            {clientId && (
+
+            {linkMode === 'general' && (
+              <Form.Group>
+                <Form.Label>
+                  General resources to share
+                  {pickedResourceIds.length > 0 && (
+                    <Badge bg="info" pill className="ms-2">{pickedResourceIds.length} picked</Badge>
+                  )}
+                </Form.Label>
+                {generalResources.length === 0 ? (
+                  <Alert variant="info" className="py-2 small mb-0">
+                    No general resources exist yet. Add some on the Resources page first.
+                  </Alert>
+                ) : (
+                  <div style={{ maxHeight: 280, overflowY: 'auto', border: '1px solid #dee2e6', borderRadius: 6, padding: 10 }}>
+                    {generalResources.map(r => {
+                      const ic = resourceIcon(r.url);
+                      const checked = pickedResourceIds.includes(r.id);
+                      return (
+                        <div key={r.id} className="d-flex align-items-center py-1"
+                          style={{ background: checked ? 'rgba(232,134,46,.06)' : undefined, borderRadius: 6, padding: '4px 6px' }}>
+                          <Form.Check type="checkbox" id={`g-${r.id}`}
+                            checked={checked}
+                            onChange={() => togglePickedResource(r.id)}
+                            className="me-2" />
+                          <i className={`bi ${ic.icon} me-2`} style={{ color: ic.color }} />
+                          <label htmlFor={`g-${r.id}`} style={{ cursor: 'pointer', flex: 1 }}>
+                            <span className="fw-semibold">{r.name}</span>
+                            {r.general_folder && (
+                              <span className="text-muted small ms-2">· {r.general_folder}</span>
+                            )}
+                            {!r.is_shared && (
+                              <small className="text-warning ms-2" title="Resource isn't flagged is_shared. Turn on its share toggle on the Resources page or it will be filtered out.">
+                                <i className="bi bi-exclamation-triangle-fill" />
+                              </small>
+                            )}
+                          </label>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <Form.Text className="text-muted">
+                  Only the resources you check here will be visible on this link. The client won't see any brand-scoped reports or resources.
+                </Form.Text>
+              </Form.Group>
+            )}
+
+            {clientId && linkMode === 'brand' && (
               <>
                 <Form.Group className="mb-3">
                   <Form.Label>Brands to share</Form.Label>
@@ -245,31 +377,58 @@ export default function ClientAccess() {
                 </Form.Group>
 
                 {brandIds.length > 0 && (
+                  <Form.Group className="mb-3">
+                    <Form.Label className="fw-semibold">Share with this client</Form.Label>
+                    <div className="border rounded p-2">
+                      <Form.Check
+                        type="switch"
+                        id="include-reports"
+                        label={<><strong>Reports</strong> <span className="text-muted small">— weekly performance dashboards</span></>}
+                        checked={includeReports}
+                        onChange={e => setIncludeReports(e.target.checked)}
+                      />
+                      <Form.Check
+                        type="switch"
+                        className="mt-2"
+                        id="include-resources"
+                        label={<><strong>Resources</strong> <span className="text-muted small">— links, docs, brand assets</span></>}
+                        checked={includeResources}
+                        onChange={e => setIncludeResources(e.target.checked)}
+                      />
+                    </div>
+                    <Form.Text className="text-muted">
+                      Turn off either to hide that section from this client. The other one stays visible.
+                    </Form.Text>
+                  </Form.Group>
+                )}
+
+                {brandIds.length > 0 && includeResources && (
                   <Form.Group>
-                    <Form.Label>Resources to share <small className="text-muted fw-normal">(optional)</small></Form.Label>
-                    {relevantResources.length === 0 ? (
-                      <p className="text-muted small mb-0">No resources available for selected brands. Add resources from the Resources menu.</p>
+                    <Form.Label>Resources auto-included</Form.Label>
+                    {autoIncludedResources.length === 0 ? (
+                      <Alert variant="info" className="py-2 small mb-0">
+                        No resources are flagged "Share with clients" yet. Open the Resources page (or a brand's Resources tab) and turn on the share toggle for the items you want clients to see.
+                      </Alert>
                     ) : (
                       <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #dee2e6', borderRadius: 6, padding: 10 }}>
-                        {relevantResources.map(r => {
+                        {autoIncludedResources.map(r => {
                           const ic = resourceIcon(r.url);
                           return (
                             <div key={r.id} className="d-flex align-items-center py-1">
-                              <Form.Check type="checkbox" id={`r-${r.id}`}
-                                checked={resourceIds.includes(r.id)} onChange={() => toggleResource(r.id)}
-                                className="me-2" />
                               <i className={`bi ${ic.icon} me-2`} style={{ color: ic.color }} />
-                              <label htmlFor={`r-${r.id}`} style={{ cursor: 'pointer', flex: 1 }}>
-                                <span className="fw-semibold">{r.name}</span>
-                                <span className="text-muted small ms-2">
-                                  {r.scope === 'general' ? 'General' : brands.find(b => b.id === r.brand_id)?.name}
-                                </span>
-                              </label>
+                              <span className="fw-semibold flex-grow-1">{r.name}</span>
+                              <span className="text-muted small">
+                                {r.scope === 'general' ? 'General' : brands.find(b => b.id === r.brand_id)?.name}
+                              </span>
                             </div>
                           );
                         })}
                       </div>
                     )}
+                    <Form.Text className="text-muted">
+                      Every resource flagged "Share with clients" is auto-included whenever it's general or its brand is on this link.
+                      Toggle individual resources from the Resources page.
+                    </Form.Text>
                   </Form.Group>
                 )}
               </>
@@ -277,7 +436,12 @@ export default function ClientAccess() {
           </Modal.Body>
           <Modal.Footer>
             <Button variant="secondary" onClick={() => setShow(false)} disabled={saving}>Cancel</Button>
-            <Button type="submit" disabled={saving || !clientId || brandIds.length === 0}>
+            <Button type="submit"
+              disabled={
+                saving || !clientId ||
+                (linkMode === 'brand' && brandIds.length === 0) ||
+                (linkMode === 'general' && pickedResourceIds.length === 0)
+              }>
               {saving ? 'Saving…' : (editingId ? 'Save changes' : 'Create link')}
             </Button>
           </Modal.Footer>
@@ -291,4 +455,26 @@ function generateToken() {
   const arr = new Uint8Array(24);
   crypto.getRandomValues(arr);
   return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function ModePill({ active, onClick, icon, title, sub }: {
+  active: boolean; onClick: () => void; icon: string; title: string; sub: string;
+}) {
+  return (
+    <button type="button" onClick={onClick}
+      className="border rounded text-start px-3 py-2"
+      style={{
+        flex: 1, minWidth: 200,
+        borderColor: active ? 'var(--ac-primary, #e8862e)' : '#dee2e6',
+        background: active ? 'rgba(232,134,46,.08)' : 'white',
+        cursor: 'pointer',
+        transition: 'all .15s',
+      }}>
+      <div className="d-flex align-items-center gap-2">
+        <i className={`bi ${icon}`} style={{ fontSize: '1.1rem', color: active ? 'var(--ac-primary, #e8862e)' : '#64748b' }} />
+        <strong>{title}</strong>
+      </div>
+      <div className="text-muted small mt-1">{sub}</div>
+    </button>
+  );
 }
