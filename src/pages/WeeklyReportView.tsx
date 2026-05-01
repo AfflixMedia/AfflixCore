@@ -39,8 +39,8 @@ export default function WeeklyReportView() {
     if (!el || !report || !brand) return;
     setExporting(true);
     document.body.classList.add('ac-pdf-capturing');
-    // The capture target is rendered at a fixed wide width so Bootstrap's grid
-    // lays out properly regardless of the user's screen width.
+    // Capture at a fixed width that hits xl so all 6 KPI cards fit in one row,
+    // and render the PDF in landscape so the capture downscales only a little.
     const prevWidth = el.style.width;
     el.style.width = '1280px';
     try {
@@ -56,7 +56,7 @@ export default function WeeklyReportView() {
           scrollX: 0,
           scrollY: 0,
         },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
         pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
       };
       await html2pdf().from(el).set(opts).save();

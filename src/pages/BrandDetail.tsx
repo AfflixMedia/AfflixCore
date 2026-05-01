@@ -6,6 +6,7 @@ import { useAuth } from '../auth/AuthContext';
 import BrandResourcesTab from './brand/BrandResourcesTab';
 import BrandReportingTab from './brand/BrandReportingTab';
 import BrandGmvMaxTab from './brand/BrandGmvMaxTab';
+import BrandSamplesTab from './brand/BrandSamplesTab';
 import BrandPaidCollabTab from './brand/BrandPaidCollabTab';
 
 interface Brand {
@@ -16,13 +17,14 @@ interface Brand {
   share_enabled: boolean;
 }
 
-type TabKey = 'resources' | 'reporting' | 'gmv-max' | 'paid-collab';
+type TabKey = 'resources' | 'reporting' | 'gmv-max' | 'samples' | 'paid-collab';
 
 const TABS: { key: TabKey; label: string; icon: string }[] = [
-  { key: 'resources',   label: 'Resources',   icon: 'bi-folder2-open' },
-  { key: 'reporting',   label: 'Reporting',   icon: 'bi-bar-chart' },
-  { key: 'gmv-max',     label: 'GMV Max',     icon: 'bi-graph-up-arrow' },
-  { key: 'paid-collab', label: 'Paid Collab', icon: 'bi-people' },
+  { key: 'resources',   label: 'Resources',      icon: 'bi-folder2-open' },
+  { key: 'reporting',   label: 'Reporting',      icon: 'bi-bar-chart' },
+  { key: 'gmv-max',     label: 'GMV Max',        icon: 'bi-graph-up-arrow' },
+  { key: 'samples',     label: 'Sample Seeding', icon: 'bi-box-seam' },
+  { key: 'paid-collab', label: 'Paid Collab',    icon: 'bi-people' },
 ];
 
 export default function BrandDetail() {
@@ -131,6 +133,7 @@ export default function BrandDetail() {
       {currentTab === 'resources'   && <BrandResourcesTab brandId={brand.id} brandName={brand.name} />}
       {currentTab === 'reporting'   && <BrandReportingTab brand={brand} isBob={isBob} onShareEnabledChanged={onShareEnabledChanged} />}
       {currentTab === 'gmv-max'     && <BrandGmvMaxTab brandId={brand.id} canEdit={isBob || canManageGmvMax} />}
+      {currentTab === 'samples'     && <BrandSamplesTab brandId={brand.id} canEdit={isBob || (isApc && assignedToMe)} />}
       {currentTab === 'paid-collab' && <BrandPaidCollabTab />}
     </div>
   );

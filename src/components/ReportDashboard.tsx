@@ -473,7 +473,7 @@ function KpiCard({ label, value, prev, cur, money, dec, sub }: {
   money?: boolean; dec?: boolean; sub?: string;
 }) {
   return (
-    <Col md={4} lg={2}>
+    <Col xs={6} md={4} xl={2}>
       <Card className="h-100 shadow-sm" style={{ borderLeft: '4px solid #e8862e' }}>
         <Card.Body className="py-3">
           <div className="ac-label">{label}</div>
