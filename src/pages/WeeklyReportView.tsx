@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Spinner, Alert, Badge, Button } from 'react-bootstrap';
-import html2pdf from 'html2pdf.js';
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/AuthContext';
 import { useNotifications } from '../notifications/NotificationsContext';
@@ -39,27 +40,50 @@ export default function WeeklyReportView() {
     if (!el || !report || !brand) return;
     setExporting(true);
     document.body.classList.add('ac-pdf-capturing');
-    // Capture at a fixed width that hits xl so all 6 KPI cards fit in one row,
-    // and render the PDF in landscape so the capture downscales only a little.
+    // Render at a fixed wide width so layout is consistent across viewports.
+    // The PDF page size is then sized to match the actual rendered content,
+    // so nothing can be cropped no matter how wide a custom section grows.
     const prevWidth = el.style.width;
-    el.style.width = '1280px';
+    const captureWidth = 1280;
+    el.style.width = `${captureWidth}px`;
+
+    // Let recharts and any responsive containers reflow to the new width.
+    await new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+
     try {
-      const opts: any = {
-        margin: [8, 8, 8, 8],
-        filename: `${brand.name.replace(/\s+/g, '_')}-Week-${report.week_number}.pdf`,
-        image: { type: 'jpeg', quality: 0.96 },
-        html2canvas: {
-          scale: 2,
-          useCORS: true,
-          backgroundColor: '#ffffff',
-          windowWidth: 1280,
-          scrollX: 0,
-          scrollY: 0,
-        },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
-        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
-      };
-      await html2pdf().from(el).set(opts).save();
+      const canvas = await html2canvas(el, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        windowWidth: captureWidth,
+        width: captureWidth,
+        scrollX: 0,
+        scrollY: 0,
+      });
+
+      // Convert captured pixels → mm (96dpi reference). canvas dims are 2× from scale.
+      const PX_TO_MM = 25.4 / 96;
+      const contentWidthMm = (canvas.width / 2) * PX_TO_MM;
+      const contentHeightMm = (canvas.height / 2) * PX_TO_MM;
+      const margin = 8;
+      const pageWidth = contentWidthMm + margin * 2;
+      const pageHeight = contentHeightMm + margin * 2;
+
+      // Single-page PDF whose page format exactly matches the captured content.
+      // Page grows to fit content of any size — no horizontal cropping ever.
+      const pdf = new jsPDF({
+        unit: 'mm',
+        format: [pageWidth, pageHeight],
+        orientation: pageWidth > pageHeight ? 'landscape' : 'portrait',
+      });
+
+      pdf.addImage(
+        canvas.toDataURL('image/jpeg', 0.96),
+        'JPEG',
+        margin, margin,
+        contentWidthMm, contentHeightMm,
+      );
+      pdf.save(`${brand.name.replace(/\s+/g, '_')}-Week-${report.week_number}.pdf`);
     } finally {
       el.style.width = prevWidth;
       document.body.classList.remove('ac-pdf-capturing');
