@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card, Form, Button, Row, Col, Table, Spinner, Alert, Badge, Modal, Offcanvas, Dropdown } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
@@ -14,6 +14,7 @@ import RichTextEditor from '../components/RichTextEditor';
 import { CustomSectionInline, CustomSectionDefModal, customSectionsAt, newSection } from '../components/CustomSectionEditor';
 import { CustomSection, StandardSectionId } from '../lib/reportSchema';
 import NumberInput from '../components/NumberInput';
+import { parseReportPdf } from '../lib/importReport';
 
 const SECTION_LABELS: Record<string, string> = {
   overall: 'Overall Performance',
@@ -71,6 +72,48 @@ export default function WeeklyReportEdit() {
   const [presets, setPresets] = useState<PresetRow[]>([]);
   const [presetSavingId, setPresetSavingId] = useState<string | null>(null);
   const [presetMsg, setPresetMsg] = useState<string | null>(null);
+
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState<{ kind: 'success' | 'warning' | 'danger'; text: string } | null>(null);
+
+  const onImportFile = async (file: File) => {
+    setImporting(true);
+    setImportMsg(null);
+    try {
+      const parsed = await parseReportPdf(file);
+      setC(prev => ({
+        ...prev,
+        ...(parsed.content.overall            ? { overall:            parsed.content.overall } : {}),
+        ...(parsed.content.video_performance  ? { video_performance:  parsed.content.video_performance } : {}),
+        ...(parsed.content.gmv_max            ? { gmv_max:            parsed.content.gmv_max } : {}),
+        ...(parsed.content.shop_health        ? { shop_health:        parsed.content.shop_health } : {}),
+        ...(parsed.content.top_creators       ? { top_creators:       parsed.content.top_creators } : {}),
+        ...(parsed.content.top_videos         ? { top_videos:         parsed.content.top_videos } : {}),
+        ...(parsed.content.product_highlights ? { product_highlights: parsed.content.product_highlights } : {}),
+        ...(parsed.content.insights           ? { insights:           parsed.content.insights } : {}),
+      }));
+      const pieces: string[] = [];
+      if (parsed.content.overall)                       pieces.push('KPIs');
+      if (parsed.content.video_performance)             pieces.push('Video Performance');
+      if (parsed.content.gmv_max)                       pieces.push('GMV Max');
+      if (parsed.content.shop_health)                   pieces.push('Shop Health');
+      if (parsed.content.top_creators?.length)          pieces.push(`${parsed.content.top_creators.length} creator${parsed.content.top_creators.length === 1 ? '' : 's'}`);
+      if (parsed.content.top_videos?.length)            pieces.push(`${parsed.content.top_videos.length} video${parsed.content.top_videos.length === 1 ? '' : 's'}`);
+      if (parsed.content.product_highlights?.length)    pieces.push(`${parsed.content.product_highlights.length} product${parsed.content.product_highlights.length === 1 ? '' : 's'}`);
+      if (parsed.content.insights?.summary)             pieces.push('Insights');
+      const summary = pieces.length > 0
+        ? `Imported: ${pieces.join(', ')}. Review the fields and save when ready.`
+        : 'Nothing recognizable was extracted. Make sure the PDF uses the standard report layout.';
+      const warnSuffix = parsed.warnings.length > 0 ? ` (warnings: ${parsed.warnings.join('; ')})` : '';
+      setImportMsg({ kind: pieces.length > 0 ? 'success' : 'warning', text: summary + warnSuffix });
+    } catch (e: any) {
+      setImportMsg({ kind: 'danger', text: `Failed to parse PDF: ${e?.message ?? 'unknown error'}` });
+    } finally {
+      setImporting(false);
+      if (importInputRef.current) importInputRef.current.value = '';
+    }
+  };
 
   useEffect(() => {
     if (!presetMsg) return;
@@ -437,6 +480,21 @@ export default function WeeklyReportEdit() {
           </div>
         </div>
         <div className="d-flex gap-2 flex-wrap">
+          <input
+            ref={importInputRef}
+            type="file"
+            accept="application/pdf"
+            style={{ display: 'none' }}
+            onChange={e => {
+              const f = e.target.files?.[0];
+              if (f) onImportFile(f);
+            }}
+          />
+          <Button variant="outline-warning" disabled={importing} onClick={() => importInputRef.current?.click()}
+            title="Upload a report PDF and auto-fill the form fields">
+            <i className="bi bi-file-earmark-arrow-up me-1" />
+            {importing ? 'Reading PDF…' : 'Import from PDF'}
+          </Button>
           {priorReports.length > 0 && (
             <Button variant="outline-info" onClick={openCommentsModal}>
               <i className="bi bi-chat-left-text me-1" /> Load previous comments
@@ -480,6 +538,11 @@ export default function WeeklyReportEdit() {
 
       {err && <Alert variant="danger">{err}</Alert>}
       {presetMsg && <Alert variant="info" className="py-2 small" dismissible onClose={() => setPresetMsg(null)}>{presetMsg}</Alert>}
+      {importMsg && (
+        <Alert variant={importMsg.kind} className="py-2 small" dismissible onClose={() => setImportMsg(null)}>
+          {importMsg.text}
+        </Alert>
+      )}
 
       {renderCustomAt('start')}
 
