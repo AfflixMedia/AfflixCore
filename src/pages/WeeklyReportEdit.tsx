@@ -733,6 +733,36 @@ export default function WeeklyReportEdit() {
       </Card>
       {renderCustomAt('insights')}
 
+      {/* Approval Needed (optional) */}
+      <Card className="mb-4">
+        <Card.Header className="d-flex justify-content-between align-items-center">
+          <span className="fw-semibold">
+            <i className="bi bi-shield-check me-2 text-warning" />
+            Approval Needed
+          </span>
+          <Form.Check
+            type="switch"
+            id="approval-needed-toggle"
+            checked={!!c.approval?.enabled}
+            onChange={e => setC({ ...c, approval: { ...c.approval, enabled: e.target.checked } })}
+            label={c.approval?.enabled ? 'On — client will see approval prompt' : 'Off'}
+          />
+        </Card.Header>
+        {c.approval?.enabled && (
+          <Card.Body>
+            <Form.Text className="text-muted d-block mb-2">
+              The client will see this content in a prompt before viewing the report. They can approve, request changes, and add a comment.
+            </Form.Text>
+            <RichTextEditor
+              value={c.approval?.content ?? ''}
+              onChange={html => setC({ ...c, approval: { ...c.approval, content: html } })}
+              placeholder="Describe what needs the client's approval this week…"
+              minHeight={180}
+            />
+          </Card.Body>
+        )}
+      </Card>
+
       <CustomSectionDefModal
         show={csModalOpen}
         onHide={() => setCsModalOpen(false)}

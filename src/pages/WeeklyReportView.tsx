@@ -8,7 +8,7 @@ import { useAuth } from '../auth/AuthContext';
 import { useNotifications } from '../notifications/NotificationsContext';
 import { addDays, formatRange, formatHuman } from '../lib/dates';
 import { WeeklyReportContent, normalizeContent } from '../lib/reportSchema';
-import ReportDashboard, { TrendPoint } from '../components/ReportDashboard';
+import ReportDashboard, { TrendPoint, ApprovalDecisionView } from '../components/ReportDashboard';
 import { Comment, CommentSection } from '../components/SectionComments';
 
 interface ReportRow {
@@ -30,6 +30,7 @@ export default function WeeklyReportView() {
   const [brand, setBrand] = useState<Brand | null>(null);
   const [trend, setTrend] = useState<ReportRow[]>([]);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [decisions, setDecisions] = useState<ApprovalDecisionView[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -118,6 +119,17 @@ export default function WeeklyReportView() {
       const { data: cm } = await supabase.from('report_comments')
         .select('*').eq('report_id', r.id).order('created_at', { ascending: true });
       setComments((cm as Comment[]) ?? []);
+      const { data: dec } = await supabase.from('report_approval_decisions')
+        .select('id,decision,comment,decided_by_name,decided_at,share_link_id,report_share_links(label)')
+        .eq('report_id', r.id).order('decided_at', { ascending: false });
+      setDecisions(((dec as any[]) ?? []).map(d => ({
+        id: d.id,
+        decision: d.decision,
+        comment: d.comment,
+        decided_by_name: d.decided_by_name,
+        decided_at: d.decided_at,
+        share_link_label: d.report_share_links?.label ?? null,
+      })));
       setLoading(false);
     })();
   }, [id]);
@@ -198,6 +210,7 @@ export default function WeeklyReportView() {
           prevTopVideos={p?.top_videos}
           openSectionOnLoad={openSection}
           highlightCommentId={highlightCommentId}
+          approvalDecisions={decisions}
           commentsConfig={{
             mode: 'authed',
             comments,

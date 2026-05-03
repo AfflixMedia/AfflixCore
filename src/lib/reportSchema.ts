@@ -57,6 +57,11 @@ export interface ShopHealth {
 
 export interface Insights { summary: string; }  // summary is now HTML (rich text)
 
+export interface ApprovalRequest {
+  enabled: boolean;
+  content: string;  // rich text HTML — what is being requested for approval
+}
+
 export type CustomFieldType = 'text' | 'number' | 'textarea' | 'richtext' | 'date' | 'url' | 'select';
 
 export interface CustomField {
@@ -89,6 +94,7 @@ export interface WeeklyReportContent {
   shop_health: ShopHealth;
   insights: Insights;
   custom_sections: CustomSection[];
+  approval: ApprovalRequest;
 }
 
 export const emptyOverall = (): OverallPerformance => ({
@@ -127,6 +133,7 @@ export const emptyContent = (): WeeklyReportContent => ({
   shop_health: emptyShopHealth(),
   insights: { summary: '' },
   custom_sections: [],
+  approval: { enabled: false, content: '' },
 });
 
 export const emptyTopCreator = (): TopCreator => ({ name: '', videos: 0, items_sold: 0, gmv: 0, notes: '' });
@@ -236,6 +243,10 @@ export function normalizeContent(raw: any): WeeklyReportContent {
         };
       })
     : [];
+  const approval: ApprovalRequest = {
+    enabled: !!src.approval?.enabled,
+    content: str(src.approval?.content),
+  };
   return {
     overall,
     top_creators,
@@ -246,6 +257,7 @@ export function normalizeContent(raw: any): WeeklyReportContent {
     shop_health,
     insights: { summary: str(src.insights?.summary) },
     custom_sections,
+    approval,
   };
 }
 

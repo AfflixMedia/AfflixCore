@@ -4,10 +4,22 @@ import { Card, Spinner, Alert, Form, Row, Col, Badge, Button, Tab, Nav, Offcanva
 import { supabase } from '../lib/supabase';
 import { addDays, formatRange, formatHuman, fromISO } from '../lib/dates';
 import { WeeklyReportContent, normalizeContent } from '../lib/reportSchema';
-import ReportDashboard, { TrendPoint } from '../components/ReportDashboard';
+import ReportDashboard, { TrendPoint, ApprovalDecisionView } from '../components/ReportDashboard';
 import { Comment, CommentSection } from '../components/SectionComments';
 import { resourceIcon } from '../lib/resourceIcon';
 import ResourceComments, { ResourceComment } from '../components/ResourceComments';
+import ApprovalsModal, { PendingApprovalReport } from '../components/share/ApprovalsModal';
+import MonthPickerModal from '../components/share/MonthPickerModal';
+
+interface ApprovalDecisionRow {
+  id: string;
+  report_id: string;
+  share_link_id: string;
+  decision: 'approved' | 'changes_requested';
+  comment: string | null;
+  decided_by_name: string;
+  decided_at: string;
+}
 
 interface Brand { id: string; name: string; client: string | null; client_id: string | null; }
 interface Report {
@@ -37,6 +49,9 @@ export default function SharedReports() {
   const [includeReports, setIncludeReports] = useState(true);
   const [includeResources, setIncludeResources] = useState(true);
   const [linkMode, setLinkMode] = useState<'brand' | 'general'>('brand');
+  const [decisions, setDecisions] = useState<ApprovalDecisionRow[]>([]);
+  const [showApprovals, setShowApprovals] = useState(false);
+  const [showMonthPicker, setShowMonthPicker] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -53,15 +68,27 @@ export default function SharedReports() {
         setResources(data.resources ?? []);
         setComments(data.comments ?? []);
         setResourceComments(data.resource_comments ?? []);
+        setDecisions(data.approval_decisions ?? []);
         setLabel(data.label);
         const ir = data.include_reports !== false;
         const ix = data.include_resources !== false;
         setIncludeReports(ir);
         setIncludeResources(ix);
-        setLinkMode(data.link_mode === 'general' ? 'general' : 'brand');
+        const mode: 'brand' | 'general' = data.link_mode === 'general' ? 'general' : 'brand';
+        setLinkMode(mode);
         // If reports are excluded, default landing tab to resources
         if (!ir && ix) setActiveTab('resources');
         if (data.brands?.length > 0) setActiveBrandId(data.brands[0].id);
+
+        // Brand-mode entry flow: approvals popup first (if any pending), then month picker.
+        if (mode === 'brand' && ir) {
+          const decidedIds = new Set<string>((data.approval_decisions ?? []).map((d: any) => d.report_id));
+          const pendingCount = (data.reports ?? []).filter((r: any) =>
+            r.content?.approval?.enabled === true && !decidedIds.has(r.id)
+          ).length;
+          if (pendingCount > 0) setShowApprovals(true);
+          else setShowMonthPicker(true);
+        }
       } catch (e: any) {
         setErr(e?.message ?? 'Failed to load');
       }
@@ -125,6 +152,49 @@ export default function SharedReports() {
 
   const reportComments = openReport ? comments.filter(c => c.report_id === openReport.id) : [];
 
+  const decidedIds = useMemo(() => new Set(decisions.map(d => d.report_id)), [decisions]);
+  const pendingApprovals: PendingApprovalReport[] = useMemo(() => {
+    return reports
+      .filter(r => r.content?.approval?.enabled === true && !decidedIds.has(r.id))
+      .map(r => {
+        const b = brands.find(x => x.id === r.brand_id);
+        return {
+          id: r.id,
+          brand_id: r.brand_id,
+          brand_name: b?.name ?? 'Brand',
+          week_number: r.week_number,
+          week_start: r.week_start,
+          week_end: r.week_end,
+          content: normalizeContent(r.content),
+        };
+      });
+  }, [reports, brands, decidedIds]);
+
+  const monthsWithData = useMemo(() =>
+    new Set<string>(reports.map(r => r.week_start.slice(0, 7))),
+  [reports]);
+
+  const submitApprovals = async (
+    items: { report_id: string; decision: 'approved' | 'changes_requested'; comment: string; decided_by_name: string }[]
+  ) => {
+    for (const it of items) {
+      const { data, error } = await supabase.functions.invoke('post-approval-decision', {
+        body: { token, ...it },
+      });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      const inserted = (data as any).decision;
+      setDecisions(prev => {
+        const filtered = prev.filter(d => d.report_id !== inserted.report_id);
+        return [...filtered, inserted];
+      });
+    }
+    if (items[0]?.decided_by_name) {
+      setPublicName(items[0].decided_by_name);
+      localStorage.setItem('ac_public_name', items[0].decided_by_name);
+    }
+  };
+
   const addResourceComment = async (body: string, authorName: string, parentId?: string) => {
     if (!feedbackResource) return;
     const { data, error } = await supabase.functions.invoke('post-shared-resource-comment', {
@@ -161,6 +231,12 @@ export default function SharedReports() {
           trendData={trendData}
           hasPrev={!!prevReport}
           prevTopVideos={prevReport ? normalizeContent(prevReport.content).top_videos : undefined}
+          approvalDecisions={decisions
+            .filter(d => d.report_id === openReport.id)
+            .map(d => ({
+              id: d.id, decision: d.decision, comment: d.comment,
+              decided_by_name: d.decided_by_name, decided_at: d.decided_at,
+            }))}
           commentsConfig={{
             mode: 'public',
             comments: reportComments,
@@ -359,11 +435,12 @@ export default function SharedReports() {
                   <div className="d-flex justify-content-between align-items-end mb-3 flex-wrap gap-2">
                     <div>
                       <h5 className="mb-0">{activeBrand.name} — Reports</h5>
-                      <small className="text-muted">{monthFiltered.length} report{monthFiltered.length !== 1 ? 's' : ''} in selected month</small>
+                      <small className="text-muted">{monthFiltered.length} report{monthFiltered.length !== 1 ? 's' : ''} in {fmtMonthLabel(month)}</small>
                     </div>
-                    <div>
-                      <Form.Label className="small mb-1 text-muted">Month</Form.Label>
-                      <Form.Control size="sm" type="month" value={month} onChange={e => setMonth(e.target.value)} style={{ minWidth: 170 }} />
+                    <div className="d-flex gap-2 align-items-end">
+                      <Button size="sm" variant="outline-primary" onClick={() => setShowMonthPicker(true)}>
+                        <i className="bi bi-calendar3 me-1" /> Change month
+                      </Button>
                     </div>
                   </div>
 
@@ -376,28 +453,47 @@ export default function SharedReports() {
                     <div className="text-center py-4 text-muted">No reports in this month. Try a different month.</div>
                   ) : (
                     <Row className="g-3">
-                      {monthFiltered.map(r => (
-                        <Col md={6} lg={4} key={r.id}>
-                          <Card
-                            className="h-100 shadow-sm report-card"
-                            style={{ cursor: 'pointer', borderLeft: '4px solid #2563eb', transition: 'transform .15s, box-shadow .15s' }}
-                            onClick={() => setOpenId(r.id)}
-                            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)'; (e.currentTarget as HTMLElement).style.boxShadow = '0 8px 24px rgba(0,0,0,.08)'; }}
-                            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.transform = ''; (e.currentTarget as HTMLElement).style.boxShadow = ''; }}
-                          >
-                            <Card.Body>
-                              <div className="d-flex justify-content-between align-items-start">
-                                <div className="text-muted small text-uppercase" style={{ letterSpacing: '.5px', fontSize: '.7rem' }}>Week</div>
-                                <Badge bg="primary" pill>#{r.week_number}</Badge>
-                              </div>
-                              <div className="fs-5 fw-semibold mt-1">{formatRange(r.week_start, r.week_end)}</div>
-                              <div className="text-muted small mt-2">
-                                <i className="bi bi-calendar3 me-1" /> Click to view dashboard
-                              </div>
-                            </Card.Body>
-                          </Card>
-                        </Col>
-                      ))}
+                      {monthFiltered.map(r => {
+                        const dec = decisions.find(d => d.report_id === r.id);
+                        const approvalEnabled = !!r.content?.approval?.enabled;
+                        return (
+                          <Col md={6} lg={4} key={r.id}>
+                            <Card
+                              className="h-100 shadow-sm report-card"
+                              style={{ cursor: 'pointer', borderLeft: '4px solid #2563eb', transition: 'transform .15s, box-shadow .15s' }}
+                              onClick={() => setOpenId(r.id)}
+                              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)'; (e.currentTarget as HTMLElement).style.boxShadow = '0 8px 24px rgba(0,0,0,.08)'; }}
+                              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.transform = ''; (e.currentTarget as HTMLElement).style.boxShadow = ''; }}
+                            >
+                              <Card.Body>
+                                <div className="d-flex justify-content-between align-items-start">
+                                  <div className="text-muted small text-uppercase" style={{ letterSpacing: '.5px', fontSize: '.7rem' }}>Week</div>
+                                  <Badge bg="primary" pill>#{r.week_number}</Badge>
+                                </div>
+                                <div className="fs-5 fw-semibold mt-1">{formatRange(r.week_start, r.week_end)}</div>
+                                <div className="text-muted small mt-2">
+                                  <i className="bi bi-calendar3 me-1" /> Click to view dashboard
+                                </div>
+                                {approvalEnabled && (
+                                  <div className="mt-2">
+                                    {dec ? (
+                                      <Badge bg={dec.decision === 'approved' ? 'success' : 'warning'}
+                                             text={dec.decision === 'approved' ? undefined : 'dark'}>
+                                        <i className={`bi ${dec.decision === 'approved' ? 'bi-check-circle' : 'bi-arrow-repeat'} me-1`} />
+                                        {dec.decision === 'approved' ? 'Approved' : 'Changes requested'}
+                                      </Badge>
+                                    ) : (
+                                      <Badge bg="warning" text="dark">
+                                        <i className="bi bi-shield-exclamation me-1" /> Approval requested
+                                      </Badge>
+                                    )}
+                                  </div>
+                                )}
+                              </Card.Body>
+                            </Card>
+                          </Col>
+                        );
+                      })}
                     </Row>
                   )}
                 </Tab.Pane>
@@ -505,8 +601,31 @@ export default function SharedReports() {
           )}
         </Offcanvas.Body>
       </Offcanvas>
+
+      <ApprovalsModal
+        show={showApprovals}
+        pending={pendingApprovals}
+        defaultName={publicName}
+        onClose={() => {
+          setShowApprovals(false);
+          setShowMonthPicker(true);
+        }}
+        onSubmit={submitApprovals}
+      />
+      <MonthPickerModal
+        show={showMonthPicker}
+        monthsWithData={monthsWithData}
+        selectedMonth={month}
+        onPick={(m) => { setMonth(m); setShowMonthPicker(false); }}
+        onClose={() => setShowMonthPicker(false)}
+      />
     </PublicShell>
   );
+}
+
+function fmtMonthLabel(yyyymm: string): string {
+  const [y, m] = yyyymm.split('-').map(Number);
+  return new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
 }
 
 function PublicShell({ children, clientName }: { children: React.ReactNode; clientName: string }) {

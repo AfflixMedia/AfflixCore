@@ -18,8 +18,18 @@ export interface CommentsConfig {
   onAdd: (section: CommentSection, body: string, authorName: string, parentId?: string) => Promise<void>;
 }
 
+export interface ApprovalDecisionView {
+  id: string;
+  decision: 'approved' | 'changes_requested';
+  comment: string | null;
+  decided_by_name: string;
+  decided_at: string;
+  share_link_label?: string | null;
+}
+
 export default function ReportDashboard({
   c, p, trendData, hasPrev, commentsConfig, prevTopVideos, openSectionOnLoad, highlightCommentId,
+  approvalDecisions,
 }: {
   c: WeeklyReportContent;
   p: WeeklyReportContent | null;
@@ -31,6 +41,8 @@ export default function ReportDashboard({
   openSectionOnLoad?: CommentSection | null;
   /** When set, highlights and scrolls to that comment id inside the offcanvas. */
   highlightCommentId?: string | null;
+  /** All decisions made by clients across share links (authed view). */
+  approvalDecisions?: ApprovalDecisionView[];
 }) {
   const o = c.overall, po = p?.overall;
   const vp = c.video_performance, pvp = p?.video_performance;
@@ -383,6 +395,61 @@ export default function ReportDashboard({
         </Card>
       )}
       {renderCustomAt('insights')}
+
+      {/* Approval Needed */}
+      {c.approval?.enabled && (
+        <Card className="mb-3" data-section="approval" border="warning">
+          <Card.Header className="d-flex justify-content-between align-items-center" style={{ background: '#fff8ef' }}>
+            <span className="fw-semibold">
+              <i className="bi bi-shield-check me-2 text-warning" />
+              Approval Needed
+            </span>
+            {approvalDecisions && approvalDecisions.length > 0 && (
+              <Badge bg="success" pill>
+                {approvalDecisions.length} decision{approvalDecisions.length === 1 ? '' : 's'}
+              </Badge>
+            )}
+          </Card.Header>
+          <Card.Body>
+            <div className="ac-rte-view" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(c.approval.content) }} />
+
+            {commentsConfig?.mode === 'authed' && (
+              <div className="mt-3">
+                <h6 className="text-muted mb-2 small text-uppercase" style={{ letterSpacing: '.5px' }}>
+                  Client decisions
+                </h6>
+                {(!approvalDecisions || approvalDecisions.length === 0) ? (
+                  <p className="text-muted small mb-0">No client has decided yet.</p>
+                ) : (
+                  <Table size="sm" className="mb-0 align-middle">
+                    <thead><tr>
+                      <th>Decision</th><th>Client</th><th>When</th><th>Comment</th>
+                    </tr></thead>
+                    <tbody>
+                      {approvalDecisions.map(d => (
+                        <tr key={d.id}>
+                          <td>
+                            <Badge bg={d.decision === 'approved' ? 'success' : 'warning'} text={d.decision === 'approved' ? undefined : 'dark'}>
+                              <i className={`bi ${d.decision === 'approved' ? 'bi-check-circle' : 'bi-arrow-repeat'} me-1`} />
+                              {d.decision === 'approved' ? 'Approved' : 'Changes requested'}
+                            </Badge>
+                          </td>
+                          <td>
+                            <div className="fw-semibold">{d.decided_by_name}</div>
+                            {d.share_link_label && <small className="text-muted">{d.share_link_label}</small>}
+                          </td>
+                          <td className="text-muted small">{new Date(d.decided_at).toLocaleString()}</td>
+                          <td className="small">{d.comment || <span className="text-muted">—</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </Table>
+                )}
+              </div>
+            )}
+          </Card.Body>
+        </Card>
+      )}
 
       {/* Custom Sections */}
     </div>

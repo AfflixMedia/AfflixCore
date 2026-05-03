@@ -103,6 +103,12 @@ serve(async (req) => {
       ? await admin.from('resource_comments').select('*').in('resource_id', sharedResourceIds).order('created_at', { ascending: true })
       : { data: [] };
 
+    // Approval decisions made via THIS link only — drives "what's still pending for this client"
+    const { data: approval_decisions } = reportIds.length > 0
+      ? await admin.from('report_approval_decisions').select('*')
+          .in('report_id', reportIds).eq('share_link_id', link.id)
+      : { data: [] };
+
     return json({
       client,
       brands,
@@ -110,6 +116,7 @@ serve(async (req) => {
       resources: resources ?? [],
       comments: comments ?? [],
       resource_comments: resource_comments ?? [],
+      approval_decisions: approval_decisions ?? [],
       label: link.label ?? null,
       include_reports: includeReports,
       include_resources: includeResources,
