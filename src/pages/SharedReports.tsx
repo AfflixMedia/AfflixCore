@@ -135,23 +135,6 @@ export default function SharedReports() {
       });
   }, [openReport, reports]);
 
-  const clientName = client?.name ?? 'Client';
-  if (loading) return <PublicShell clientName={clientName}><div className="text-center py-5"><Spinner animation="border" /></div></PublicShell>;
-  if (err) return <PublicShell clientName={clientName}><Alert variant="danger">{err}</Alert></PublicShell>;
-
-  const addComment = async (section: CommentSection, body: string, authorName: string, parentId?: string) => {
-    if (!openReport) return;
-    const { data, error } = await supabase.functions.invoke('post-shared-comment', {
-      body: { token, report_id: openReport.id, section, author_name: authorName, body, parent_id: parentId },
-    });
-    if (error) throw error;
-    if ((data as any)?.error) throw new Error((data as any).error);
-    setComments(prev => [...prev, (data as any).comment as Comment]);
-    setPublicName(authorName);
-  };
-
-  const reportComments = openReport ? comments.filter(c => c.report_id === openReport.id) : [];
-
   const decidedIds = useMemo(() => new Set(decisions.map(d => d.report_id)), [decisions]);
   const pendingApprovals: PendingApprovalReport[] = useMemo(() => {
     return reports
@@ -169,10 +152,26 @@ export default function SharedReports() {
         };
       });
   }, [reports, brands, decidedIds]);
-
   const monthsWithData = useMemo(() =>
     new Set<string>(reports.map(r => r.week_start.slice(0, 7))),
   [reports]);
+
+  const clientName = client?.name ?? 'Client';
+  if (loading) return <PublicShell clientName={clientName}><div className="text-center py-5"><Spinner animation="border" /></div></PublicShell>;
+  if (err) return <PublicShell clientName={clientName}><Alert variant="danger">{err}</Alert></PublicShell>;
+
+  const addComment = async (section: CommentSection, body: string, authorName: string, parentId?: string) => {
+    if (!openReport) return;
+    const { data, error } = await supabase.functions.invoke('post-shared-comment', {
+      body: { token, report_id: openReport.id, section, author_name: authorName, body, parent_id: parentId },
+    });
+    if (error) throw error;
+    if ((data as any)?.error) throw new Error((data as any).error);
+    setComments(prev => [...prev, (data as any).comment as Comment]);
+    setPublicName(authorName);
+  };
+
+  const reportComments = openReport ? comments.filter(c => c.report_id === openReport.id) : [];
 
   const submitApprovals = async (
     items: { report_id: string; decision: 'approved' | 'changes_requested'; comment: string; decided_by_name: string }[]
