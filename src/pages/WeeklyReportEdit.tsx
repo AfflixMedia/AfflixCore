@@ -804,7 +804,7 @@ export default function WeeklyReportEdit() {
         <Card.Body>
           <RichTextEditor
             value={c.insights.summary}
-            onChange={html => setC({ ...c, insights: { summary: html } })}
+            onChange={html => setC(prev => ({ ...prev, insights: { summary: html } }))}
             placeholder="Write your insights for this week…"
             minHeight={220}
           />
@@ -823,7 +823,7 @@ export default function WeeklyReportEdit() {
             type="switch"
             id="approval-needed-toggle"
             checked={!!c.approval?.enabled}
-            onChange={e => setC({ ...c, approval: { ...c.approval, enabled: e.target.checked } })}
+            onChange={e => setC(prev => ({ ...prev, approval: { ...prev.approval, enabled: e.target.checked } }))}
             label={c.approval?.enabled ? 'On — client will see approval prompt' : 'Off'}
           />
         </Card.Header>
@@ -834,7 +834,7 @@ export default function WeeklyReportEdit() {
             </Form.Text>
             <RichTextEditor
               value={c.approval?.content ?? ''}
-              onChange={html => setC({ ...c, approval: { ...c.approval, content: html } })}
+              onChange={html => setC(prev => ({ ...prev, approval: { ...prev.approval, content: html } }))}
               placeholder="Describe what needs the client's approval this week…"
               minHeight={180}
             />
