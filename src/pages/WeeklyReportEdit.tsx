@@ -82,8 +82,6 @@ export default function WeeklyReportEdit() {
     setImportMsg(null);
     try {
       const parsed = await parseReportPdf(file);
-      // Temporary diagnostics — remove once import is reliable.
-      console.log('[PDF Import] parsed:', parsed);
       setC(prev => {
         const next: WeeklyReportContent = { ...prev };
         if (parsed.content.overall)                      next.overall            = parsed.content.overall;
@@ -94,10 +92,6 @@ export default function WeeklyReportEdit() {
         if (parsed.content.top_videos?.length)           next.top_videos         = parsed.content.top_videos;
         if (parsed.content.product_highlights?.length)   next.product_highlights = parsed.content.product_highlights;
         if (parsed.content.insights)                     next.insights           = parsed.content.insights;
-        console.log('[PDF Import] setC updater. prev.overall.total_gmv =', prev.overall.total_gmv,
-          '→ next.overall.total_gmv =', next.overall.total_gmv,
-          '| prev.top_creators.len =', prev.top_creators.length,
-          '→ next.top_creators.len =', next.top_creators.length);
         return next;
       });
       const pieces: string[] = [];
@@ -128,20 +122,11 @@ export default function WeeklyReportEdit() {
     return () => clearTimeout(t);
   }, [presetMsg]);
 
-  // Diagnostic — logs whenever c is rebuilt at the top level
   useEffect(() => {
-    console.log('[c re-rendered] total_gmv=', c.overall.total_gmv,
-      'top_creators.len=', c.top_creators.length,
-      'top_videos.len=', c.top_videos.length);
-  }, [c]);
-
-  useEffect(() => {
-    console.log('[load effect] firing for id=', id);
     (async () => {
       const { data, error } = await supabase.from('weekly_reports').select('*').eq('id', id).single();
       if (error) { setErr(error.message); setLoading(false); return; }
       const r = data as ReportRow;
-      console.log('[load effect] fetched, about to setC. content keys=', Object.keys(r.content ?? {}));
       setReport(r);
       setC(normalizeContent(r.content));
       const { data: bd } = await supabase.from('brands').select('id,name,client').eq('id', r.brand_id).single();
