@@ -82,20 +82,24 @@ export default function WeeklyReportEdit() {
     setImportMsg(null);
     try {
       const parsed = await parseReportPdf(file);
-      // Temporary diagnostic — open devtools (F12 → Console) to inspect what
-      // the parser actually extracted. Remove once import is reliable.
+      // Temporary diagnostics — remove once import is reliable.
       console.log('[PDF Import] parsed:', parsed);
-      setC(prev => ({
-        ...prev,
-        ...(parsed.content.overall                          ? { overall:            parsed.content.overall } : {}),
-        ...(parsed.content.video_performance                ? { video_performance:  parsed.content.video_performance } : {}),
-        ...(parsed.content.gmv_max                          ? { gmv_max:            parsed.content.gmv_max } : {}),
-        ...(parsed.content.shop_health                      ? { shop_health:        parsed.content.shop_health } : {}),
-        ...(parsed.content.top_creators?.length             ? { top_creators:       parsed.content.top_creators } : {}),
-        ...(parsed.content.top_videos?.length               ? { top_videos:         parsed.content.top_videos } : {}),
-        ...(parsed.content.product_highlights?.length       ? { product_highlights: parsed.content.product_highlights } : {}),
-        ...(parsed.content.insights                         ? { insights:           parsed.content.insights } : {}),
-      }));
+      setC(prev => {
+        const next: WeeklyReportContent = { ...prev };
+        if (parsed.content.overall)                      next.overall            = parsed.content.overall;
+        if (parsed.content.video_performance)            next.video_performance  = parsed.content.video_performance;
+        if (parsed.content.gmv_max)                      next.gmv_max            = parsed.content.gmv_max;
+        if (parsed.content.shop_health)                  next.shop_health        = parsed.content.shop_health;
+        if (parsed.content.top_creators?.length)         next.top_creators       = parsed.content.top_creators;
+        if (parsed.content.top_videos?.length)           next.top_videos         = parsed.content.top_videos;
+        if (parsed.content.product_highlights?.length)   next.product_highlights = parsed.content.product_highlights;
+        if (parsed.content.insights)                     next.insights           = parsed.content.insights;
+        console.log('[PDF Import] setC updater. prev.overall.total_gmv =', prev.overall.total_gmv,
+          '→ next.overall.total_gmv =', next.overall.total_gmv,
+          '| prev.top_creators.len =', prev.top_creators.length,
+          '→ next.top_creators.len =', next.top_creators.length);
+        return next;
+      });
       const pieces: string[] = [];
       if (parsed.content.overall)                       pieces.push('KPIs');
       if (parsed.content.video_performance)             pieces.push('Video Performance');
@@ -123,6 +127,13 @@ export default function WeeklyReportEdit() {
     const t = setTimeout(() => setPresetMsg(null), 3500);
     return () => clearTimeout(t);
   }, [presetMsg]);
+
+  // Diagnostic — logs whenever c is rebuilt at the top level
+  useEffect(() => {
+    console.log('[c re-rendered] total_gmv=', c.overall.total_gmv,
+      'top_creators.len=', c.top_creators.length,
+      'top_videos.len=', c.top_videos.length);
+  }, [c]);
 
   useEffect(() => {
     (async () => {
