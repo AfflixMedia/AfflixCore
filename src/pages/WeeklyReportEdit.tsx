@@ -136,10 +136,12 @@ export default function WeeklyReportEdit() {
   }, [c]);
 
   useEffect(() => {
+    console.log('[load effect] firing for id=', id);
     (async () => {
       const { data, error } = await supabase.from('weekly_reports').select('*').eq('id', id).single();
       if (error) { setErr(error.message); setLoading(false); return; }
       const r = data as ReportRow;
+      console.log('[load effect] fetched, about to setC. content keys=', Object.keys(r.content ?? {}));
       setReport(r);
       setC(normalizeContent(r.content));
       const { data: bd } = await supabase.from('brands').select('id,name,client').eq('id', r.brand_id).single();
