@@ -82,16 +82,19 @@ export default function WeeklyReportEdit() {
     setImportMsg(null);
     try {
       const parsed = await parseReportPdf(file);
+      // Temporary diagnostic — open devtools (F12 → Console) to inspect what
+      // the parser actually extracted. Remove once import is reliable.
+      console.log('[PDF Import] parsed:', parsed);
       setC(prev => ({
         ...prev,
-        ...(parsed.content.overall            ? { overall:            parsed.content.overall } : {}),
-        ...(parsed.content.video_performance  ? { video_performance:  parsed.content.video_performance } : {}),
-        ...(parsed.content.gmv_max            ? { gmv_max:            parsed.content.gmv_max } : {}),
-        ...(parsed.content.shop_health        ? { shop_health:        parsed.content.shop_health } : {}),
-        ...(parsed.content.top_creators       ? { top_creators:       parsed.content.top_creators } : {}),
-        ...(parsed.content.top_videos         ? { top_videos:         parsed.content.top_videos } : {}),
-        ...(parsed.content.product_highlights ? { product_highlights: parsed.content.product_highlights } : {}),
-        ...(parsed.content.insights           ? { insights:           parsed.content.insights } : {}),
+        ...(parsed.content.overall                          ? { overall:            parsed.content.overall } : {}),
+        ...(parsed.content.video_performance                ? { video_performance:  parsed.content.video_performance } : {}),
+        ...(parsed.content.gmv_max                          ? { gmv_max:            parsed.content.gmv_max } : {}),
+        ...(parsed.content.shop_health                      ? { shop_health:        parsed.content.shop_health } : {}),
+        ...(parsed.content.top_creators?.length             ? { top_creators:       parsed.content.top_creators } : {}),
+        ...(parsed.content.top_videos?.length               ? { top_videos:         parsed.content.top_videos } : {}),
+        ...(parsed.content.product_highlights?.length       ? { product_highlights: parsed.content.product_highlights } : {}),
+        ...(parsed.content.insights                         ? { insights:           parsed.content.insights } : {}),
       }));
       const pieces: string[] = [];
       if (parsed.content.overall)                       pieces.push('KPIs');

@@ -247,41 +247,47 @@ function sliceSections(lines: Line[]): Record<string, Line[]> {
 
 function parseOverallPerformance(lines: Line[]): WeeklyReportContent['overall'] | null {
   const o = emptyOverall();
-  const labelMap: { match: RegExp; field: keyof typeof o }[] = [
-    { match: /^total\s+gmv$/i,        field: 'total_gmv' },
-    { match: /^affiliate\s+gmv$/i,    field: 'affiliate_gmv' },
-    { match: /^orders$/i,             field: 'orders' },
-    { match: /^samples\s+approved$/i, field: 'samples_approved' },
-    { match: /^ad\s+spend$/i,         field: 'ad_spend' },
-    { match: /^pending\s+collabs$/i,  field: 'pending_collabs' },
+  // Match against the FULL line text — pdfjs sometimes splits multi-word
+  // labels ("Total GMV") into separate cells with X-gaps wider than our
+  // merge threshold, so we can't rely on cells[0] alone.
+  const labelMap: { regex: RegExp; field: keyof typeof o }[] = [
+    { regex: /^total\s+gmv\b/i,        field: 'total_gmv' },
+    { regex: /^affiliate\s+gmv\b/i,    field: 'affiliate_gmv' },
+    { regex: /^orders\b/i,             field: 'orders' },
+    { regex: /^samples\s+approved\b/i, field: 'samples_approved' },
+    { regex: /^ad\s+spend\b/i,         field: 'ad_spend' },
+    { regex: /^pending\s+collabs\b/i,  field: 'pending_collabs' },
   ];
 
   let foundAny = false;
   for (const l of lines) {
     if (l.cells.length < 2) continue;
-    const labelCell = l.cells[0];
-    const matched = labelMap.find(({ match }) => match.test(labelCell.text));
+    const matched = labelMap.find(({ regex }) => regex.test(l.text));
     if (!matched) continue;
 
-    // cells[1] = This Week, cells[2] = Last Week, cells[3] = Notes (when present)
-    const thisCell = l.cells[1];
-    const noteCell = l.cells[3];
+    // First cell that begins with $/digit/dash or "not" — treat as value.
+    const valueCellIdx = l.cells.findIndex(c =>
+      /^[\$\d-]/.test(c.text.trim()) || /^not\s/i.test(c.text.trim())
+    );
+    if (valueCellIdx < 0) continue;
+    const valueCell = l.cells[valueCellIdx];
 
-    if (matched.field === 'ad_spend' && /not\s*started/i.test(thisCell.text)) {
+    if (matched.field === 'ad_spend' && /not\s*started/i.test(valueCell.text)) {
       o.ad_spend_not_started = true;
       o.ad_spend = 0;
       foundAny = true;
       continue;
     }
-
-    const n = parseNum(thisCell.text);
+    const n = parseNum(valueCell.text);
     if (n != null) {
       if (matched.field === 'ad_spend') o.ad_spend_not_started = false;
       (o as any)[matched.field] = n;
       foundAny = true;
     }
-    if (matched.field === 'samples_approved' && noteCell?.text) {
-      o.samples_approved_note = noteCell.text.trim();
+    // Samples Approved notes — first letter-bearing cell after the Last Week value.
+    if (matched.field === 'samples_approved') {
+      const noteCell = l.cells.slice(valueCellIdx + 2).find(c => /[a-zA-Z]/.test(c.text));
+      if (noteCell) o.samples_approved_note = noteCell.text.trim();
     }
   }
   return foundAny ? o : null;
@@ -382,19 +388,20 @@ function parseTopVideos(lines: Line[], links: LinkAnno[]): TopVideo[] {
 
 function parseVideoPerformance(lines: Line[]): WeeklyReportContent['video_performance'] | null {
   const vp = emptyVideoPerf();
-  const labelMap: { match: RegExp; field: keyof typeof vp }[] = [
-    { match: /^total\s+videos\s+posted$/i, field: 'total_videos_posted' },
-    { match: /^video\s+views$/i,           field: 'video_views' },
-    { match: /^ctr$/i,                     field: 'ctr' },
-    { match: /^ctor$/i,                    field: 'ctor' },
+  const labelMap: { regex: RegExp; field: keyof typeof vp }[] = [
+    { regex: /^total\s+videos\s+posted\b/i, field: 'total_videos_posted' },
+    { regex: /^video\s+views\b/i,           field: 'video_views' },
+    { regex: /^ctr\b/i,                     field: 'ctr' },
+    { regex: /^ctor\b/i,                    field: 'ctor' },
   ];
   let foundAny = false;
   for (const l of lines) {
     if (l.cells.length < 2) continue;
-    const labelCell = l.cells[0];
-    const matched = labelMap.find(({ match }) => match.test(labelCell.text));
+    const matched = labelMap.find(({ regex }) => regex.test(l.text));
     if (!matched) continue;
-    const n = parseNum(l.cells[1].text);
+    const valueCell = l.cells.find(c => /^[\$\d-]/.test(c.text.trim()));
+    if (!valueCell) continue;
+    const n = parseNum(valueCell.text);
     if (n != null) {
       (vp as any)[matched.field] = n;
       foundAny = true;
@@ -420,23 +427,24 @@ function parseGmvMax(lines: Line[]): WeeklyReportContent['gmv_max'] | null {
   );
   if (!headerLine) return null;
 
-  // Map header column X positions to fields
-  const colSpec: { match: RegExp; field: keyof typeof gm }[] = [
-    { match: /^ad\s+spend$/i, field: 'ad_spend' },
-    { match: /^roi$/i,        field: 'roi' },
-    { match: /^orders$/i,     field: 'orders' },
-    { match: /^cpo$/i,        field: 'cpo' },
-    { match: /^gmv$/i,        field: 'gmv' },
+  // Map header column X positions to fields. "Ad Spend" can be split into
+  // ["Ad", "Spend"] cells, so we try each cell alone or combined with the next.
+  const colSpec: { regex: RegExp; field: keyof typeof gm }[] = [
+    { regex: /^ad\s+spend$/i, field: 'ad_spend' },
+    { regex: /^roi$/i,        field: 'roi' },
+    { regex: /^orders$/i,     field: 'orders' },
+    { regex: /^cpo$/i,        field: 'cpo' },
+    { regex: /^gmv$/i,        field: 'gmv' },
   ];
   const colXs: { field: keyof typeof gm; x: number }[] = [];
-  for (const { match, field } of colSpec) {
-    const c = headerLine.cells.find(c => match.test(c.text));
-    if (c) colXs.push({ field, x: c.x });
+  for (const { regex, field } of colSpec) {
+    const x = findLabelX(headerLine, regex);
+    if (x != null) colXs.push({ field, x });
   }
   if (colXs.length === 0) return null;
 
   const thisRow = lines.find(l =>
-    l.y > headerLine.y && l.cells[0] && /^this\s*week$/i.test(l.cells[0].text),
+    l.y > headerLine.y && /^this\s*week\b/i.test(l.text),
   );
   if (!thisRow) return null;
 
@@ -465,18 +473,18 @@ function parseProductHighlights(lines: Line[]): ProductRow[] {
   if (!headerLine) return [];
 
   const cols: { name: string; match: RegExp }[] = [
-    { name: 'product',    match: /product/i },
-    { name: 'total',      match: /total\s+units/i },
-    { name: 'affiliate',  match: /affiliate\s+units/i },
-    { name: 'totalGmv',   match: /total\s+gmv/i },
-    { name: 'videos',     match: /videos/i },
-    { name: 'quality',    match: /listing\s+quality/i },
+    { name: 'product',    match: /^product\b/i },
+    { name: 'total',      match: /^total\s+units\b/i },
+    { name: 'affiliate',  match: /^affiliate\s+units\b/i },
+    { name: 'totalGmv',   match: /^total\s+gmv\b/i },
+    { name: 'videos',     match: /^videos\b/i },
+    { name: 'quality',    match: /^listing\s+quality\b/i },
   ];
   const colXs: Record<string, number> = {};
   for (const { name, match } of cols) {
-    const c = headerLine.cells.find(c => match.test(c.text));
-    if (!c) return [];
-    colXs[name] = c.x;
+    const x = findLabelX(headerLine, match);
+    if (x == null) return [];
+    colXs[name] = x;
   }
 
   const dataLines = lines.filter(l => l.y > headerLine.y + 6);
@@ -527,6 +535,21 @@ function parseProductHighlights(lines: Line[]): ProductRow[] {
   return products;
 }
 
+// Find the X coordinate of a header label within a header line. Tries the cell
+// alone, then with up to two following cells joined, so split labels like
+// ["Total", "Units", "Sold"] still match /^total\s+units\b/.
+function findLabelX(line: Line, regex: RegExp): number | null {
+  for (let i = 0; i < line.cells.length; i++) {
+    const c = line.cells[i];
+    const cn = line.cells[i + 1];
+    const cnn = line.cells[i + 2];
+    if (regex.test(c.text)) return c.x;
+    if (cn && regex.test(`${c.text} ${cn.text}`)) return c.x;
+    if (cnn && regex.test(`${c.text} ${cn.text} ${cnn.text}`)) return c.x;
+  }
+  return null;
+}
+
 function parseListingQuality(v: string | undefined): ListingQuality {
   if (!v) return '';
   const t = v.trim().toLowerCase();
@@ -543,31 +566,40 @@ function parseListingQuality(v: string | undefined): ListingQuality {
 function parseShopHealth(lines: Line[]): WeeklyReportContent['shop_health'] {
   const sh = emptyShopHealth();
 
-  // Match each row by its label prefix; cells[1] is "This Week".
+  // Match against full line text since labels span multiple cells in Google Docs.
+  // Pick the first cell whose text starts with a digit/dash/yes/no as the value.
+  const findValue = (l: Line): string | null => {
+    const c = l.cells.find(c => /^[\d-]/.test(c.text.trim()) || /^(yes|no)\b/i.test(c.text.trim()));
+    return c ? c.text.trim() : null;
+  };
+
   for (const l of lines) {
     if (l.cells.length < 2) continue;
-    const label = l.cells[0].text.trim();
-    const value = l.cells[1].text.trim();
-    if (!label || !value) continue;
-
-    if (/^shop\s+performance\s+score/i.test(label)) {
-      sh.shop_performance_score = parseRating(value);
-    } else if (/^product\s+satisfaction/i.test(label)) {
-      sh.product_satisfaction_rating = parseRating(value);
-    } else if (/^fulfillment/i.test(label)) {
-      sh.fulfillment_rating = parseRating(value);
-    } else if (/^customer\s+service/i.test(label)) {
-      sh.customer_service_rating = parseRating(value);
-    } else if (/dispatching/i.test(label)) {
-      sh.dispatching_on_time = parseYesNo(value);
-    } else if (/replying/i.test(label)) {
-      sh.replying_within_24h = parseYesNo(value);
-    } else if (/^warnings/i.test(label)) {
-      const n = parseNum(value);
-      sh.warnings_received = n != null && n > 0;
-    } else if (/^violations/i.test(label)) {
-      const n = parseNum(value);
-      sh.violations_received = n != null && n > 0;
+    const t = l.text;
+    if (/^shop\s+performance\s+score/i.test(t)) {
+      const v = findValue(l); if (v) sh.shop_performance_score = parseRating(v);
+    } else if (/^product\s+satisfaction/i.test(t)) {
+      const v = findValue(l); if (v) sh.product_satisfaction_rating = parseRating(v);
+    } else if (/^fulfillment/i.test(t)) {
+      const v = findValue(l); if (v) sh.fulfillment_rating = parseRating(v);
+    } else if (/^customer\s+service/i.test(t)) {
+      const v = findValue(l); if (v) sh.customer_service_rating = parseRating(v);
+    } else if (/dispatching/i.test(t)) {
+      const v = findValue(l); if (v) sh.dispatching_on_time = parseYesNo(v);
+    } else if (/replying/i.test(t)) {
+      const v = findValue(l); if (v) sh.replying_within_24h = parseYesNo(v);
+    } else if (/^warnings/i.test(t)) {
+      const v = findValue(l);
+      if (v) {
+        const n = parseNum(v);
+        sh.warnings_received = n != null && n > 0;
+      }
+    } else if (/^violations/i.test(t)) {
+      const v = findValue(l);
+      if (v) {
+        const n = parseNum(v);
+        sh.violations_received = n != null && n > 0;
+      }
     }
   }
   return sh;
