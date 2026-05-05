@@ -145,18 +145,16 @@ export default function WeeklyReportView() {
     };
   }), [trend]);
 
-  const addComment = async (section: CommentSection, body: string, authorName: string, parentId?: string) => {
-    if (!report || !profile) return;
-    const { data, error } = await supabase.from('report_comments').insert({
-      report_id: report.id,
-      section,
-      author_type: profile.role === 'bob' ? 'bob' : 'apc',
-      author_name: authorName,
-      body,
-      parent_id: parentId ?? null,
-    }).select().single();
+  const addComment = async (section: CommentSection, body: string, _authorName: string, parentId?: string) => {
+    // We ignore the passed-in author name — the edge function uses the
+    // caller's profile name, so it's tamper-proof.
+    if (!report) return;
+    const { data, error } = await supabase.functions.invoke('post-staff-comment', {
+      body: { report_id: report.id, section, body, parent_id: parentId ?? null },
+    });
     if (error) throw error;
-    setComments(prev => [...prev, data as Comment]);
+    if ((data as any)?.error) throw new Error((data as any).error);
+    setComments(prev => [...prev, (data as any).comment as Comment]);
   };
 
 
