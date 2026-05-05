@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Card, Row, Col, Table, Alert, Badge, Offcanvas, Button } from 'react-bootstrap';
+import { Card, Row, Col, Table, Alert, Badge, Offcanvas, Button, Form } from 'react-bootstrap';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
   LineChart, Line, RadialBarChart, RadialBar, PolarAngleAxis,
@@ -27,9 +27,19 @@ export interface ApprovalDecisionView {
   share_link_label?: string | null;
 }
 
+/** Wires the in-dashboard approval form to the share-link decision flow.
+ *  Provided only in public (shared-link) mode. */
+export interface ApprovalActionConfig {
+  /** This link's existing decision for the report, if any. */
+  myDecision: ApprovalDecisionView | null;
+  /** Pre-filled name for the form. */
+  defaultName: string;
+  onSubmit: (decision: 'approved' | 'changes_requested', comment: string, name: string) => Promise<void>;
+}
+
 export default function ReportDashboard({
   c, p, trendData, hasPrev, commentsConfig, prevTopVideos, openSectionOnLoad, highlightCommentId,
-  approvalDecisions,
+  approvalDecisions, approvalAction,
 }: {
   c: WeeklyReportContent;
   p: WeeklyReportContent | null;
@@ -43,6 +53,8 @@ export default function ReportDashboard({
   highlightCommentId?: string | null;
   /** All decisions made by clients across share links (authed view). */
   approvalDecisions?: ApprovalDecisionView[];
+  /** Public mode: inline approve / request-changes form for the current link. */
+  approvalAction?: ApprovalActionConfig;
 }) {
   const o = c.overall, po = p?.overall;
   const vp = c.video_performance, pvp = p?.video_performance;
@@ -411,7 +423,11 @@ export default function ReportDashboard({
             )}
           </Card.Header>
           <Card.Body>
-            <div className="ac-rte-view" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(c.approval.content) }} />
+            <div className="ac-rte-view ac-approval-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(c.approval.content) }} />
+
+            {commentsConfig?.mode === 'public' && approvalAction && (
+              <ApprovalActionInline action={approvalAction} />
+            )}
 
             {commentsConfig?.mode === 'authed' && (
               <div className="mt-3">
@@ -452,6 +468,97 @@ export default function ReportDashboard({
       )}
 
       {/* Custom Sections */}
+    </div>
+  );
+}
+
+function ApprovalActionInline({ action }: { action: ApprovalActionConfig }) {
+  const { myDecision, defaultName, onSubmit } = action;
+  const [name, setName] = useState(defaultName);
+  const [choice, setChoice] = useState<'approved' | 'changes_requested' | null>(myDecision?.decision ?? null);
+  const [comment, setComment] = useState(myDecision?.comment ?? '');
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [justSaved, setJustSaved] = useState(false);
+
+  // Re-sync if the parent changes the decision (e.g. after popup submission)
+  useEffect(() => {
+    setChoice(myDecision?.decision ?? null);
+    setComment(myDecision?.comment ?? '');
+    setName(prev => prev || defaultName);
+    setJustSaved(false);
+  }, [myDecision, defaultName]);
+
+  const submit = async () => {
+    setErr(null);
+    if (!choice) { setErr('Pick Approve or Request changes first.'); return; }
+    if (!name.trim()) { setErr('Enter your name so we can credit your decision.'); return; }
+    setSubmitting(true);
+    try {
+      await onSubmit(choice, comment.trim(), name.trim());
+      setJustSaved(true);
+    } catch (e: any) {
+      setErr(e?.message ?? 'Failed to submit');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 pt-3 border-top">
+      {myDecision && (
+        <Alert variant={myDecision.decision === 'approved' ? 'success' : 'warning'} className="py-2 small mb-3">
+          <strong>Your previous decision:</strong>{' '}
+          {myDecision.decision === 'approved' ? 'Approved' : 'Changes requested'}
+          {' '}by {myDecision.decided_by_name} on {new Date(myDecision.decided_at).toLocaleDateString()}.
+          {myDecision.comment && <div className="mt-1 fst-italic">"{myDecision.comment}"</div>}
+        </Alert>
+      )}
+
+      <div className="fw-semibold small text-uppercase text-muted mb-2" style={{ letterSpacing: '.5px' }}>
+        {myDecision ? 'Update your decision' : 'Submit your decision'}
+      </div>
+
+      {err && <Alert variant="danger" className="py-2 small mb-2">{err}</Alert>}
+      {justSaved && !err && <Alert variant="success" className="py-2 small mb-2">Saved. Thank you.</Alert>}
+
+      <Form.Group className="mb-2">
+        <Form.Label className="small mb-1">Your name</Form.Label>
+        <Form.Control size="sm" value={name} onChange={e => setName(e.target.value)} disabled={submitting} />
+      </Form.Group>
+
+      <div className="d-flex gap-2 flex-wrap mb-2">
+        <Button
+          size="sm"
+          variant={choice === 'approved' ? 'success' : 'outline-success'}
+          onClick={() => setChoice('approved')}
+          disabled={submitting}
+        >
+          <i className="bi bi-check-circle me-1" /> Approve
+        </Button>
+        <Button
+          size="sm"
+          variant={choice === 'changes_requested' ? 'warning' : 'outline-warning'}
+          onClick={() => setChoice('changes_requested')}
+          disabled={submitting}
+        >
+          <i className="bi bi-arrow-repeat me-1" /> Request changes
+        </Button>
+      </div>
+
+      <Form.Control
+        as="textarea" rows={2}
+        placeholder="Comment (optional)"
+        value={comment}
+        onChange={e => setComment(e.target.value)}
+        disabled={submitting}
+      />
+
+      <div className="d-flex justify-content-end mt-2">
+        <Button size="sm" onClick={submit} disabled={submitting || !choice || !name.trim()}>
+          {submitting ? 'Submitting…' : myDecision ? 'Update decision' : 'Submit decision'}
+        </Button>
+      </div>
     </div>
   );
 }

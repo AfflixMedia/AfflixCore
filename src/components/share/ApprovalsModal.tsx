@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Modal, Button, Form, Alert, Badge } from 'react-bootstrap';
 import DOMPurify from 'dompurify';
 import { WeeklyReportContent, normalizeContent } from '../../lib/reportSchema';
@@ -21,19 +21,44 @@ interface DraftDecision {
   comment: string;
 }
 
+export interface ExistingDecisionInfo {
+  decision: 'approved' | 'changes_requested';
+  comment: string | null;
+  decided_by_name: string;
+  decided_at: string;
+}
+
 interface Props {
   show: boolean;
   pending: PendingApprovalReport[];
   defaultName: string;
+  /** Map of report_id → previously-submitted decision via this link, for pre-fill / re-edit. */
+  existingDecisions?: Record<string, ExistingDecisionInfo>;
   onClose: () => void;
   onSubmit: (decisions: { report_id: string; decision: 'approved' | 'changes_requested'; comment: string; decided_by_name: string }[]) => Promise<void>;
 }
 
-export default function ApprovalsModal({ show, pending, defaultName, onClose, onSubmit }: Props) {
+export default function ApprovalsModal({ show, pending, defaultName, existingDecisions, onClose, onSubmit }: Props) {
   const [name, setName] = useState(defaultName);
   const [drafts, setDrafts] = useState<Record<string, DraftDecision>>({});
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // When the dialog (re-)opens, seed drafts from any existing decisions so the
+  // user sees their previous choice + comment and can update them.
+  useEffect(() => {
+    if (!show) return;
+    const seeded: Record<string, DraftDecision> = {};
+    if (existingDecisions) {
+      for (const p of pending) {
+        const e = existingDecisions[p.id];
+        if (e) seeded[p.id] = { choice: e.decision, comment: e.comment ?? '' };
+      }
+    }
+    setDrafts(seeded);
+    setName(defaultName);
+    setErr(null);
+  }, [show, pending, existingDecisions, defaultName]);
 
   const setDraft = (reportId: string, patch: Partial<DraftDecision>) =>
     setDrafts(prev => {
@@ -89,6 +114,7 @@ export default function ApprovalsModal({ show, pending, defaultName, onClose, on
 
         {pending.map(p => {
           const draft = drafts[p.id] ?? { choice: null, comment: '' };
+          const existing = existingDecisions?.[p.id];
           const safeHtml = DOMPurify.sanitize(p.content.approval?.content ?? '');
           return (
             <div key={p.id} className="ac-approval-item mb-3">
@@ -98,6 +124,11 @@ export default function ApprovalsModal({ show, pending, defaultName, onClose, on
                   <span className="fw-semibold">Week #{p.week_number}</span>
                   <small className="text-muted ms-2">{formatRange(p.week_start, p.week_end)}</small>
                 </div>
+                {existing && (
+                  <Badge bg={existing.decision === 'approved' ? 'success' : 'warning'} text={existing.decision === 'approved' ? undefined : 'dark'}>
+                    Already {existing.decision === 'approved' ? 'approved' : 'asked for changes'}
+                  </Badge>
+                )}
               </div>
               <div className="ac-rte-view ac-approval-content mb-3"
                    dangerouslySetInnerHTML={{ __html: safeHtml }} />

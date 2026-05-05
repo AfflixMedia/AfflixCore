@@ -51,6 +51,8 @@ export default function SharedReports() {
   const [linkMode, setLinkMode] = useState<'brand' | 'general'>('brand');
   const [decisions, setDecisions] = useState<ApprovalDecisionRow[]>([]);
   const [showApprovals, setShowApprovals] = useState(false);
+  const [singleApprovalId, setSingleApprovalId] = useState<string | null>(null);
+  const [pickerAfterApprovals, setPickerAfterApprovals] = useState(false);
   const [showMonthPicker, setShowMonthPicker] = useState(false);
 
   useEffect(() => {
@@ -86,8 +88,12 @@ export default function SharedReports() {
           const pendingCount = (data.reports ?? []).filter((r: any) =>
             r.content?.approval?.enabled === true && !decidedIds.has(r.id)
           ).length;
-          if (pendingCount > 0) setShowApprovals(true);
-          else setShowMonthPicker(true);
+          if (pendingCount > 0) {
+            setShowApprovals(true);
+            setPickerAfterApprovals(true);
+          } else {
+            setShowMonthPicker(true);
+          }
         }
       } catch (e: any) {
         setErr(e?.message ?? 'Failed to load');
@@ -136,22 +142,46 @@ export default function SharedReports() {
   }, [openReport, reports]);
 
   const decidedIds = useMemo(() => new Set(decisions.map(d => d.report_id)), [decisions]);
+  const toPending = (r: Report): PendingApprovalReport => {
+    const b = brands.find(x => x.id === r.brand_id);
+    return {
+      id: r.id,
+      brand_id: r.brand_id,
+      brand_name: b?.name ?? 'Brand',
+      week_number: r.week_number,
+      week_start: r.week_start,
+      week_end: r.week_end,
+      content: normalizeContent(r.content),
+    };
+  };
   const pendingApprovals: PendingApprovalReport[] = useMemo(() => {
     return reports
       .filter(r => r.content?.approval?.enabled === true && !decidedIds.has(r.id))
-      .map(r => {
-        const b = brands.find(x => x.id === r.brand_id);
-        return {
-          id: r.id,
-          brand_id: r.brand_id,
-          brand_name: b?.name ?? 'Brand',
-          week_number: r.week_number,
-          week_start: r.week_start,
-          week_end: r.week_end,
-          content: normalizeContent(r.content),
-        };
-      });
+      .map(toPending);
+    // toPending is a stable closure over brands; including it would re-evaluate every render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reports, brands, decidedIds]);
+  // For the badge → popup flow we may pass a single (possibly already-decided) report.
+  const modalPending: PendingApprovalReport[] = useMemo(() => {
+    if (singleApprovalId) {
+      const one = reports.find(r => r.id === singleApprovalId);
+      return one ? [toPending(one)] : [];
+    }
+    return pendingApprovals;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [singleApprovalId, reports, pendingApprovals]);
+  const existingDecisionsMap = useMemo(() => {
+    const map: Record<string, { decision: 'approved' | 'changes_requested'; comment: string | null; decided_by_name: string; decided_at: string }> = {};
+    for (const d of decisions) {
+      map[d.report_id] = {
+        decision: d.decision,
+        comment: d.comment,
+        decided_by_name: d.decided_by_name,
+        decided_at: d.decided_at,
+      };
+    }
+    return map;
+  }, [decisions]);
   const monthsWithData = useMemo(() =>
     new Set<string>(reports.map(r => r.week_start.slice(0, 7))),
   [reports]);
@@ -230,12 +260,24 @@ export default function SharedReports() {
           trendData={trendData}
           hasPrev={!!prevReport}
           prevTopVideos={prevReport ? normalizeContent(prevReport.content).top_videos : undefined}
-          approvalDecisions={decisions
-            .filter(d => d.report_id === openReport.id)
-            .map(d => ({
-              id: d.id, decision: d.decision, comment: d.comment,
-              decided_by_name: d.decided_by_name, decided_at: d.decided_at,
-            }))}
+          approvalAction={openReport.content?.approval?.enabled ? {
+            myDecision: (() => {
+              const d = decisions.find(x => x.report_id === openReport.id);
+              return d ? {
+                id: d.id, decision: d.decision, comment: d.comment,
+                decided_by_name: d.decided_by_name, decided_at: d.decided_at,
+              } : null;
+            })(),
+            defaultName: publicName,
+            onSubmit: async (choice, comment, name) => {
+              await submitApprovals([{
+                report_id: openReport.id,
+                decision: choice,
+                comment,
+                decided_by_name: name,
+              }]);
+            },
+          } : undefined}
           commentsConfig={{
             mode: 'public',
             comments: reportComments,
@@ -474,17 +516,20 @@ export default function SharedReports() {
                                   <i className="bi bi-calendar3 me-1" /> Click to view dashboard
                                 </div>
                                 {approvalEnabled && (
-                                  <div className="mt-2">
+                                  <div className="mt-2" onClick={(e) => e.stopPropagation()}>
                                     {dec ? (
-                                      <Badge bg={dec.decision === 'approved' ? 'success' : 'warning'}
-                                             text={dec.decision === 'approved' ? undefined : 'dark'}>
+                                      <Button size="sm" variant={dec.decision === 'approved' ? 'success' : 'warning'}
+                                              onClick={() => { setSingleApprovalId(r.id); setShowApprovals(true); }}
+                                              title="Review or change your decision">
                                         <i className={`bi ${dec.decision === 'approved' ? 'bi-check-circle' : 'bi-arrow-repeat'} me-1`} />
                                         {dec.decision === 'approved' ? 'Approved' : 'Changes requested'}
-                                      </Badge>
+                                      </Button>
                                     ) : (
-                                      <Badge bg="warning" text="dark">
+                                      <Button size="sm" variant="warning"
+                                              onClick={() => { setSingleApprovalId(r.id); setShowApprovals(true); }}
+                                              title="Open the approval request">
                                         <i className="bi bi-shield-exclamation me-1" /> Approval requested
-                                      </Badge>
+                                      </Button>
                                     )}
                                   </div>
                                 )}
@@ -603,11 +648,16 @@ export default function SharedReports() {
 
       <ApprovalsModal
         show={showApprovals}
-        pending={pendingApprovals}
+        pending={modalPending}
         defaultName={publicName}
+        existingDecisions={existingDecisionsMap}
         onClose={() => {
           setShowApprovals(false);
-          setShowMonthPicker(true);
+          setSingleApprovalId(null);
+          if (pickerAfterApprovals) {
+            setPickerAfterApprovals(false);
+            setShowMonthPicker(true);
+          }
         }}
         onSubmit={submitApprovals}
       />
