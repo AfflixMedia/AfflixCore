@@ -319,8 +319,14 @@ export default function WeeklyReportEdit() {
   const submit = async (e: FormEvent, status: 'draft' | 'submitted') => {
     e.preventDefault();
     setSaving(true); setErr(null);
+    // If the report is asking the client for approval, the client has to be
+    // able to see it via the share link, so auto-enable per-report sharing.
+    // (We never auto-disable; that's an explicit choice on the brand reporting
+    // tab.)
+    const update: Record<string, any> = { content: c, status };
+    if (c.approval?.enabled) update.is_shared = true;
     const { error } = await supabase.from('weekly_reports')
-      .update({ content: c, status }).eq('id', id);
+      .update(update).eq('id', id);
     setSaving(false);
     if (error) { setErr(error.message); return; }
     nav(`/reporting/weekly/${id}`);
