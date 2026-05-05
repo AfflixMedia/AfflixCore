@@ -113,12 +113,14 @@ export default function ReportDashboard({
   const FeedbackIcon = ({ section }: { section: CommentSection }) => {
     if (!commentsConfig) return null;
     const n = sectionFeedbackCount(section);
-    // Authed: only show when feedback exists. Public: always show (clients can comment).
-    if (commentsConfig.mode === 'authed' && n === 0) return null;
+    // Authed: only show when feedback exists OR for the bidirectional 'approval'
+    // section (where staff routinely start threads themselves).
+    // Public: always show (clients can comment).
+    if (commentsConfig.mode === 'authed' && n === 0 && section !== 'approval') return null;
     return (
       <Button size="sm" variant="outline-primary" className="ms-2 d-inline-flex align-items-center gap-1"
         onClick={() => setFeedbackSection(section)}
-        title={commentsConfig.mode === 'authed' ? 'View client feedback' : 'View / add comments'}>
+        title={commentsConfig.mode === 'authed' ? 'View / add staff notes' : 'View / add comments'}>
         <i className="bi bi-chat-left-text" />
         {n > 0 && <Badge bg="primary" pill>{n}</Badge>}
       </Button>
