@@ -12,7 +12,7 @@ const cors = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const STANDARD_SECTIONS = ['overall','top_creators','top_videos','video_performance','gmv_max','product_highlights','shop_health','insights'];
+const STANDARD_SECTIONS = ['overall','top_creators','top_videos','video_performance','gmv_max','product_highlights','shop_health','insights','approval'];
 const CUSTOM_SECTION_RE = /^cs:[0-9a-f-]{16,64}$/i;
 function isValidSection(s: string): boolean {
   return STANDARD_SECTIONS.includes(s) || CUSTOM_SECTION_RE.test(s);
@@ -73,6 +73,7 @@ serve(async (req) => {
         overall: 'Overall Performance', top_creators: 'Top Creators', top_videos: 'Top Videos',
         video_performance: 'Video Performance', gmv_max: 'GMV Max',
         product_highlights: 'Product Highlights', shop_health: 'Shop Health', insights: 'Insights',
+        approval: 'Approval Needed',
       };
       const labelFor = (s: string): string => {
         if (sectionLabel[s]) return sectionLabel[s];

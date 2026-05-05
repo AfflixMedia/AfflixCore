@@ -61,6 +61,26 @@ serve(async (req) => {
       .select().single();
     if (error) return json({ error: error.message }, 500);
 
+    // Mirror the decision (and any comment) into report_comments so it joins
+    // the section's regular thread — staff can reply, the offcanvas shows it,
+    // and notifications can deep-link to a real comment id.
+    let mirrorComment: any = null;
+    {
+      const verb = decision === 'approved' ? 'Approved' : 'Requested changes';
+      const body = cleanComment
+        ? `[${verb}] ${cleanComment}`
+        : `[${verb}]`;
+      const { data: cm } = await admin.from('report_comments').insert({
+        report_id,
+        section: 'approval',
+        author_type: 'client',
+        author_name: cleanName,
+        body,
+        parent_id: null,
+      }).select().single();
+      mirrorComment = cm;
+    }
+
     // Notify Bob + assigned APCs (best-effort)
     try {
       const [{ data: bobs }, { data: apcRows }] = await Promise.all([
@@ -76,10 +96,14 @@ serve(async (req) => {
       const bodyText = cleanComment
         ? `Week #${report.week_number}. Comment: "${cleanComment.slice(0, 160)}${cleanComment.length > 160 ? '…' : ''}"`
         : `Week #${report.week_number}. No comment.`;
-      const linkUrl = `/reporting/weekly/${report_id}?section=approval`;
+      const linkUrl = mirrorComment?.id
+        ? `/reporting/weekly/${report_id}?section=approval&comment=${mirrorComment.id}`
+        : `/reporting/weekly/${report_id}?section=approval`;
       const payload = {
         report_id, brand_id: report.brand_id,
         decision, decision_id: (inserted as any).id,
+        section: 'approval',
+        comment_id: mirrorComment?.id ?? null,
       };
       const rows = Array.from(recipientIds).map(uid => ({
         user_id: uid,
@@ -102,7 +126,7 @@ serve(async (req) => {
       console.error('Notification dispatch failed:', notifyErr);
     }
 
-    return json({ decision: inserted });
+    return json({ decision: inserted, comment: mirrorComment });
   } catch (e) {
     return json({ error: (e as Error).message }, 500);
   }

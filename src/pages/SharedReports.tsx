@@ -217,6 +217,12 @@ export default function SharedReports() {
         const filtered = prev.filter(d => d.report_id !== inserted.report_id);
         return [...filtered, inserted];
       });
+      // The edge function also mirrors the decision into report_comments so the
+      // approval section's offcanvas thread shows it. Push it into local state.
+      const mirrorComment = (data as any).comment;
+      if (mirrorComment?.id) {
+        setComments(prev => prev.some(c => c.id === mirrorComment.id) ? prev : [...prev, mirrorComment as Comment]);
+      }
     }
     if (items[0]?.decided_by_name) {
       setPublicName(items[0].decided_by_name);

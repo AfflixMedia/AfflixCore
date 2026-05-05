@@ -96,6 +96,7 @@ export default function ReportDashboard({
     product_highlights: 'Product Highlights',
     shop_health: 'Shop Health',
     insights: 'Insights',
+    approval: 'Approval Needed',
   };
 
   const customSectionFor = (section: CommentSection): CustomSection | null => {
@@ -416,11 +417,14 @@ export default function ReportDashboard({
               <i className="bi bi-shield-check me-2 text-warning" />
               Approval Needed
             </span>
-            {approvalDecisions && approvalDecisions.length > 0 && (
-              <Badge bg="success" pill>
-                {approvalDecisions.length} decision{approvalDecisions.length === 1 ? '' : 's'}
-              </Badge>
-            )}
+            <div className="d-flex align-items-center gap-2">
+              {approvalDecisions && approvalDecisions.length > 0 && (
+                <Badge bg="success" pill>
+                  {approvalDecisions.length} decision{approvalDecisions.length === 1 ? '' : 's'}
+                </Badge>
+              )}
+              <FeedbackIcon section="approval" />
+            </div>
           </Card.Header>
           <Card.Body>
             <div className="ac-rte-view ac-approval-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(c.approval.content) }} />

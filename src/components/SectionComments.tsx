@@ -30,7 +30,7 @@ export interface SectionCommentsProps {
   highlightCommentId?: string;
 }
 
-const STANDARD_LABELS: Record<StandardCommentSection, string> = {
+const STANDARD_LABELS: Record<string, string> = {
   overall: 'Overall Performance',
   top_creators: 'Top Creators',
   top_videos: 'Top Videos',
@@ -39,10 +39,11 @@ const STANDARD_LABELS: Record<StandardCommentSection, string> = {
   product_highlights: 'Product Highlights',
   shop_health: 'Shop Health',
   insights: 'Insights',
+  approval: 'Approval Needed',
 };
 
 const labelFor = (section: CommentSection, override?: string) =>
-  override ?? STANDARD_LABELS[section as StandardCommentSection] ?? 'this section';
+  override ?? STANDARD_LABELS[section] ?? 'this section';
 
 export default function SectionComments(props: SectionCommentsProps) {
   const { section, sectionLabel, comments, mode, currentAuthorName, defaultPublicName, onAdd, highlightCommentId } = props;
