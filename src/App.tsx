@@ -5,7 +5,10 @@ import Layout from './layout/Layout';
 import Dashboard from './pages/Dashboard';
 import Brands from './pages/Brands';
 import BrandDetail from './pages/BrandDetail';
-import APCs from './pages/APCs';
+import {
+  EmployeesAPCs, EmployeesAffiliateTLs, EmployeesPaidCollabTLs,
+  EmployeesOperationLeads, EmployeesIPCs, EmployeesDevelopers,
+} from './pages/Employees';
 import Clients from './pages/Clients';
 import ClientAccess from './pages/ClientAccess';
 import Resources from './pages/Resources';
@@ -41,7 +44,13 @@ export default function App() {
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="brands" element={<Brands />} />
         <Route path="brands/:id" element={<BrandDetail />} />
-        <Route path="apcs" element={<ProtectedRoute roles={['bob']}><APCs /></ProtectedRoute>} />
+        <Route path="apcs"                       element={<ProtectedRoute roles={['bob']}><EmployeesAPCs /></ProtectedRoute>} />
+        <Route path="employees/apcs"             element={<ProtectedRoute roles={['bob']}><EmployeesAPCs /></ProtectedRoute>} />
+        <Route path="employees/affiliate-tls"    element={<ProtectedRoute roles={['bob']}><EmployeesAffiliateTLs /></ProtectedRoute>} />
+        <Route path="employees/paid-collab-tls"  element={<ProtectedRoute roles={['bob']}><EmployeesPaidCollabTLs /></ProtectedRoute>} />
+        <Route path="employees/operation-leads"  element={<ProtectedRoute roles={['bob']}><EmployeesOperationLeads /></ProtectedRoute>} />
+        <Route path="employees/ipcs"             element={<ProtectedRoute roles={['bob']}><EmployeesIPCs /></ProtectedRoute>} />
+        <Route path="employees/developers"       element={<ProtectedRoute roles={['bob']}><EmployeesDevelopers /></ProtectedRoute>} />
         <Route path="clients" element={<ProtectedRoute roles={['bob']}><Clients /></ProtectedRoute>} />
         <Route path="client-access" element={<ProtectedRoute roles={['bob']}><ClientAccess /></ProtectedRoute>} />
         <Route path="resources" element={<Resources />} />

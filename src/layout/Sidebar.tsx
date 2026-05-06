@@ -6,6 +6,7 @@ import { Badge } from 'react-bootstrap';
 
 export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) {
   const [reportingOpen, setReportingOpen] = useState(true);
+  const [employeesOpen, setEmployeesOpen] = useState(false);
   const { profile } = useAuth();
   const { unreadCount, notifications } = useNotifications();
   const isBob = profile?.role === 'bob';
@@ -42,9 +43,29 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
                 <NavLink to="/clients" title="Clients">
                   <i className="bi bi-building" /> <span className="ac-nav-label">Clients</span>
                 </NavLink>
-                <NavLink to="/apcs" title="APCs">
-                  <i className="bi bi-people" /> <span className="ac-nav-label">APCs</span>
-                </NavLink>
+                {/* Employees: collapsible group with one entry per role */}
+                {collapsed ? (
+                  <NavLink to="/employees/apcs" title="Employees">
+                    <i className="bi bi-people" />
+                  </NavLink>
+                ) : (
+                  <>
+                    <button className="ac-nav-toggle" onClick={() => setEmployeesOpen(o => !o)}>
+                      <i className="bi bi-people" /> <span className="ac-nav-label">Employees</span>
+                      <i className={`bi ms-auto ac-nav-label ${employeesOpen ? 'bi-chevron-up' : 'bi-chevron-down'}`} />
+                    </button>
+                    {employeesOpen && (
+                      <div className="ac-sub">
+                        <NavLink to="/employees/affiliate-tls"><span className="ac-nav-label">Affiliate TLs</span></NavLink>
+                        <NavLink to="/employees/paid-collab-tls"><span className="ac-nav-label">Paid Collab TLs</span></NavLink>
+                        <NavLink to="/employees/operation-leads"><span className="ac-nav-label">Operation Leads</span></NavLink>
+                        <NavLink to="/employees/apcs"><span className="ac-nav-label">APCs</span></NavLink>
+                        <NavLink to="/employees/ipcs"><span className="ac-nav-label">IPCs</span></NavLink>
+                        <NavLink to="/employees/developers"><span className="ac-nav-label">Developers</span></NavLink>
+                      </div>
+                    )}
+                  </>
+                )}
                 <NavLink to="/client-access" title="Client Access">
                   <i className="bi bi-link-45deg" /> <span className="ac-nav-label">Client Access</span>
                 </NavLink>
