@@ -36,20 +36,13 @@ serve(async (req) => {
       return json({ error: 'Forbidden — only Bob can create APCs' }, 403);
     }
 
-    // 2. Parse + validate body. `role` defaults to 'apc' for backwards compat.
-    const body = await req.json();
-    const { email, password, full_name, can_edit_brands, can_manage_gmv_max } = body;
-    const role: string = body.role ?? 'apc';
-    const brand_ids: string[] = Array.isArray(body.brand_ids) ? body.brand_ids : [];
-    const ALLOWED_ROLES = ['apc', 'affiliate_tl', 'paid_collab_tl', 'operation_lead', 'ipc', 'developer'];
-    if (!ALLOWED_ROLES.includes(role)) {
-      return json({ error: `Invalid role: ${role}` }, 400);
-    }
-    if (!email || !password) {
-      return json({ error: 'email and password required' }, 400);
+    // 2. Parse + validate body
+    const { email, password, full_name, brand_ids, can_edit_brands, can_manage_gmv_max } = await req.json();
+    if (!email || !password || !Array.isArray(brand_ids)) {
+      return json({ error: 'email, password, brand_ids required' }, 400);
     }
 
-    // 3. Create the auth user (email auto-confirmed so they can sign in immediately)
+    // 3. Create the auth user (email auto-confirmed so APC can log in immediately)
     const { data: created, error: createErr } = await admin.auth.admin.createUser({
       email,
       password,
@@ -61,27 +54,27 @@ serve(async (req) => {
     }
     const newUserId = created.user.id;
 
-    // 4. Upsert profile with the requested role
+    // 4. Upsert profile with role=apc (trigger may have created it as 'pending')
     const { error: profErr } = await admin
       .from('profiles')
       .upsert({
         id: newUserId,
         email,
         full_name: full_name ?? '',
-        role,
+        role: 'apc',
         can_edit_brands: !!can_edit_brands,
         can_manage_gmv_max: !!can_manage_gmv_max,
       });
     if (profErr) return json({ error: profErr.message }, 400);
 
-    // 5. Brand assignment (APC only — other roles don't have a join table for now)
-    if (role === 'apc' && brand_ids.length > 0) {
+    // 5. Assign brands
+    if (brand_ids.length > 0) {
       const rows = brand_ids.map((bid: string) => ({ apc_id: newUserId, brand_id: bid }));
       const { error: asgErr } = await admin.from('apc_brands').insert(rows);
       if (asgErr) return json({ error: asgErr.message }, 400);
     }
 
-    return json({ id: newUserId, email, role });
+    return json({ id: newUserId, email });
   } catch (e) {
     return json({ error: (e as Error).message }, 500);
   }
