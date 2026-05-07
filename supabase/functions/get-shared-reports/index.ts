@@ -66,8 +66,9 @@ serve(async (req) => {
       });
     }
 
-    const includeReports   = link.include_reports   !== false;
-    const includeResources = link.include_resources !== false;
+    const includeReports         = link.include_reports          !== false;
+    const includeMonthlyReports  = link.include_monthly_reports  === true;
+    const includeResources       = link.include_resources        !== false;
 
     const [
       { data: client },
@@ -83,7 +84,7 @@ serve(async (req) => {
             .eq('is_shared', true)
             .order('week_start', { ascending: false })
         : Promise.resolve({ data: [] as any[] }),
-      includeReports
+      includeMonthlyReports
         ? admin.from('monthly_reports').select('*').in('brand_id', brandIds)
             .eq('is_shared', true)
             .order('month', { ascending: false })
@@ -152,6 +153,7 @@ serve(async (req) => {
       approval_decisions,
       label: link.label ?? null,
       include_reports: includeReports,
+      include_monthly_reports: includeMonthlyReports,
       include_resources: includeResources,
       link_mode: 'brand',
     });

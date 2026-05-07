@@ -4,7 +4,9 @@ import { Card, Spinner, Alert, Form, Row, Col, Badge, Button, Tab, Nav, Offcanva
 import { supabase } from '../lib/supabase';
 import { addDays, formatRange, formatHuman, fromISO } from '../lib/dates';
 import { WeeklyReportContent, normalizeContent } from '../lib/reportSchema';
+import { MonthlyReportContent, normalizeMonthlyContent } from '../lib/monthlyReportSchema';
 import ReportDashboard, { TrendPoint, ApprovalDecisionView } from '../components/ReportDashboard';
+import MonthlyReportDashboard from '../components/MonthlyReportDashboard';
 import { Comment, CommentSection } from '../components/SectionComments';
 import { resourceIcon } from '../lib/resourceIcon';
 import ResourceComments, { ResourceComment } from '../components/ResourceComments';
@@ -14,6 +16,7 @@ import MonthPickerModal from '../components/share/MonthPickerModal';
 interface ApprovalDecisionRow {
   id: string;
   report_id: string;
+  report_type: 'weekly' | 'monthly';
   share_link_id: string;
   decision: 'approved' | 'changes_requested';
   comment: string | null;
@@ -26,6 +29,10 @@ interface Report {
   id: string; brand_id: string; week_start: string; week_end: string;
   week_number: number; status: string; content: WeeklyReportContent;
 }
+interface MonthlyReport {
+  id: string; brand_id: string; month: string;
+  status: string; content: MonthlyReportContent;
+}
 interface SharedResource { id: string; name: string; url: string; description: string | null; scope: string; brand_id: string | null; }
 
 export default function SharedReports() {
@@ -33,6 +40,7 @@ export default function SharedReports() {
   const [client, setClient] = useState<{ id: string; name: string } | null>(null);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [reports, setReports] = useState<Report[]>([]);
+  const [monthlyReports, setMonthlyReports] = useState<MonthlyReport[]>([]);
   const [resources, setResources] = useState<SharedResource[]>([]);
   const [comments, setComments] = useState<Comment[]>([]);
   const [resourceComments, setResourceComments] = useState<ResourceComment[]>([]);
@@ -43,15 +51,18 @@ export default function SharedReports() {
   const [err, setErr] = useState<string | null>(null);
 
   const [activeBrandId, setActiveBrandId] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'reporting' | 'resources'>('reporting');
+  const [activeTab, setActiveTab] = useState<'reporting' | 'monthly' | 'resources'>('reporting');
   const [month, setMonth] = useState(currentMonth());
   const [openId, setOpenId] = useState<string | null>(null);
+  const [openMonthlyId, setOpenMonthlyId] = useState<string | null>(null);
   const [includeReports, setIncludeReports] = useState(true);
+  const [includeMonthlyReports, setIncludeMonthlyReports] = useState(false);
   const [includeResources, setIncludeResources] = useState(true);
   const [linkMode, setLinkMode] = useState<'brand' | 'general'>('brand');
   const [decisions, setDecisions] = useState<ApprovalDecisionRow[]>([]);
   const [showApprovals, setShowApprovals] = useState(false);
   const [singleApprovalId, setSingleApprovalId] = useState<string | null>(null);
+  const [singleApprovalType, setSingleApprovalType] = useState<'weekly' | 'monthly'>('weekly');
   const [pickerAfterApprovals, setPickerAfterApprovals] = useState(false);
   const [showMonthPicker, setShowMonthPicker] = useState(false);
 
@@ -67,28 +78,41 @@ export default function SharedReports() {
         setClient(data.client);
         setBrands(data.brands);
         setReports(data.reports);
+        setMonthlyReports(data.monthly_reports ?? []);
         setResources(data.resources ?? []);
         setComments(data.comments ?? []);
         setResourceComments(data.resource_comments ?? []);
         setDecisions(data.approval_decisions ?? []);
         setLabel(data.label);
         const ir = data.include_reports !== false;
+        const im = data.include_monthly_reports === true;
         const ix = data.include_resources !== false;
         setIncludeReports(ir);
+        setIncludeMonthlyReports(im);
         setIncludeResources(ix);
         const mode: 'brand' | 'general' = data.link_mode === 'general' ? 'general' : 'brand';
         setLinkMode(mode);
-        // If reports are excluded, default landing tab to resources
-        if (!ir && ix) setActiveTab('resources');
+        // Default landing tab — first enabled section
+        if (ir) setActiveTab('reporting');
+        else if (im) setActiveTab('monthly');
+        else if (ix) setActiveTab('resources');
         if (data.brands?.length > 0) setActiveBrandId(data.brands[0].id);
 
-        // Brand-mode entry flow: approvals popup first (if any pending), then month picker.
-        if (mode === 'brand' && ir) {
-          const decidedIds = new Set<string>((data.approval_decisions ?? []).map((d: any) => d.report_id));
-          const pendingCount = (data.reports ?? []).filter((r: any) =>
-            r.content?.approval?.enabled === true && !decidedIds.has(r.id)
-          ).length;
-          if (pendingCount > 0) {
+        // Brand-mode entry flow: approvals popup first (if any pending across
+        // weekly OR monthly), then month picker.
+        if (mode === 'brand' && (ir || im)) {
+          const decisionsList: ApprovalDecisionRow[] = data.approval_decisions ?? [];
+          const decidedKey = (rt: 'weekly' | 'monthly', rid: string) => `${rt}:${rid}`;
+          const decided = new Set<string>(decisionsList.map(d => decidedKey(d.report_type, d.report_id)));
+          const weeklyPending = ir
+            ? (data.reports ?? []).filter((r: any) =>
+                r.content?.approval?.enabled === true && !decided.has(decidedKey('weekly', r.id))
+              ).length : 0;
+          const monthlyPending = im
+            ? (data.monthly_reports ?? []).filter((r: any) =>
+                r.content?.approval?.enabled === true && !decided.has(decidedKey('monthly', r.id))
+              ).length : 0;
+          if (weeklyPending + monthlyPending > 0) {
             setShowApprovals(true);
             setPickerAfterApprovals(true);
           } else {
@@ -141,35 +165,61 @@ export default function SharedReports() {
       });
   }, [openReport, reports]);
 
-  const decidedIds = useMemo(() => new Set(decisions.map(d => d.report_id)), [decisions]);
-  const toPending = (r: Report): PendingApprovalReport => {
+  // Decisions are keyed by (report_type, report_id) so a weekly + monthly report
+  // never accidentally share state.
+  const decidedSet = useMemo(
+    () => new Set(decisions.map(d => `${d.report_type}:${d.report_id}`)),
+    [decisions],
+  );
+  const fmtMonth = (yyyymm: string) => {
+    const [y, m] = yyyymm.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleString(undefined, { month: 'long', year: 'numeric' });
+  };
+  const weeklyToPending = (r: Report): PendingApprovalReport => {
     const b = brands.find(x => x.id === r.brand_id);
     return {
       id: r.id,
+      report_type: 'weekly',
       brand_id: r.brand_id,
       brand_name: b?.name ?? 'Brand',
-      week_number: r.week_number,
-      week_start: r.week_start,
-      week_end: r.week_end,
-      content: normalizeContent(r.content),
+      period_label: `Week #${r.week_number} — ${formatRange(r.week_start, r.week_end)}`,
+      approval_html: normalizeContent(r.content).approval?.content ?? '',
+    };
+  };
+  const monthlyToPending = (r: MonthlyReport): PendingApprovalReport => {
+    const b = brands.find(x => x.id === r.brand_id);
+    return {
+      id: r.id,
+      report_type: 'monthly',
+      brand_id: r.brand_id,
+      brand_name: b?.name ?? 'Brand',
+      period_label: fmtMonth(r.month),
+      approval_html: normalizeMonthlyContent(r.content).approval?.content ?? '',
     };
   };
   const pendingApprovals: PendingApprovalReport[] = useMemo(() => {
-    return reports
-      .filter(r => r.content?.approval?.enabled === true && !decidedIds.has(r.id))
-      .map(toPending);
-    // toPending is a stable closure over brands; including it would re-evaluate every render.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reports, brands, decidedIds]);
+    const w = reports
+      .filter(r => r.content?.approval?.enabled === true && !decidedSet.has(`weekly:${r.id}`))
+      .map(weeklyToPending);
+    const m = monthlyReports
+      .filter(r => r.content?.approval?.enabled === true && !decidedSet.has(`monthly:${r.id}`))
+      .map(monthlyToPending);
+    return [...w, ...m];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reports, monthlyReports, brands, decidedSet]);
   // For the badge → popup flow we may pass a single (possibly already-decided) report.
   const modalPending: PendingApprovalReport[] = useMemo(() => {
     if (singleApprovalId) {
+      if (singleApprovalType === 'monthly') {
+        const one = monthlyReports.find(r => r.id === singleApprovalId);
+        return one ? [monthlyToPending(one)] : [];
+      }
       const one = reports.find(r => r.id === singleApprovalId);
-      return one ? [toPending(one)] : [];
+      return one ? [weeklyToPending(one)] : [];
     }
     return pendingApprovals;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [singleApprovalId, reports, pendingApprovals]);
+  }, [singleApprovalId, singleApprovalType, reports, monthlyReports, pendingApprovals]);
   const existingDecisionsMap = useMemo(() => {
     const map: Record<string, { decision: 'approved' | 'changes_requested'; comment: string | null; decided_by_name: string; decided_at: string }> = {};
     for (const d of decisions) {
@@ -182,18 +232,24 @@ export default function SharedReports() {
     }
     return map;
   }, [decisions]);
-  const monthsWithData = useMemo(() =>
-    new Set<string>(reports.map(r => r.week_start.slice(0, 7))),
-  [reports]);
+  const monthsWithData = useMemo(() => {
+    const s = new Set<string>(reports.map(r => r.week_start.slice(0, 7)));
+    monthlyReports.forEach(r => s.add(r.month));
+    return s;
+  }, [reports, monthlyReports]);
 
   const clientName = client?.name ?? 'Client';
   if (loading) return <PublicShell clientName={clientName}><div className="text-center py-5"><Spinner animation="border" /></div></PublicShell>;
   if (err) return <PublicShell clientName={clientName}><Alert variant="danger">{err}</Alert></PublicShell>;
 
-  const addComment = async (section: CommentSection, body: string, authorName: string, parentId?: string) => {
-    if (!openReport) return;
+  const addComment = async (
+    section: CommentSection, body: string, authorName: string, parentId?: string,
+    reportType: 'weekly' | 'monthly' = 'weekly',
+  ) => {
+    const reportId = reportType === 'monthly' ? openMonthlyId : (openReport?.id ?? null);
+    if (!reportId) return;
     const { data, error } = await supabase.functions.invoke('post-shared-comment', {
-      body: { token, report_id: openReport.id, section, author_name: authorName, body, parent_id: parentId },
+      body: { token, report_id: reportId, report_type: reportType, section, author_name: authorName, body, parent_id: parentId },
     });
     if (error) throw error;
     if ((data as any)?.error) throw new Error((data as any).error);
@@ -201,10 +257,12 @@ export default function SharedReports() {
     setPublicName(authorName);
   };
 
-  const reportComments = openReport ? comments.filter(c => c.report_id === openReport.id) : [];
+  const reportComments = openReport ? comments.filter(c => c.report_id === openReport.id && c.report_type !== 'monthly') : [];
+  const openMonthly = openMonthlyId ? monthlyReports.find(r => r.id === openMonthlyId) ?? null : null;
+  const monthlyReportComments = openMonthly ? comments.filter(c => c.report_id === openMonthly.id && c.report_type === 'monthly') : [];
 
   const submitApprovals = async (
-    items: { report_id: string; decision: 'approved' | 'changes_requested'; comment: string; decided_by_name: string }[]
+    items: { report_id: string; report_type: 'weekly' | 'monthly'; decision: 'approved' | 'changes_requested'; comment: string; decided_by_name: string }[]
   ) => {
     for (const it of items) {
       const { data, error } = await supabase.functions.invoke('post-approval-decision', {
@@ -214,7 +272,7 @@ export default function SharedReports() {
       if ((data as any)?.error) throw new Error((data as any).error);
       const inserted = (data as any).decision;
       setDecisions(prev => {
-        const filtered = prev.filter(d => d.report_id !== inserted.report_id);
+        const filtered = prev.filter(d => !(d.report_id === inserted.report_id && d.report_type === inserted.report_type));
         return [...filtered, inserted];
       });
       // The edge function also mirrors the decision into report_comments so the
@@ -268,7 +326,7 @@ export default function SharedReports() {
           prevTopVideos={prevReport ? normalizeContent(prevReport.content).top_videos : undefined}
           approvalAction={openReport.content?.approval?.enabled ? {
             myDecision: (() => {
-              const d = decisions.find(x => x.report_id === openReport.id);
+              const d = decisions.find(x => x.report_id === openReport.id && x.report_type !== 'monthly');
               return d ? {
                 id: d.id, decision: d.decision, comment: d.comment,
                 decided_by_name: d.decided_by_name, decided_at: d.decided_at,
@@ -278,6 +336,7 @@ export default function SharedReports() {
             onSubmit: async (choice, comment, name) => {
               await submitApprovals([{
                 report_id: openReport.id,
+                report_type: 'weekly',
                 decision: choice,
                 comment,
                 decided_by_name: name,
@@ -321,7 +380,97 @@ export default function SharedReports() {
     );
   }
 
+  // Monthly report detail view
+  if (openMonthly && activeBrand) {
+    const sameBrandM = monthlyReports.filter(r => r.brand_id === activeBrand.id)
+      .sort((a, b) => b.month.localeCompare(a.month));    // newest first
+    const idxM = sameBrandM.findIndex(r => r.id === openMonthly.id);
+    const newerM = idxM > 0 ? sameBrandM[idxM - 1] : null;
+    const olderM = idxM >= 0 && idxM < sameBrandM.length - 1 ? sameBrandM[idxM + 1] : null;
+    const fmtMonthLabel = (yyyymm: string) => {
+      const [y, m] = yyyymm.split('-').map(Number);
+      return new Date(y, m - 1, 1).toLocaleString(undefined, { month: 'long', year: 'numeric' });
+    };
+    return (
+      <PublicShell clientName={clientName}>
+        <div className="d-flex align-items-start gap-3 mb-4 flex-wrap">
+          <button type="button" className="ac-back-btn" onClick={() => setOpenMonthlyId(null)}>
+            <i className="bi bi-arrow-left" /> Back
+          </button>
+          <div className="flex-grow-1 min-w-0">
+            <div className="text-muted small">{activeBrand.name}</div>
+            <h4 className="mb-0">{fmtMonthLabel(openMonthly.month)} <Badge bg="info" className="ms-2">Monthly</Badge></h4>
+          </div>
+        </div>
+        <MonthlyReportDashboard
+          c={normalizeMonthlyContent(openMonthly.content)}
+          monthLabel={fmtMonthLabel(openMonthly.month)}
+          brandName={activeBrand.name}
+          clientName={activeBrand.client}
+          approvalDecisions={decisions
+            .filter(d => d.report_id === openMonthly.id && d.report_type === 'monthly')
+            .map(d => ({
+              id: d.id, decision: d.decision, comment: d.comment,
+              decided_by_name: d.decided_by_name, decided_at: d.decided_at,
+            }))}
+          approvalAction={openMonthly.content?.approval?.enabled ? {
+            myDecision: (() => {
+              const d = decisions.find(x => x.report_id === openMonthly.id && x.report_type === 'monthly');
+              return d ? {
+                id: d.id, decision: d.decision, comment: d.comment,
+                decided_by_name: d.decided_by_name, decided_at: d.decided_at,
+              } : null;
+            })(),
+            defaultName: publicName,
+            onSubmit: async (choice, comment, name) => {
+              await submitApprovals([{
+                report_id: openMonthly.id,
+                report_type: 'monthly',
+                decision: choice,
+                comment,
+                decided_by_name: name,
+              }]);
+            },
+          } : undefined}
+          commentsConfig={{
+            mode: 'public',
+            comments: monthlyReportComments,
+            defaultPublicName: publicName,
+            onAdd: (section, body, name, parentId) => addComment(section, body, name, parentId, 'monthly'),
+          }}
+        />
+        <div className="ac-report-nav">
+          <button
+            type="button"
+            className="ac-nav-arrow-btn"
+            onClick={() => olderM && setOpenMonthlyId(olderM.id)}
+            disabled={!olderM}
+          >
+            <i className="bi bi-arrow-left" />
+            <span className="ac-nav-arrow-label">
+              <span className="ac-nav-arrow-hint">Previous</span>
+              <span>{olderM ? fmtMonthLabel(olderM.month) : 'No earlier month'}</span>
+            </span>
+          </button>
+          <button
+            type="button"
+            className="ac-nav-arrow-btn"
+            onClick={() => newerM && setOpenMonthlyId(newerM.id)}
+            disabled={!newerM}
+          >
+            <span className="ac-nav-arrow-label" style={{ alignItems: 'flex-end' }}>
+              <span className="ac-nav-arrow-hint">Next</span>
+              <span>{newerM ? fmtMonthLabel(newerM.month) : 'No later month'}</span>
+            </span>
+            <i className="bi bi-arrow-right" />
+          </button>
+        </div>
+      </PublicShell>
+    );
+  }
+
   const brandReportCount = (brandId: string) => reports.filter(r => r.brand_id === brandId).length;
+  const brandMonthlyCount = (brandId: string) => monthlyReports.filter(r => r.brand_id === brandId).length;
   const brandResourceCount = (brandId: string) =>
     resources.filter(r => (r.scope === 'brand' && r.brand_id === brandId) || r.scope === 'general').length;
 
@@ -445,7 +594,9 @@ export default function SharedReports() {
                 <div className="small" style={{ opacity: active ? .8 : .55, fontSize: '.7rem', letterSpacing: '.5px' }}>BRAND</div>
                 <div className="fw-semibold" style={{ fontSize: '1.05rem' }}>{b.name}</div>
                 <div className="small mt-1" style={{ opacity: active ? .85 : .6 }}>
-                  {brandReportCount(b.id)} report{brandReportCount(b.id) !== 1 ? 's' : ''} · {brandResourceCount(b.id)} resource{brandResourceCount(b.id) !== 1 ? 's' : ''}
+                  {includeReports && <>{brandReportCount(b.id)} weekly · </>}
+                  {includeMonthlyReports && <>{brandMonthlyCount(b.id)} monthly · </>}
+                  {brandResourceCount(b.id)} resource{brandResourceCount(b.id) !== 1 ? 's' : ''}
                 </div>
               </button>
             );
@@ -461,8 +612,16 @@ export default function SharedReports() {
                 {includeReports && (
                   <Nav.Item>
                     <Nav.Link eventKey="reporting" className="d-flex align-items-center gap-2 px-3">
-                      <i className="bi bi-bar-chart-line" /> Reporting
+                      <i className="bi bi-bar-chart-line" /> Weekly
                       <Badge bg="secondary">{brandReports.length}</Badge>
+                    </Nav.Link>
+                  </Nav.Item>
+                )}
+                {includeMonthlyReports && (
+                  <Nav.Item>
+                    <Nav.Link eventKey="monthly" className="d-flex align-items-center gap-2 px-3">
+                      <i className="bi bi-calendar-month" /> Monthly
+                      <Badge bg="secondary">{monthlyReports.filter(r => r.brand_id === activeBrandId).length}</Badge>
                     </Nav.Link>
                   </Nav.Item>
                 )}
@@ -525,14 +684,14 @@ export default function SharedReports() {
                                   <div className="mt-2" onClick={(e) => e.stopPropagation()}>
                                     {dec ? (
                                       <Button size="sm" variant={dec.decision === 'approved' ? 'success' : 'warning'}
-                                              onClick={() => { setSingleApprovalId(r.id); setShowApprovals(true); }}
+                                              onClick={() => { setSingleApprovalId(r.id); setSingleApprovalType('weekly'); setShowApprovals(true); }}
                                               title="Review or change your decision">
                                         <i className={`bi ${dec.decision === 'approved' ? 'bi-check-circle' : 'bi-arrow-repeat'} me-1`} />
                                         {dec.decision === 'approved' ? 'Approved' : 'Changes requested'}
                                       </Button>
                                     ) : (
                                       <Button size="sm" variant="warning"
-                                              onClick={() => { setSingleApprovalId(r.id); setShowApprovals(true); }}
+                                              onClick={() => { setSingleApprovalId(r.id); setSingleApprovalType('weekly'); setShowApprovals(true); }}
                                               title="Open the approval request">
                                         <i className="bi bi-shield-exclamation me-1" /> Approval requested
                                       </Button>
@@ -546,6 +705,89 @@ export default function SharedReports() {
                       })}
                     </Row>
                   )}
+                </Tab.Pane>
+
+                <Tab.Pane eventKey="monthly">
+                  {(() => {
+                    const brandMonthly = monthlyReports
+                      .filter(r => r.brand_id === activeBrandId)
+                      .sort((a, b) => b.month.localeCompare(a.month));
+                    const monthFilteredMonthly = brandMonthly.filter(r => r.month === month);
+                    const fmtMonthLabel = (yyyymm: string) => {
+                      const [y, m] = yyyymm.split('-').map(Number);
+                      return new Date(y, m - 1, 1).toLocaleString(undefined, { month: 'long', year: 'numeric' });
+                    };
+                    return (
+                      <>
+                        <div className="d-flex justify-content-between align-items-end mb-3 flex-wrap gap-2">
+                          <div>
+                            <h5 className="mb-0">{activeBrand.name} — Monthly Reports</h5>
+                            <small className="text-muted">{monthFilteredMonthly.length} report{monthFilteredMonthly.length !== 1 ? 's' : ''} in {fmtMonthLabel(month)}</small>
+                          </div>
+                          <div className="d-flex gap-2 align-items-end">
+                            <Button size="sm" variant="outline-primary" onClick={() => setShowMonthPicker(true)}>
+                              <i className="bi bi-calendar3 me-1" /> Change month
+                            </Button>
+                          </div>
+                        </div>
+                        {brandMonthly.length === 0 ? (
+                          <div className="text-center py-5 text-muted">
+                            <i className="bi bi-inbox" style={{ fontSize: '2rem' }} /><br />
+                            No monthly reports shared for this brand yet.
+                          </div>
+                        ) : monthFilteredMonthly.length === 0 ? (
+                          <div className="text-center py-4 text-muted">
+                            No monthly report for {fmtMonthLabel(month)}. Try a different month.
+                          </div>
+                        ) : (
+                          <Row className="g-3">
+                            {monthFilteredMonthly.map(r => {
+                              const dec = decisions.find(d => d.report_id === r.id && d.report_type === 'monthly');
+                              const approvalEnabled = !!r.content?.approval?.enabled;
+                              return (
+                                <Col md={6} lg={4} key={r.id}>
+                                  <Card
+                                    className="h-100 shadow-sm report-card"
+                                    style={{ cursor: 'pointer', borderLeft: '4px solid #14b8a6', transition: 'transform .15s, box-shadow .15s' }}
+                                    onClick={() => setOpenMonthlyId(r.id)}
+                                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)'; (e.currentTarget as HTMLElement).style.boxShadow = '0 8px 24px rgba(0,0,0,.08)'; }}
+                                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.transform = ''; (e.currentTarget as HTMLElement).style.boxShadow = ''; }}
+                                  >
+                                    <Card.Body>
+                                      <div className="d-flex justify-content-between align-items-start">
+                                        <div className="text-muted small text-uppercase" style={{ letterSpacing: '.5px', fontSize: '.7rem' }}>Month</div>
+                                        <Badge bg="info" pill>Monthly</Badge>
+                                      </div>
+                                      <div className="fs-5 fw-semibold mt-1">{fmtMonthLabel(r.month)}</div>
+                                      <div className="text-muted small mt-2">
+                                        <i className="bi bi-calendar3 me-1" /> Click to view dashboard
+                                      </div>
+                                      {approvalEnabled && (
+                                        <div className="mt-2" onClick={(e) => e.stopPropagation()}>
+                                          {dec ? (
+                                            <Button size="sm" variant={dec.decision === 'approved' ? 'success' : 'warning'}
+                                                    onClick={() => { setSingleApprovalId(r.id); setSingleApprovalType('monthly'); setShowApprovals(true); }}>
+                                              <i className={`bi ${dec.decision === 'approved' ? 'bi-check-circle' : 'bi-arrow-repeat'} me-1`} />
+                                              {dec.decision === 'approved' ? 'Approved' : 'Changes requested'}
+                                            </Button>
+                                          ) : (
+                                            <Button size="sm" variant="warning"
+                                                    onClick={() => { setSingleApprovalId(r.id); setSingleApprovalType('monthly'); setShowApprovals(true); }}>
+                                              <i className="bi bi-shield-exclamation me-1" /> Approval requested
+                                            </Button>
+                                          )}
+                                        </div>
+                                      )}
+                                    </Card.Body>
+                                  </Card>
+                                </Col>
+                              );
+                            })}
+                          </Row>
+                        )}
+                      </>
+                    );
+                  })()}
                 </Tab.Pane>
 
                 <Tab.Pane eventKey="resources">

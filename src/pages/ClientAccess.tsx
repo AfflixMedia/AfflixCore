@@ -11,7 +11,7 @@ type LinkMode = 'brand' | 'general';
 interface Link {
   id: string; token: string; label: string | null; client_id: string;
   brand_ids: string[]; resource_ids: string[];
-  include_reports: boolean; include_resources: boolean;
+  include_reports: boolean; include_monthly_reports: boolean; include_resources: boolean;
   link_mode: LinkMode;
   created_at: string; revoked_at: string | null;
 }
@@ -31,6 +31,7 @@ export default function ClientAccess() {
   const [brandIds, setBrandIds] = useState<string[]>([]);
   const [label, setLabel] = useState('');
   const [includeReports, setIncludeReports] = useState(true);
+  const [includeMonthlyReports, setIncludeMonthlyReports] = useState(false);
   const [includeResources, setIncludeResources] = useState(true);
   const [linkMode, setLinkMode] = useState<LinkMode>('brand');
   const [pickedResourceIds, setPickedResourceIds] = useState<string[]>([]);
@@ -80,7 +81,7 @@ export default function ClientAccess() {
   const openAdd = () => {
     setEditingId(null);
     setClientId(''); setBrandIds([]); setLabel('');
-    setIncludeReports(true); setIncludeResources(true);
+    setIncludeReports(true); setIncludeMonthlyReports(false); setIncludeResources(true);
     setLinkMode('brand'); setPickedResourceIds([]);
     setErr(null); setShow(true);
   };
@@ -91,6 +92,7 @@ export default function ClientAccess() {
     setBrandIds(l.brand_ids ?? []);
     setLabel(l.label ?? '');
     setIncludeReports(l.include_reports !== false);
+    setIncludeMonthlyReports(l.include_monthly_reports === true);
     setIncludeResources(l.include_resources !== false);
     setLinkMode((l.link_mode as LinkMode) ?? 'brand');
     setPickedResourceIds(l.resource_ids ?? []);
@@ -116,8 +118,8 @@ export default function ClientAccess() {
     setSaving(true); setErr(null);
     if (linkMode === 'brand') {
       if (brandIds.length === 0) { setErr('Pick at least one brand'); setSaving(false); return; }
-      if (!includeReports && !includeResources) {
-        setErr('Pick at least one of Reports or Resources to share — otherwise the client sees nothing.');
+      if (!includeReports && !includeMonthlyReports && !includeResources) {
+        setErr('Pick at least one of Weekly Reports / Monthly Reports / Resources — otherwise the client sees nothing.');
         setSaving(false); return;
       }
     } else if (linkMode === 'general') {
@@ -134,6 +136,7 @@ export default function ClientAccess() {
           brand_ids: brandIds,
           resource_ids: [] as string[],   // auto-include drives brand-mode resource visibility
           include_reports: includeReports,
+          include_monthly_reports: includeMonthlyReports,
           include_resources: includeResources,
         }
       : {
@@ -143,6 +146,7 @@ export default function ClientAccess() {
           brand_ids: [] as string[],
           resource_ids: pickedResourceIds,
           include_reports: false,
+          include_monthly_reports: false,
           include_resources: true,
         };
     const res = editingId
@@ -226,7 +230,8 @@ export default function ClientAccess() {
                             ? <Badge bg="warning" text="dark"><i className="bi bi-folder2 me-1" />Files only</Badge>
                             : (
                               <>
-                                {l.include_reports !== false && <Badge bg="success" className="me-1"><i className="bi bi-bar-chart me-1" />Reports</Badge>}
+                                {l.include_reports !== false && <Badge bg="success" className="me-1"><i className="bi bi-bar-chart me-1" />Weekly</Badge>}
+                                {l.include_monthly_reports === true && <Badge bg="info" className="me-1"><i className="bi bi-calendar-month me-1" />Monthly</Badge>}
                                 {l.include_resources !== false && <Badge bg="warning" text="dark" className="me-1"><i className="bi bi-folder2 me-1" />Resources</Badge>}
                               </>
                             )}
@@ -383,9 +388,17 @@ export default function ClientAccess() {
                       <Form.Check
                         type="switch"
                         id="include-reports"
-                        label={<><strong>Reports</strong> <span className="text-muted small">— weekly performance dashboards</span></>}
+                        label={<><strong>Weekly Reports</strong> <span className="text-muted small">— weekly performance dashboards</span></>}
                         checked={includeReports}
                         onChange={e => setIncludeReports(e.target.checked)}
+                      />
+                      <Form.Check
+                        type="switch"
+                        className="mt-2"
+                        id="include-monthly-reports"
+                        label={<><strong>Monthly Reports</strong> <span className="text-muted small">— monthly TikTok Shop reports</span></>}
+                        checked={includeMonthlyReports}
+                        onChange={e => setIncludeMonthlyReports(e.target.checked)}
                       />
                       <Form.Check
                         type="switch"
@@ -397,7 +410,7 @@ export default function ClientAccess() {
                       />
                     </div>
                     <Form.Text className="text-muted">
-                      Turn off either to hide that section from this client. The other one stays visible.
+                      Turn off any to hide that section from this client. The others stay visible.
                     </Form.Text>
                   </Form.Group>
                 )}

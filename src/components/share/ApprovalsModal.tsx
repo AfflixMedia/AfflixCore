@@ -1,17 +1,14 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Modal, Button, Form, Alert, Badge } from 'react-bootstrap';
 import DOMPurify from 'dompurify';
-import { WeeklyReportContent, normalizeContent } from '../../lib/reportSchema';
-import { formatRange } from '../../lib/dates';
 
 export interface PendingApprovalReport {
   id: string;
+  report_type: 'weekly' | 'monthly';
   brand_id: string;
   brand_name: string;
-  week_number: number;
-  week_start: string;
-  week_end: string;
-  content: WeeklyReportContent;
+  period_label: string;          // e.g. "Week #4 — Apr 19–25" or "March 2026"
+  approval_html: string;         // sanitized-or-raw HTML body of the approval request
 }
 
 export type ApprovalChoice = 'approved' | 'changes_requested' | null;
@@ -35,7 +32,7 @@ interface Props {
   /** Map of report_id → previously-submitted decision via this link, for pre-fill / re-edit. */
   existingDecisions?: Record<string, ExistingDecisionInfo>;
   onClose: () => void;
-  onSubmit: (decisions: { report_id: string; decision: 'approved' | 'changes_requested'; comment: string; decided_by_name: string }[]) => Promise<void>;
+  onSubmit: (decisions: { report_id: string; report_type: 'weekly' | 'monthly'; decision: 'approved' | 'changes_requested'; comment: string; decided_by_name: string }[]) => Promise<void>;
 }
 
 export default function ApprovalsModal({ show, pending, defaultName, existingDecisions, onClose, onSubmit }: Props) {
@@ -74,12 +71,16 @@ export default function ApprovalsModal({ show, pending, defaultName, existingDec
     if (decided.length === 0) { setErr('Choose Approve or Request changes for at least one item, or close this dialog.'); return; }
     setSubmitting(true);
     try {
-      await onSubmit(decided.map(([report_id, d]) => ({
-        report_id,
-        decision: d.choice as 'approved' | 'changes_requested',
-        comment: d.comment.trim(),
-        decided_by_name: name.trim(),
-      })));
+      await onSubmit(decided.map(([report_id, d]) => {
+        const p = pending.find(x => x.id === report_id);
+        return {
+          report_id,
+          report_type: p?.report_type ?? 'weekly',
+          decision: d.choice as 'approved' | 'changes_requested',
+          comment: d.comment.trim(),
+          decided_by_name: name.trim(),
+        };
+      }));
       onClose();
     } catch (e: any) {
       setErr(e?.message ?? 'Failed to submit');
@@ -115,14 +116,16 @@ export default function ApprovalsModal({ show, pending, defaultName, existingDec
         {pending.map(p => {
           const draft = drafts[p.id] ?? { choice: null, comment: '' };
           const existing = existingDecisions?.[p.id];
-          const safeHtml = DOMPurify.sanitize(p.content.approval?.content ?? '');
+          const safeHtml = DOMPurify.sanitize(p.approval_html ?? '');
           return (
             <div key={p.id} className="ac-approval-item mb-3">
               <div className="d-flex flex-wrap align-items-center justify-content-between mb-2 gap-2">
                 <div>
                   <Badge bg="dark" className="me-2">{p.brand_name}</Badge>
-                  <span className="fw-semibold">Week #{p.week_number}</span>
-                  <small className="text-muted ms-2">{formatRange(p.week_start, p.week_end)}</small>
+                  <Badge bg={p.report_type === 'monthly' ? 'info' : 'secondary'} className="me-2">
+                    {p.report_type === 'monthly' ? 'Monthly' : 'Weekly'}
+                  </Badge>
+                  <span className="fw-semibold">{p.period_label}</span>
                 </div>
                 {existing && (
                   <Badge bg={existing.decision === 'approved' ? 'success' : 'warning'} text={existing.decision === 'approved' ? undefined : 'dark'}>

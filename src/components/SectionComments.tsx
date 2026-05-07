@@ -8,6 +8,8 @@ export type StandardCommentSection = 'overall' | 'top_creators' | 'top_videos' |
 export interface Comment {
   id: string;
   report_id: string;
+  /** Polymorphic discriminator: which report table the comment belongs to. */
+  report_type?: 'weekly' | 'monthly';
   section: CommentSection;
   author_type: 'client' | 'apc' | 'bob';
   author_name: string;
