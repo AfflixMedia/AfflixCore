@@ -25,7 +25,9 @@ serve(async (req) => {
     const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const admin = createClient(supabaseUrl, serviceKey);
 
-    const { token, report_id, section, author_name, body, parent_id } = await req.json();
+    const reqBody = await req.json();
+    const { token, report_id, section, author_name, body, parent_id } = reqBody;
+    const report_type: 'weekly' | 'monthly' = reqBody.report_type === 'monthly' ? 'monthly' : 'weekly';
     if (!token || !report_id || !section || !author_name || !body) {
       return json({ error: 'token, report_id, section, author_name, body required' }, 400);
     }
@@ -37,8 +39,10 @@ serve(async (req) => {
     if (!link) return json({ error: 'Invalid link' }, 404);
     if (link.revoked_at) return json({ error: 'Link revoked' }, 410);
 
-    const { data: report } = await admin.from('weekly_reports')
-      .select('id,brand_id,content,is_shared').eq('id', report_id).maybeSingle();
+    const reportTable = report_type === 'monthly' ? 'monthly_reports' : 'weekly_reports';
+    const periodLabelField = report_type === 'monthly' ? 'month' : 'week_number';
+    const { data: report } = await admin.from(reportTable)
+      .select(`id,brand_id,content,is_shared,${periodLabelField}`).eq('id', report_id).maybeSingle();
     if (!report) return json({ error: 'Report not found' }, 404);
     const brandIds: string[] = link.brand_ids ?? [];
     if (!brandIds.includes(report.brand_id)) return json({ error: 'Not allowed' }, 403);
@@ -50,8 +54,10 @@ serve(async (req) => {
 
     if (parent_id) {
       const { data: parent } = await admin.from('report_comments')
-        .select('report_id').eq('id', parent_id).maybeSingle();
-      if (!parent || parent.report_id !== report_id) return json({ error: 'Invalid parent' }, 400);
+        .select('report_id,report_type').eq('id', parent_id).maybeSingle();
+      if (!parent || parent.report_id !== report_id || (parent as any).report_type !== report_type) {
+        return json({ error: 'Invalid parent' }, 400);
+      }
     }
 
     const cleanName = String(author_name).trim().slice(0, 80);
@@ -59,6 +65,7 @@ serve(async (req) => {
 
     const { data: inserted, error } = await admin.from('report_comments').insert({
       report_id,
+      report_type,
       section,
       author_type: 'client',
       author_name: cleanName,
@@ -95,7 +102,8 @@ serve(async (req) => {
 
       const title = `New comment on ${brand?.name ?? 'brand'} report`;
       const bodyText = `${cleanName} commented on ${labelFor(section)}: "${cleanBody.slice(0, 140)}${cleanBody.length > 140 ? '…' : ''}"`;
-      const link = `/reporting/weekly/${report_id}?section=${encodeURIComponent(section)}&comment=${(inserted as any).id}`;
+      const routeBase = report_type === 'monthly' ? 'monthly' : 'weekly';
+      const link = `/reporting/${routeBase}/${report_id}?section=${encodeURIComponent(section)}&comment=${(inserted as any).id}`;
       const payload = {
         report_id, brand_id: report.brand_id, section, comment_id: (inserted as any).id,
       };

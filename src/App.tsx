@@ -15,6 +15,9 @@ import Reporting from './pages/Reporting';
 import WeeklyReports from './pages/WeeklyReports';
 import WeeklyReportEdit from './pages/WeeklyReportEdit';
 import WeeklyReportView from './pages/WeeklyReportView';
+import MonthlyReports from './pages/MonthlyReports';
+import MonthlyReportEdit from './pages/MonthlyReportEdit';
+import MonthlyReportView from './pages/MonthlyReportView';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { useAuth } from './auth/AuthContext';
 
@@ -49,8 +52,10 @@ export default function App() {
         <Route path="reporting/weekly" element={<WeeklyReports />} />
         <Route path="reporting/weekly/:id" element={<WeeklyReportView />} />
         <Route path="reporting/weekly/:id/edit" element={<WeeklyReportEdit />} />
+        <Route path="reporting/monthly" element={<MonthlyReports />} />
+        <Route path="reporting/monthly/:id" element={<MonthlyReportView />} />
+        <Route path="reporting/monthly/:id/edit" element={<MonthlyReportEdit />} />
         <Route path="reporting/bi-weekly" element={<Reporting kind="Bi-Weekly" />} />
-        <Route path="reporting/monthly" element={<Reporting kind="Monthly" />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

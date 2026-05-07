@@ -19,7 +19,9 @@ serve(async (req) => {
     const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const admin = createClient(supabaseUrl, serviceKey);
 
-    const { token, report_id, decision, decided_by_name, comment } = await req.json();
+    const reqBody = await req.json();
+    const { token, report_id, decision, decided_by_name, comment } = reqBody;
+    const report_type: 'weekly' | 'monthly' = reqBody.report_type === 'monthly' ? 'monthly' : 'weekly';
     if (!token || !report_id || !decision || !decided_by_name) {
       return json({ error: 'token, report_id, decision, decided_by_name required' }, 400);
     }
@@ -32,8 +34,10 @@ serve(async (req) => {
     if (!link) return json({ error: 'Invalid link' }, 404);
     if (link.revoked_at) return json({ error: 'Link revoked' }, 410);
 
-    const { data: report } = await admin.from('weekly_reports')
-      .select('id,brand_id,week_number,is_shared,content').eq('id', report_id).maybeSingle();
+    const reportTable = report_type === 'monthly' ? 'monthly_reports' : 'weekly_reports';
+    const periodLabelField = report_type === 'monthly' ? 'month' : 'week_number';
+    const { data: report } = await admin.from(reportTable)
+      .select(`id,brand_id,${periodLabelField},is_shared,content`).eq('id', report_id).maybeSingle();
     if (!report) return json({ error: 'Report not found' }, 404);
 
     const brandIds: string[] = link.brand_ids ?? [];
@@ -52,6 +56,7 @@ serve(async (req) => {
     const { data: inserted, error } = await admin.from('report_approval_decisions')
       .upsert({
         report_id,
+        report_type,
         share_link_id: link.id,
         decision,
         comment: cleanComment,
@@ -72,6 +77,7 @@ serve(async (req) => {
         : `[${verb}]`;
       const { data: cm } = await admin.from('report_comments').insert({
         report_id,
+        report_type,
         section: 'approval',
         author_type: 'client',
         author_name: cleanName,
@@ -92,15 +98,19 @@ serve(async (req) => {
       (apcRows ?? []).forEach((r: any) => recipientIds.add(r.apc_id));
 
       const verb = decision === 'approved' ? 'approved' : 'requested changes on';
+      const periodLabel = report_type === 'monthly'
+        ? `Month ${(report as any).month ?? ''}`
+        : `Week #${(report as any).week_number}`;
+      const routeBase = report_type === 'monthly' ? 'monthly' : 'weekly';
       const title = `${cleanName} ${verb} ${brand?.name ?? 'a brand'} report`;
       const bodyText = cleanComment
-        ? `Week #${report.week_number}. Comment: "${cleanComment.slice(0, 160)}${cleanComment.length > 160 ? '…' : ''}"`
-        : `Week #${report.week_number}. No comment.`;
+        ? `${periodLabel}. Comment: "${cleanComment.slice(0, 160)}${cleanComment.length > 160 ? '…' : ''}"`
+        : `${periodLabel}. No comment.`;
       const linkUrl = mirrorComment?.id
-        ? `/reporting/weekly/${report_id}?section=approval&comment=${mirrorComment.id}`
-        : `/reporting/weekly/${report_id}?section=approval`;
+        ? `/reporting/${routeBase}/${report_id}?section=approval&comment=${mirrorComment.id}`
+        : `/reporting/${routeBase}/${report_id}?section=approval`;
       const payload = {
-        report_id, brand_id: report.brand_id,
+        report_id, report_type, brand_id: report.brand_id,
         decision, decision_id: (inserted as any).id,
         section: 'approval',
         comment_id: mirrorComment?.id ?? null,

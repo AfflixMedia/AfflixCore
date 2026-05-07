@@ -42,15 +42,19 @@ serve(async (req) => {
       return json({ error: 'Not allowed' }, 403);
     }
 
-    const { report_id, section, body, parent_id } = await req.json();
+    const reqBody = await req.json();
+    const { report_id, section, body, parent_id } = reqBody;
+    const report_type: 'weekly' | 'monthly' = reqBody.report_type === 'monthly' ? 'monthly' : 'weekly';
     if (!report_id || !section || !body) {
       return json({ error: 'report_id, section, body required' }, 400);
     }
     if (!isValidSection(section)) return json({ error: 'Invalid section' }, 400);
     if (String(body).trim().length === 0) return json({ error: 'Empty comment' }, 400);
 
-    const { data: report } = await admin.from('weekly_reports')
-      .select('id,brand_id,week_number,content').eq('id', report_id).single();
+    const reportTable = report_type === 'monthly' ? 'monthly_reports' : 'weekly_reports';
+    const periodLabelField = report_type === 'monthly' ? 'month' : 'week_number';
+    const { data: report } = await admin.from(reportTable)
+      .select(`id,brand_id,${periodLabelField},content`).eq('id', report_id).single();
     if (!report) return json({ error: 'Report not found' }, 404);
 
     if (profile.role === 'apc') {
@@ -61,8 +65,10 @@ serve(async (req) => {
 
     if (parent_id) {
       const { data: parent } = await admin.from('report_comments')
-        .select('report_id').eq('id', parent_id).maybeSingle();
-      if (!parent || parent.report_id !== report_id) return json({ error: 'Invalid parent' }, 400);
+        .select('report_id,report_type').eq('id', parent_id).maybeSingle();
+      if (!parent || parent.report_id !== report_id || (parent as any).report_type !== report_type) {
+        return json({ error: 'Invalid parent' }, 400);
+      }
     }
 
     const cleanBody = String(body).trim().slice(0, 4000);
@@ -70,6 +76,7 @@ serve(async (req) => {
 
     const { data: inserted, error } = await admin.from('report_comments').insert({
       report_id,
+      report_type,
       section,
       author_type: profile.role === 'bob' ? 'bob' : 'apc',
       author_name: authorName,
@@ -105,9 +112,13 @@ serve(async (req) => {
       (apcRows ?? []).forEach((r: any) => recipientIds.add(r.apc_id));
       recipientIds.delete(profile.id);  // don't notify self
 
+      const periodLabel = report_type === 'monthly'
+        ? `Month ${(report as any).month ?? ''}`
+        : `Week #${(report as any).week_number}`;
       const title = `${authorName} replied on ${brand?.name ?? 'a brand'} report`;
-      const bodyText = `${labelFor(section)} (Week #${report.week_number}): "${cleanBody.slice(0, 140)}${cleanBody.length > 140 ? '…' : ''}"`;
-      const linkUrl = `/reporting/weekly/${report_id}?section=${encodeURIComponent(section)}&comment=${(inserted as any).id}`;
+      const bodyText = `${labelFor(section)} (${periodLabel}): "${cleanBody.slice(0, 140)}${cleanBody.length > 140 ? '…' : ''}"`;
+      const routeBase = report_type === 'monthly' ? 'monthly' : 'weekly';
+      const linkUrl = `/reporting/${routeBase}/${report_id}?section=${encodeURIComponent(section)}&comment=${(inserted as any).id}`;
       const payload = {
         report_id, brand_id: report.brand_id, section, comment_id: (inserted as any).id,
       };

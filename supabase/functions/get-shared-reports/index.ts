@@ -69,13 +69,24 @@ serve(async (req) => {
     const includeReports   = link.include_reports   !== false;
     const includeResources = link.include_resources !== false;
 
-    const [{ data: client }, { data: allBrands }, { data: rawReports }, { data: rawResources }] = await Promise.all([
+    const [
+      { data: client },
+      { data: allBrands },
+      { data: rawWeekly },
+      { data: rawMonthly },
+      { data: rawResources },
+    ] = await Promise.all([
       admin.from('clients').select('id,name').eq('id', link.client_id).single(),
       admin.from('brands').select('id,name,client,client_id,share_enabled').in('id', brandIds),
       includeReports
         ? admin.from('weekly_reports').select('*').in('brand_id', brandIds)
             .eq('is_shared', true)
             .order('week_start', { ascending: false })
+        : Promise.resolve({ data: [] as any[] }),
+      includeReports
+        ? admin.from('monthly_reports').select('*').in('brand_id', brandIds)
+            .eq('is_shared', true)
+            .order('month', { ascending: false })
         : Promise.resolve({ data: [] as any[] }),
       includeResources
         ? admin.from('resources').select('*').eq('is_shared', true)
@@ -86,37 +97,59 @@ serve(async (req) => {
     const brands = (allBrands ?? []).filter((b: any) => b.share_enabled === true)
       .map(({ share_enabled: _share, ...rest }: any) => rest);
     const allowedBrandIds = new Set(brands.map((b: any) => b.id));
-    const reports = (rawReports ?? []).filter((r: any) => allowedBrandIds.has(r.brand_id));
+    const reports         = (rawWeekly ?? []).filter((r: any) => allowedBrandIds.has(r.brand_id));
+    const monthly_reports = (rawMonthly ?? []).filter((r: any) => allowedBrandIds.has(r.brand_id));
 
     // Auto-include is_shared resources: general (always) + brand-scope where the brand is in the link AND share_enabled.
     const resources = (rawResources ?? []).filter((r: any) =>
       r.scope === 'general' || (r.brand_id && allowedBrandIds.has(r.brand_id))
     );
 
-    const reportIds = reports.map((r: any) => r.id);
-    const { data: comments } = reportIds.length > 0
-      ? await admin.from('report_comments').select('*').in('report_id', reportIds).order('created_at', { ascending: true })
-      : { data: [] };
+    const reportIds        = reports.map((r: any) => r.id);
+    const monthlyReportIds = monthly_reports.map((r: any) => r.id);
+
+    // Comments: filter by both report_id and report_type to match the polymorphic schema
+    const [{ data: weeklyComments }, { data: monthlyComments }] = await Promise.all([
+      reportIds.length > 0
+        ? admin.from('report_comments').select('*')
+            .in('report_id', reportIds).eq('report_type', 'weekly')
+            .order('created_at', { ascending: true })
+        : Promise.resolve({ data: [] as any[] }),
+      monthlyReportIds.length > 0
+        ? admin.from('report_comments').select('*')
+            .in('report_id', monthlyReportIds).eq('report_type', 'monthly')
+            .order('created_at', { ascending: true })
+        : Promise.resolve({ data: [] as any[] }),
+    ]);
+    const comments = [...(weeklyComments ?? []), ...(monthlyComments ?? [])];
 
     const sharedResourceIds = (resources ?? []).map((r: any) => r.id);
     const { data: resource_comments } = sharedResourceIds.length > 0
       ? await admin.from('resource_comments').select('*').in('resource_id', sharedResourceIds).order('created_at', { ascending: true })
       : { data: [] };
 
-    // Approval decisions made via THIS link only — drives "what's still pending for this client"
-    const { data: approval_decisions } = reportIds.length > 0
-      ? await admin.from('report_approval_decisions').select('*')
-          .in('report_id', reportIds).eq('share_link_id', link.id)
-      : { data: [] };
+    // Approval decisions made via THIS link only — across both report types
+    const [{ data: weeklyDecisions }, { data: monthlyDecisions }] = await Promise.all([
+      reportIds.length > 0
+        ? admin.from('report_approval_decisions').select('*')
+            .in('report_id', reportIds).eq('share_link_id', link.id).eq('report_type', 'weekly')
+        : Promise.resolve({ data: [] as any[] }),
+      monthlyReportIds.length > 0
+        ? admin.from('report_approval_decisions').select('*')
+            .in('report_id', monthlyReportIds).eq('share_link_id', link.id).eq('report_type', 'monthly')
+        : Promise.resolve({ data: [] as any[] }),
+    ]);
+    const approval_decisions = [...(weeklyDecisions ?? []), ...(monthlyDecisions ?? [])];
 
     return json({
       client,
       brands,
       reports,
+      monthly_reports,
       resources: resources ?? [],
-      comments: comments ?? [],
+      comments,
       resource_comments: resource_comments ?? [],
-      approval_decisions: approval_decisions ?? [],
+      approval_decisions,
       label: link.label ?? null,
       include_reports: includeReports,
       include_resources: includeResources,

@@ -1,0 +1,182 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Spinner, Alert, Badge, Button } from 'react-bootstrap';
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../auth/AuthContext';
+import { useNotifications } from '../notifications/NotificationsContext';
+import { MonthlyReportContent, normalizeMonthlyContent } from '../lib/monthlyReportSchema';
+import MonthlyReportDashboard from '../components/MonthlyReportDashboard';
+import { ApprovalDecisionView } from '../components/ReportDashboard';
+import { Comment, CommentSection } from '../components/SectionComments';
+
+interface MonthlyRow {
+  id: string; brand_id: string; month: string;
+  status: string; content: any;
+}
+interface Brand { id: string; name: string; client: string; }
+
+function fmtMonth(yyyymm: string): string {
+  const [y, m] = yyyymm.split('-').map(Number);
+  return new Date(y, m - 1, 1).toLocaleString(undefined, { month: 'long', year: 'numeric' });
+}
+
+export default function MonthlyReportView() {
+  const { id } = useParams<{ id: string }>();
+  const nav = useNavigate();
+  const [params] = useSearchParams();
+  const openSection = params.get('section') as CommentSection | null;
+  const highlightCommentId = params.get('comment');
+  const { profile } = useAuth();
+  const { notifications, markRead } = useNotifications();
+  const [report, setReport] = useState<MonthlyRow | null>(null);
+  const [brand, setBrand] = useState<Brand | null>(null);
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [decisions, setDecisions] = useState<ApprovalDecisionView[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
+
+  const exportPdf = async () => {
+    const el = exportRef.current;
+    if (!el || !report || !brand) return;
+    setExporting(true);
+    document.body.classList.add('ac-pdf-capturing');
+    const prevWidth = el.style.width;
+    const captureWidth = 1280;
+    el.style.width = `${captureWidth}px`;
+    await new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+    try {
+      const canvas = await html2canvas(el, {
+        scale: 2, useCORS: true, backgroundColor: '#ffffff',
+        windowWidth: captureWidth, width: captureWidth, scrollX: 0, scrollY: 0,
+      });
+      const PX_TO_MM = 25.4 / 96;
+      const contentWidthMm = (canvas.width / 2) * PX_TO_MM;
+      const contentHeightMm = (canvas.height / 2) * PX_TO_MM;
+      const margin = 8;
+      const pageWidth = contentWidthMm + margin * 2;
+      const pageHeight = contentHeightMm + margin * 2;
+      const pdf = new jsPDF({
+        unit: 'mm', format: [pageWidth, pageHeight],
+        orientation: pageWidth > pageHeight ? 'landscape' : 'portrait',
+      });
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.96), 'JPEG', margin, margin, contentWidthMm, contentHeightMm);
+      pdf.save(`${brand.name.replace(/\s+/g, '_')}-${report.month}.pdf`);
+    } finally {
+      el.style.width = prevWidth;
+      document.body.classList.remove('ac-pdf-capturing');
+      setExporting(false);
+    }
+  };
+
+  useEffect(() => {
+    notifications.forEach(n => {
+      if (!n.read_at && n.payload?.report_id === id && n.payload?.report_type === 'monthly') markRead(n.id);
+    });
+  }, [id, notifications, markRead]);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      const { data: cur, error } = await supabase.from('monthly_reports').select('*').eq('id', id).single();
+      if (error) { setErr(error.message); setLoading(false); return; }
+      const r = cur as MonthlyRow;
+      setReport(r);
+      const { data: bd } = await supabase.from('brands').select('id,name,client').eq('id', r.brand_id).single();
+      setBrand(bd as Brand);
+      const { data: cm } = await supabase.from('report_comments')
+        .select('*').eq('report_id', r.id).eq('report_type', 'monthly')
+        .order('created_at', { ascending: true });
+      setComments((cm as Comment[]) ?? []);
+      const { data: dec } = await supabase.from('report_approval_decisions')
+        .select('id,decision,comment,decided_by_name,decided_at,share_link_id,report_share_links(label)')
+        .eq('report_id', r.id).eq('report_type', 'monthly')
+        .order('decided_at', { ascending: false });
+      setDecisions(((dec as any[]) ?? []).map(d => ({
+        id: d.id,
+        decision: d.decision,
+        comment: d.comment,
+        decided_by_name: d.decided_by_name,
+        decided_at: d.decided_at,
+        share_link_label: d.report_share_links?.label ?? null,
+      })));
+      setLoading(false);
+    })();
+  }, [id]);
+
+  const c = useMemo<MonthlyReportContent>(() => normalizeMonthlyContent(report?.content), [report]);
+
+  const addComment = async (section: CommentSection, body: string, _authorName: string, parentId?: string) => {
+    if (!report) return;
+    const { data, error } = await supabase.functions.invoke('post-staff-comment', {
+      body: { report_id: report.id, report_type: 'monthly', section, body, parent_id: parentId ?? null },
+    });
+    if (error) throw error;
+    if ((data as any)?.error) throw new Error((data as any).error);
+    setComments(prev => [...prev, (data as any).comment as Comment]);
+  };
+
+  if (loading) return <div className="text-center py-5"><Spinner animation="border" /></div>;
+  if (err || !report || !brand) return <Alert variant="danger">{err ?? 'Not found'}</Alert>;
+
+  return (
+    <>
+      <div className="d-flex align-items-start gap-3 mb-3 flex-wrap">
+        <button type="button" className="ac-back-btn" onClick={() => nav('/reporting/monthly')}>
+          <i className="bi bi-arrow-left" /> Back
+        </button>
+        <div className="flex-grow-1" />
+        <div className="d-flex gap-2 flex-wrap">
+          <Button variant="outline-secondary" onClick={exportPdf} disabled={exporting} title="Download a PDF copy">
+            <i className="bi bi-printer me-1" /> {exporting ? 'Building PDF…' : 'Export PDF'}
+          </Button>
+          <Button variant="primary" onClick={() => nav(`/reporting/monthly/${id}/edit`)}>
+            <i className="bi bi-pencil me-1" /> Edit data
+          </Button>
+          {profile?.role === 'bob' && (
+            <Button variant="outline-danger" onClick={async () => {
+              if (!confirm(`Delete this monthly report permanently?`)) return;
+              const { error } = await supabase.from('monthly_reports').delete().eq('id', report!.id);
+              if (error) { alert(error.message); return; }
+              nav('/reporting/monthly');
+            }}>
+              <i className="bi bi-trash me-1" /> Delete
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <div ref={exportRef} className="ac-report-export-area">
+        <div className="d-flex align-items-start gap-3 mb-4 flex-wrap">
+          <div className="flex-grow-1 min-w-0">
+            <div className="text-muted small">{brand.client}</div>
+            <h2 className="mb-1">{brand.name} <span className="text-muted fs-6">— {fmtMonth(report.month)}</span></h2>
+            <div className="text-muted">
+              Monthly report
+              <Badge bg={report.status === 'draft' ? 'secondary' : 'success'} className="ms-2">{report.status}</Badge>
+            </div>
+          </div>
+        </div>
+
+        <MonthlyReportDashboard
+          c={c}
+          monthLabel={fmtMonth(report.month)}
+          brandName={brand.name}
+          clientName={brand.client}
+          openSectionOnLoad={openSection}
+          highlightCommentId={highlightCommentId}
+          approvalDecisions={decisions}
+          commentsConfig={{
+            mode: 'authed',
+            comments,
+            currentAuthorName: profile?.full_name || profile?.email || 'User',
+            onAdd: addComment,
+          }}
+        />
+      </div>
+    </>
+  );
+}
