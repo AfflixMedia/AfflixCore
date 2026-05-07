@@ -366,13 +366,17 @@ export default function MonthlyReportEdit() {
       <span><StdPresetMenu sectionId={sectionId} /><FeedbackButton section={sectionId as string} /></span>
     </div>
   );
-  const TLRow = ({ label, group, field, dec, suffix, integer }: {
-    label: string; group: keyof MonthlyReportContent; field: string;
+  // Render a "Metric / This Month / Last Month" row as a JSX expression — NOT
+  // a component. If we made this a component declared inside MonthlyReportEdit,
+  // every render would give it a new identity and React would unmount + remount
+  // the inputs underneath it on every keystroke, killing focus.
+  const tlRow = (label: string, group: keyof MonthlyReportContent, field: string, opts?: {
     dec?: boolean; suffix?: string; integer?: boolean;
   }) => {
+    const { dec, suffix, integer } = opts ?? {};
     const tl = ((c as any)[group] as any)[field] as ThisLast;
     return (
-      <Row className="g-2 align-items-center mb-2">
+      <Row key={`${String(group)}-${field}`} className="g-2 align-items-center mb-2">
         <Col md={4}><Form.Label className="small mb-0">{label}{suffix ? ` (${suffix})` : ''}</Form.Label></Col>
         <Col md={4}><NumberInput value={tl.this} step={dec ? '0.01' : (integer ? '1' : '0.01')} onChange={n => setTL(group, field, 'this', n)} /></Col>
         <Col md={4}><NumberInput value={tl.last} step={dec ? '0.01' : (integer ? '1' : '0.01')} onChange={n => setTL(group, field, 'last', n)} /></Col>
@@ -488,11 +492,11 @@ export default function MonthlyReportEdit() {
         <Card.Header><HeaderWithFeedback title="KPIs" sectionId="kpis" /></Card.Header>
         <Card.Body>
           <Row className="g-2 mb-1"><Col md={4}><strong className="small">Metric</strong></Col><Col md={4}><strong className="small">This Month</strong></Col><Col md={4}><strong className="small">Last Month</strong></Col></Row>
-          <TLRow label="Samples Approved"     group="kpis" field="samples_approved" integer />
-          <TLRow label="New Affiliate Posts"  group="kpis" field="new_affiliate_posts" integer />
-          <TLRow label="Completed Collabs"    group="kpis" field="completed_collabs" integer />
-          <TLRow label="Content Pending"      group="kpis" field="content_pending" integer />
-          <TLRow label="Total Orders"         group="kpis" field="total_orders" integer />
+          {tlRow('Samples Approved',    'kpis', 'samples_approved',    { integer: true })}
+          {tlRow('New Affiliate Posts', 'kpis', 'new_affiliate_posts', { integer: true })}
+          {tlRow('Completed Collabs',   'kpis', 'completed_collabs',   { integer: true })}
+          {tlRow('Content Pending',     'kpis', 'content_pending',     { integer: true })}
+          {tlRow('Total Orders',        'kpis', 'total_orders',        { integer: true })}
         </Card.Body>
       </Card>
       {renderCustomAt('kpis')}
@@ -502,11 +506,11 @@ export default function MonthlyReportEdit() {
         <Card.Header><HeaderWithFeedback title="GMV Breakdown" sectionId="gmv_breakdown" /></Card.Header>
         <Card.Body>
           <Row className="g-2 mb-1"><Col md={4}><strong className="small">GMV</strong></Col><Col md={4}><strong className="small">This Month ($)</strong></Col><Col md={4}><strong className="small">Last Month ($)</strong></Col></Row>
-          <TLRow label="Affiliate GMV"    group="gmv_breakdown" field="affiliate_gmv" />
-          <TLRow label="Organic GMV"      group="gmv_breakdown" field="organic_gmv" />
-          <TLRow label="LIVE GMV"         group="gmv_breakdown" field="live_gmv" />
-          <TLRow label="Video GMV"        group="gmv_breakdown" field="video_gmv" />
-          <TLRow label="Product Card GMV" group="gmv_breakdown" field="product_card_gmv" />
+          {tlRow('Affiliate GMV',    'gmv_breakdown', 'affiliate_gmv')}
+          {tlRow('Organic GMV',      'gmv_breakdown', 'organic_gmv')}
+          {tlRow('LIVE GMV',         'gmv_breakdown', 'live_gmv')}
+          {tlRow('Video GMV',        'gmv_breakdown', 'video_gmv')}
+          {tlRow('Product Card GMV', 'gmv_breakdown', 'product_card_gmv')}
         </Card.Body>
       </Card>
       {renderCustomAt('gmv_breakdown')}
@@ -572,19 +576,19 @@ export default function MonthlyReportEdit() {
         <Card.Header><HeaderWithFeedback title="Video Performance" sectionId="video_performance" /></Card.Header>
         <Card.Body>
           <Row className="g-2 mb-1"><Col md={4}><strong className="small">Metric</strong></Col><Col md={4}><strong className="small">This Month</strong></Col><Col md={4}><strong className="small">Last Month</strong></Col></Row>
-          <TLRow label="Product Impressions"  group="video_performance" field="product_impressions" integer />
-          <TLRow label="Product Clicks"       group="video_performance" field="product_clicks" integer />
-          <TLRow label="Video Views"          group="video_performance" field="video_views" integer />
-          <TLRow label="CTR (%)"              group="video_performance" field="ctr" dec />
-          <TLRow label="CTOR (%)"             group="video_performance" field="ctor" dec />
-          <TLRow label="SKU Orders"           group="video_performance" field="sku_orders" integer />
-          <TLRow label="GMV ($)"              group="video_performance" field="gmv" />
-          <TLRow label="Videos with 1M+ Views"  group="video_performance" field="videos_1m_views" integer />
-          <TLRow label="Videos with 100k+ Views" group="video_performance" field="videos_100k_views" integer />
-          <TLRow label="Videos with 10k+ Views"  group="video_performance" field="videos_10k_views" integer />
-          <TLRow label="Videos with $1000+ GMV"  group="video_performance" field="videos_1k_gmv" integer />
-          <TLRow label="Videos with $100+ GMV"   group="video_performance" field="videos_100_gmv" integer />
-          <TLRow label="No. of New Videos Posted" group="video_performance" field="new_videos_posted" integer />
+          {tlRow('Product Impressions',     'video_performance', 'product_impressions', { integer: true })}
+          {tlRow('Product Clicks',          'video_performance', 'product_clicks',      { integer: true })}
+          {tlRow('Video Views',             'video_performance', 'video_views',         { integer: true })}
+          {tlRow('CTR (%)',                 'video_performance', 'ctr',                 { dec: true })}
+          {tlRow('CTOR (%)',                'video_performance', 'ctor',                { dec: true })}
+          {tlRow('SKU Orders',              'video_performance', 'sku_orders',          { integer: true })}
+          {tlRow('GMV ($)',                 'video_performance', 'gmv')}
+          {tlRow('Videos with 1M+ Views',   'video_performance', 'videos_1m_views',     { integer: true })}
+          {tlRow('Videos with 100k+ Views', 'video_performance', 'videos_100k_views',   { integer: true })}
+          {tlRow('Videos with 10k+ Views',  'video_performance', 'videos_10k_views',    { integer: true })}
+          {tlRow('Videos with $1000+ GMV',  'video_performance', 'videos_1k_gmv',       { integer: true })}
+          {tlRow('Videos with $100+ GMV',   'video_performance', 'videos_100_gmv',      { integer: true })}
+          {tlRow('No. of New Videos Posted','video_performance', 'new_videos_posted',   { integer: true })}
         </Card.Body>
       </Card>
       {renderCustomAt('video_performance')}
@@ -594,11 +598,11 @@ export default function MonthlyReportEdit() {
         <Card.Header><HeaderWithFeedback title="Creators Performance" sectionId="creators_performance" /></Card.Header>
         <Card.Body>
           <Row className="g-2 mb-1"><Col md={4}><strong className="small">Metric</strong></Col><Col md={4}><strong className="small">This Month</strong></Col><Col md={4}><strong className="small">Last Month</strong></Col></Row>
-          <TLRow label="Creators who posted 1+ videos"  group="creators_performance" field="posted_1plus" integer />
-          <TLRow label="Creators who posted 3+ videos"  group="creators_performance" field="posted_3plus" integer />
-          <TLRow label="Creators who posted 10+ videos" group="creators_performance" field="posted_10plus" integer />
-          <TLRow label="Creators who generated $1k+ GMV"  group="creators_performance" field="generated_1k_plus" integer />
-          <TLRow label="Creators who generated $100+ GMV" group="creators_performance" field="generated_100_plus" integer />
+          {tlRow('Creators who posted 1+ videos',    'creators_performance', 'posted_1plus',        { integer: true })}
+          {tlRow('Creators who posted 3+ videos',    'creators_performance', 'posted_3plus',        { integer: true })}
+          {tlRow('Creators who posted 10+ videos',   'creators_performance', 'posted_10plus',       { integer: true })}
+          {tlRow('Creators who generated $1k+ GMV',  'creators_performance', 'generated_1k_plus',   { integer: true })}
+          {tlRow('Creators who generated $100+ GMV', 'creators_performance', 'generated_100_plus',  { integer: true })}
         </Card.Body>
       </Card>
       {renderCustomAt('creators_performance')}
@@ -648,15 +652,15 @@ export default function MonthlyReportEdit() {
         <Card.Header><HeaderWithFeedback title="Customers" sectionId="customers" /></Card.Header>
         <Card.Body>
           <Row className="g-2 mb-1"><Col md={4}><strong className="small">Metric</strong></Col><Col md={4}><strong className="small">This Month</strong></Col><Col md={4}><strong className="small">Last Month</strong></Col></Row>
-          <TLRow label="Aware Customers"          group="customers" field="aware_customers" integer />
-          <TLRow label="New Customers"            group="customers" field="new_customers" integer />
-          <TLRow label="Potential New Customers"  group="customers" field="potential_new_customers" integer />
+          {tlRow('Aware Customers',         'customers', 'aware_customers',         { integer: true })}
+          {tlRow('New Customers',           'customers', 'new_customers',           { integer: true })}
+          {tlRow('Potential New Customers', 'customers', 'potential_new_customers', { integer: true })}
           <Row className="g-2 align-items-center mb-2">
             <Col md={4}><Form.Label className="small mb-0">CRM Messages Sent</Form.Label></Col>
             <Col md={4}><Form.Control value={c.customers.crm_messages_sent_this} onChange={e => setCustomers('crm_messages_sent_this', e.target.value)} placeholder="e.g. Not Yet Eligible or 1234" /></Col>
             <Col md={4}><Form.Control value={c.customers.crm_messages_sent_last} onChange={e => setCustomers('crm_messages_sent_last', e.target.value)} /></Col>
           </Row>
-          <TLRow label="Converted Customers" group="customers" field="converted_customers" integer />
+          {tlRow('Converted Customers', 'customers', 'converted_customers', { integer: true })}
         </Card.Body>
       </Card>
       {renderCustomAt('customers')}
