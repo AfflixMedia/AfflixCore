@@ -7,7 +7,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/AuthContext';
 import { useNotifications } from '../notifications/NotificationsContext';
 import { MonthlyReportContent, normalizeMonthlyContent } from '../lib/monthlyReportSchema';
-import MonthlyReportDashboard from '../components/MonthlyReportDashboard';
+import MonthlyReportDashboard, { MonthlyTrendPoint } from '../components/MonthlyReportDashboard';
 import { ApprovalDecisionView } from '../components/ReportDashboard';
 import { Comment, CommentSection } from '../components/SectionComments';
 
@@ -16,6 +16,12 @@ interface MonthlyRow {
   status: string; content: any;
 }
 interface Brand { id: string; name: string; client: string; }
+
+function shiftMonth(yyyymm: string, delta: number) {
+  const [y, m] = yyyymm.split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
 
 function fmtMonth(yyyymm: string): string {
   const [y, m] = yyyymm.split('-').map(Number);
@@ -34,6 +40,8 @@ export default function MonthlyReportView() {
   const [brand, setBrand] = useState<Brand | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [decisions, setDecisions] = useState<ApprovalDecisionView[]>([]);
+  const [prev, setPrev] = useState<MonthlyRow | null>(null);
+  const [trend, setTrend] = useState<MonthlyRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -87,6 +95,15 @@ export default function MonthlyReportView() {
       setReport(r);
       const { data: bd } = await supabase.from('brands').select('id,name,client').eq('id', r.brand_id).single();
       setBrand(bd as Brand);
+      // Previous month (for "Last Month" auto-comparison) and 8-month trend
+      const prevMonth = shiftMonth(r.month, -1);
+      const { data: pv } = await supabase.from('monthly_reports')
+        .select('*').eq('brand_id', r.brand_id).eq('month', prevMonth).maybeSingle();
+      setPrev(pv as MonthlyRow | null);
+      const { data: tr } = await supabase.from('monthly_reports')
+        .select('*').eq('brand_id', r.brand_id)
+        .lte('month', r.month).order('month', { ascending: true }).limit(8);
+      setTrend((tr as MonthlyRow[]) ?? []);
       const { data: cm } = await supabase.from('report_comments')
         .select('*').eq('report_id', r.id).eq('report_type', 'monthly')
         .order('created_at', { ascending: true });
@@ -108,6 +125,16 @@ export default function MonthlyReportView() {
   }, [id]);
 
   const c = useMemo<MonthlyReportContent>(() => normalizeMonthlyContent(report?.content), [report]);
+  const p = useMemo<MonthlyReportContent | null>(() => prev ? normalizeMonthlyContent(prev.content) : null, [prev]);
+  const trendData: MonthlyTrendPoint[] = useMemo(() => trend.map(t => {
+    const n = normalizeMonthlyContent(t.content);
+    const [y, mm] = t.month.split('-').map(Number);
+    return {
+      label: new Date(y, mm - 1, 1).toLocaleString(undefined, { month: 'short' }),
+      'Total Sales': n.total_sales.month,
+      'Affiliate GMV': n.gmv_breakdown.affiliate_gmv.this,
+    };
+  }), [trend]);
 
   const addComment = async (section: CommentSection, body: string, _authorName: string, parentId?: string) => {
     if (!report) return;
@@ -163,6 +190,9 @@ export default function MonthlyReportView() {
 
         <MonthlyReportDashboard
           c={c}
+          p={p}
+          hasPrev={!!prev}
+          trendData={trendData}
           monthLabel={fmtMonth(report.month)}
           brandName={brand.name}
           clientName={brand.client}

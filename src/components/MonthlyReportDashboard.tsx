@@ -1,9 +1,20 @@
 import { useEffect, useState } from 'react';
 import { Card, Row, Col, Table, Badge, Offcanvas, Button, Form, Alert } from 'react-bootstrap';
+import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
+  LineChart, Line,
+} from 'recharts';
 import DOMPurify from 'dompurify';
 import { MonthlyReportContent, ThisLast } from '../lib/monthlyReportSchema';
-import SectionComments, { Comment, CommentSection } from './SectionComments';
+import { Comment, CommentSection } from './SectionComments';
+import SectionComments from './SectionComments';
 import { CommentsConfig, ApprovalDecisionView, ApprovalActionConfig } from './ReportDashboard';
+
+export interface MonthlyTrendPoint {
+  label: string;
+  'Total Sales': number;
+  'Affiliate GMV': number;
+}
 
 const SECTION_LABELS: Record<string, string> = {
   total_sales: 'Total Sales',
@@ -25,10 +36,15 @@ const SECTION_LABELS: Record<string, string> = {
 };
 
 export default function MonthlyReportDashboard({
-  c, monthLabel, brandName, clientName, commentsConfig, approvalAction, approvalDecisions,
+  c, p, hasPrev, trendData,
+  monthLabel, brandName, clientName,
+  commentsConfig, approvalAction, approvalDecisions,
   openSectionOnLoad, highlightCommentId,
 }: {
   c: MonthlyReportContent;
+  p?: MonthlyReportContent | null;
+  hasPrev?: boolean;
+  trendData?: MonthlyTrendPoint[];
   monthLabel: string;
   brandName: string;
   clientName?: string | null;
@@ -108,6 +124,33 @@ export default function MonthlyReportDashboard({
       </Card>
     ));
 
+  // ---------------------------------------------------------------------------
+  // KPI grid + comparison data
+
+  const kpiCards: { label: string; value: string; cur: number; prev?: number; money?: boolean; sub?: string }[] = [
+    { label: 'Total Sales', value: `$${c.total_sales.month.toLocaleString()}`,
+      cur: c.total_sales.month, prev: p?.total_sales.month, money: true,
+      sub: c.total_sales.all_time > 0 ? `All time: $${c.total_sales.all_time.toLocaleString()}` : undefined },
+    { label: 'Total Orders', value: c.kpis.total_orders.this.toLocaleString(),
+      cur: c.kpis.total_orders.this, prev: c.kpis.total_orders.last },
+    { label: 'Samples Approved', value: c.kpis.samples_approved.this.toLocaleString(),
+      cur: c.kpis.samples_approved.this, prev: c.kpis.samples_approved.last },
+    { label: 'New Affiliate Posts', value: c.kpis.new_affiliate_posts.this.toLocaleString(),
+      cur: c.kpis.new_affiliate_posts.this, prev: c.kpis.new_affiliate_posts.last },
+    { label: 'Completed Collabs', value: c.kpis.completed_collabs.this.toLocaleString(),
+      cur: c.kpis.completed_collabs.this, prev: c.kpis.completed_collabs.last },
+    { label: 'Content Pending', value: c.kpis.content_pending.this.toLocaleString(),
+      cur: c.kpis.content_pending.this, prev: c.kpis.content_pending.last },
+  ];
+
+  const gmvCompareData = [
+    { metric: 'Affiliate',   'This Month': c.gmv_breakdown.affiliate_gmv.this,    'Last Month': c.gmv_breakdown.affiliate_gmv.last },
+    { metric: 'Organic',     'This Month': c.gmv_breakdown.organic_gmv.this,      'Last Month': c.gmv_breakdown.organic_gmv.last },
+    { metric: 'LIVE',        'This Month': c.gmv_breakdown.live_gmv.this,         'Last Month': c.gmv_breakdown.live_gmv.last },
+    { metric: 'Video',       'This Month': c.gmv_breakdown.video_gmv.this,        'Last Month': c.gmv_breakdown.video_gmv.last },
+    { metric: 'Product Card','This Month': c.gmv_breakdown.product_card_gmv.this, 'Last Month': c.gmv_breakdown.product_card_gmv.last },
+  ];
+
   return (
     <div className="ac-themed">
       <div className="d-flex align-items-start gap-3 mb-4 flex-wrap">
@@ -143,48 +186,85 @@ export default function MonthlyReportDashboard({
 
       {renderCustomAt('start')}
 
-      {/* Total Sales */}
-      <Card className="mb-3" data-section="total_sales">
-        <Card.Header><SectionHeader title="Total Sales" section="total_sales" /></Card.Header>
-        <Card.Body>
-          <ul className="mb-2">
-            <li><strong>MONTH:</strong> ${c.total_sales.month.toLocaleString()}</li>
-            <li><strong>All time:</strong> ${c.total_sales.all_time.toLocaleString()}{c.total_sales.all_time_period_label ? ` → ${c.total_sales.all_time_period_label}` : ''}</li>
-          </ul>
-          {c.total_sales.image_url && <ImageBlock url={c.total_sales.image_url} alt="Total Sales screenshot" />}
-        </Card.Body>
-      </Card>
+      {/* KPI cards */}
+      <Row className="g-3 mb-4" data-section="total_sales">
+        {kpiCards.map(k => (
+          <KpiCard key={k.label} label={k.label} value={k.value} prev={k.prev} cur={k.cur} money={k.money} sub={k.sub} />
+        ))}
+      </Row>
       {renderCustomAt('total_sales')}
-
-      <TLSection title="KPIs" anchor="kpis" SectionHeader={SectionHeader} headers={["Metric","This Month","Last Month"]} rows={[
-        ['Samples Approved', c.kpis.samples_approved],
-        ['New Affiliate Posts', c.kpis.new_affiliate_posts],
-        ['Completed Collabs', c.kpis.completed_collabs],
-        ['Content Pending', c.kpis.content_pending],
-        ['Total Orders', c.kpis.total_orders],
-      ]} />
       {renderCustomAt('kpis')}
 
-      <TLSection title="GMV Breakdown" anchor="gmv_breakdown" SectionHeader={SectionHeader} money headers={["GMV","This Month","Last Month"]} rows={[
-        ['Affiliate GMV', c.gmv_breakdown.affiliate_gmv],
-        ['Organic GMV', c.gmv_breakdown.organic_gmv],
-        ['LIVE GMV', c.gmv_breakdown.live_gmv],
-        ['Video GMV', c.gmv_breakdown.video_gmv],
-        ['Product Card GMV', c.gmv_breakdown.product_card_gmv],
-      ]} />
+      {/* GMV breakdown (this vs last) + multi-month trend */}
+      <Row className="g-3 mb-4">
+        <Col lg={7}>
+          <Card className="h-100" data-section="gmv_breakdown">
+            <Card.Header><SectionHeader title="GMV Breakdown — month-over-month" section="gmv_breakdown" /></Card.Header>
+            <Card.Body style={{ height: 320 }}>
+              <ResponsiveContainer>
+                <BarChart data={gmvCompareData}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="metric" />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="This Month" fill="#e8862e" radius={[6,6,0,0]} />
+                  <Bar dataKey="Last Month" fill="#6e6e80" radius={[6,6,0,0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </Card.Body>
+          </Card>
+        </Col>
+        <Col lg={5}>
+          <Card className="h-100">
+            <Card.Header><span className="fw-semibold">Total Sales image</span></Card.Header>
+            <Card.Body>
+              {c.total_sales.image_url ? (
+                <ImageBlock url={c.total_sales.image_url} alt="Total Sales screenshot" />
+              ) : (
+                <div className="text-muted small">No screenshot uploaded.</div>
+              )}
+              {c.total_sales.all_time_period_label && (
+                <div className="text-muted small mt-2">
+                  All-time covers <strong>{c.total_sales.all_time_period_label}</strong>
+                </div>
+              )}
+            </Card.Body>
+          </Card>
+        </Col>
+      </Row>
       {renderCustomAt('gmv_breakdown')}
 
-      {/* Top Creators */}
+      {trendData && trendData.length > 1 && (
+        <Card className="mb-4">
+          <Card.Header><span className="fw-semibold">GMV trend (last {trendData.length} months)</span></Card.Header>
+          <Card.Body style={{ height: 280 }}>
+            <ResponsiveContainer>
+              <LineChart data={trendData}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="label" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Line type="monotone" dataKey="Total Sales"   stroke="#e8862e" strokeWidth={3} dot={{ r: 4 }} />
+                <Line type="monotone" dataKey="Affiliate GMV" stroke="#ffbe76" strokeWidth={3} dot={{ r: 4 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </Card.Body>
+        </Card>
+      )}
+
+      {/* Top Creators (this | last) */}
       <Card className="mb-3" data-section="top_creators">
         <Card.Header><SectionHeader title="Top Creators" section="top_creators" /></Card.Header>
-        <Card.Body>
-          <Row className="g-3">
-            <Col lg={6}>
-              <h6 className="text-muted small mb-2 text-uppercase" style={{ letterSpacing: '.5px' }}>This Month</h6>
+        <Card.Body className="p-0">
+          <Row className="g-0">
+            <Col lg={6} className="border-end">
+              <div className="px-3 pt-3"><h6 className="text-muted small mb-2 text-uppercase" style={{ letterSpacing: '.5px' }}>This Month</h6></div>
               <CreatorsTable rows={c.top_creators_this} />
             </Col>
             <Col lg={6}>
-              <h6 className="text-muted small mb-2 text-uppercase" style={{ letterSpacing: '.5px' }}>Last Month</h6>
+              <div className="px-3 pt-3"><h6 className="text-muted small mb-2 text-uppercase" style={{ letterSpacing: '.5px' }}>Last Month</h6></div>
               <CreatorsTable rows={c.top_creators_last} />
             </Col>
           </Row>
@@ -192,17 +272,17 @@ export default function MonthlyReportDashboard({
       </Card>
       {renderCustomAt('top_creators')}
 
-      {/* Top Videos */}
+      {/* Top Videos (this | last) */}
       <Card className="mb-3" data-section="top_videos">
         <Card.Header><SectionHeader title="Top Videos" section="top_videos" /></Card.Header>
-        <Card.Body>
-          <Row className="g-3">
-            <Col lg={6}>
-              <h6 className="text-muted small mb-2 text-uppercase" style={{ letterSpacing: '.5px' }}>This Month</h6>
+        <Card.Body className="p-0">
+          <Row className="g-0">
+            <Col lg={6} className="border-end">
+              <div className="px-3 pt-3"><h6 className="text-muted small mb-2 text-uppercase" style={{ letterSpacing: '.5px' }}>This Month</h6></div>
               <VideosTable rows={c.top_videos_this} />
             </Col>
             <Col lg={6}>
-              <h6 className="text-muted small mb-2 text-uppercase" style={{ letterSpacing: '.5px' }}>Last Month</h6>
+              <div className="px-3 pt-3"><h6 className="text-muted small mb-2 text-uppercase" style={{ letterSpacing: '.5px' }}>Last Month</h6></div>
               <VideosTable rows={c.top_videos_last} />
             </Col>
           </Row>
@@ -210,30 +290,42 @@ export default function MonthlyReportDashboard({
       </Card>
       {renderCustomAt('top_videos')}
 
-      <TLSection title="Video Performance" anchor="video_performance" SectionHeader={SectionHeader} headers={["Metric","This Month","Last Month"]} rows={[
-        ['Product Impressions', c.video_performance.product_impressions],
-        ['Product Clicks', c.video_performance.product_clicks],
-        ['Video Views', c.video_performance.video_views],
-        ['CTR', c.video_performance.ctr, '%'],
-        ['CTOR', c.video_performance.ctor, '%'],
-        ['SKU Orders', c.video_performance.sku_orders],
-        ['GMV', c.video_performance.gmv, '$'],
-        ['Videos with 1M+ Views', c.video_performance.videos_1m_views],
-        ['Videos with 100k+ Views', c.video_performance.videos_100k_views],
-        ['Videos with 10k+ Views', c.video_performance.videos_10k_views],
-        ['Videos with $1000+ GMV', c.video_performance.videos_1k_gmv],
-        ['Videos with $100+ GMV', c.video_performance.videos_100_gmv],
-        ['No. of New Videos Posted', c.video_performance.new_videos_posted],
-      ]} />
+      {/* Video Performance — MiniStats with deltas */}
+      <Card className="mb-3" data-section="video_performance">
+        <Card.Header><SectionHeader title="Video Performance" section="video_performance" /></Card.Header>
+        <Card.Body>
+          <Row className="g-3">
+            <MiniStat label="Product Impressions" tl={c.video_performance.product_impressions} integer />
+            <MiniStat label="Product Clicks"      tl={c.video_performance.product_clicks}      integer />
+            <MiniStat label="Video Views"         tl={c.video_performance.video_views}         integer />
+            <MiniStat label="CTR"                 tl={c.video_performance.ctr}                 suffix="%" />
+            <MiniStat label="CTOR"                tl={c.video_performance.ctor}                suffix="%" />
+            <MiniStat label="SKU Orders"          tl={c.video_performance.sku_orders}          integer />
+            <MiniStat label="GMV"                 tl={c.video_performance.gmv}                 money />
+            <MiniStat label="New Videos Posted"   tl={c.video_performance.new_videos_posted}   integer />
+            <MiniStat label="Videos with 1M+ Views"   tl={c.video_performance.videos_1m_views}    integer />
+            <MiniStat label="Videos with 100k+ Views" tl={c.video_performance.videos_100k_views}  integer />
+            <MiniStat label="Videos with 10k+ Views"  tl={c.video_performance.videos_10k_views}   integer />
+            <MiniStat label="Videos with $1000+ GMV"  tl={c.video_performance.videos_1k_gmv}      integer />
+            <MiniStat label="Videos with $100+ GMV"   tl={c.video_performance.videos_100_gmv}     integer />
+          </Row>
+        </Card.Body>
+      </Card>
       {renderCustomAt('video_performance')}
 
-      <TLSection title="Creators Performance" anchor="creators_performance" SectionHeader={SectionHeader} headers={["Metric","This Month","Last Month"]} rows={[
-        ['Creators who posted 1+ videos', c.creators_performance.posted_1plus],
-        ['Creators who posted 3+ videos', c.creators_performance.posted_3plus],
-        ['Creators who posted 10+ videos', c.creators_performance.posted_10plus],
-        ['Creators who generated $1k+ GMV', c.creators_performance.generated_1k_plus],
-        ['Creators who generated $100+ GMV', c.creators_performance.generated_100_plus],
-      ]} />
+      {/* Creators Performance — MiniStats */}
+      <Card className="mb-3" data-section="creators_performance">
+        <Card.Header><SectionHeader title="Creators Performance" section="creators_performance" /></Card.Header>
+        <Card.Body>
+          <Row className="g-3">
+            <MiniStat label="Posted 1+ videos"         tl={c.creators_performance.posted_1plus}        integer />
+            <MiniStat label="Posted 3+ videos"         tl={c.creators_performance.posted_3plus}        integer />
+            <MiniStat label="Posted 10+ videos"        tl={c.creators_performance.posted_10plus}       integer />
+            <MiniStat label="Generated $1k+ GMV"       tl={c.creators_performance.generated_1k_plus}   integer />
+            <MiniStat label="Generated $100+ GMV"      tl={c.creators_performance.generated_100_plus}  integer />
+          </Row>
+        </Card.Body>
+      </Card>
       {renderCustomAt('creators_performance')}
 
       {/* Product Analytics */}
@@ -243,7 +335,7 @@ export default function MonthlyReportDashboard({
           {c.product_analytics.length === 0 ? <p className="text-muted text-center py-3 mb-0 small">No products tracked.</p> : (
             <Table size="sm" responsive className="mb-0 align-middle">
               <thead><tr>
-                <th>Product (ID + Name)</th>
+                <th>Product</th>
                 <th className="text-end">Units Sold</th>
                 <th className="text-end">GMV</th>
                 <th className="text-end">Samples Approved</th>
@@ -269,14 +361,27 @@ export default function MonthlyReportDashboard({
       </Card>
       {renderCustomAt('product_analytics')}
 
-      <TLSection title="Customers" anchor="customers" SectionHeader={SectionHeader} headers={["Metric","This Month","Last Month"]} rows={[
-        ['Aware Customers', c.customers.aware_customers],
-        ['New Customers', c.customers.new_customers],
-        ['Potential New Customers', c.customers.potential_new_customers],
-        ['Converted Customers', c.customers.converted_customers],
-      ]} extraRows={[
-        { label: 'CRM Messages Sent', this: c.customers.crm_messages_sent_this, last: c.customers.crm_messages_sent_last },
-      ]} />
+      {/* Customers — MiniStats */}
+      <Card className="mb-3" data-section="customers">
+        <Card.Header><SectionHeader title="Customers" section="customers" /></Card.Header>
+        <Card.Body>
+          <Row className="g-3">
+            <MiniStat label="Aware Customers"         tl={c.customers.aware_customers}         integer />
+            <MiniStat label="New Customers"           tl={c.customers.new_customers}           integer />
+            <MiniStat label="Potential New Customers" tl={c.customers.potential_new_customers} integer />
+            <MiniStat label="Converted Customers"     tl={c.customers.converted_customers}     integer />
+            <Col md={3}>
+              <div className="p-3 rounded h-100" style={{ background: '#f8fafc', border: '1px solid #e5e7eb' }}>
+                <div className="ac-label">CRM Messages Sent</div>
+                <div className="fs-5 fw-semibold mt-1">{c.customers.crm_messages_sent_this || '—'}</div>
+                {c.customers.crm_messages_sent_last && (
+                  <small className="text-muted">prev: {c.customers.crm_messages_sent_last}</small>
+                )}
+              </div>
+            </Col>
+          </Row>
+        </Card.Body>
+      </Card>
       {renderCustomAt('customers')}
 
       {/* Six rich-text + image sections */}
@@ -352,8 +457,8 @@ export default function MonthlyReportDashboard({
   );
 }
 
-// ----------------------------------------------------------------------------
-// helpers
+// ============================================================================
+// helpers / sub-components
 
 function ImageBlock({ url, alt }: { url: string; alt: string }) {
   return (
@@ -364,80 +469,100 @@ function ImageBlock({ url, alt }: { url: string; alt: string }) {
 }
 
 function CreatorsTable({ rows }: { rows: { username: string; gmv: number }[] }) {
-  if (rows.length === 0) return <p className="text-muted small mb-0">No data</p>;
+  if (rows.length === 0) return <p className="text-muted small mb-0 px-3 pb-3">No data</p>;
   return (
     <Table size="sm" className="mb-0 align-middle">
-      <thead><tr><th>Username</th><th className="text-end">GMV Generated</th></tr></thead>
-      <tbody>{rows.map((r, i) => (
-        <tr key={i}><td className="fw-semibold">{r.username || '—'}</td><td className="text-end">${r.gmv.toLocaleString()}</td></tr>
-      ))}</tbody>
-    </Table>
-  );
-}
-
-function VideosTable({ rows }: { rows: { username: string; video_url: string; gmv: number }[] }) {
-  if (rows.length === 0) return <p className="text-muted small mb-0">No data</p>;
-  return (
-    <Table size="sm" className="mb-0 align-middle">
-      <thead><tr><th>Video</th><th className="text-end">GMV Generated</th></tr></thead>
+      <thead><tr><th className="ps-3">Username</th><th className="text-end pe-3">GMV Generated</th></tr></thead>
       <tbody>{rows.map((r, i) => (
         <tr key={i}>
-          <td className="fw-semibold">
-            {r.video_url ? <a href={r.video_url} target="_blank" rel="noreferrer">{r.username || r.video_url}</a> : (r.username || '—')}
+          <td className="ps-3 fw-semibold">
+            {r.username ? (
+              <a href={tiktokLink(r.username)} target="_blank" rel="noreferrer" title="Open creator on TikTok">
+                {r.username}
+              </a>
+            ) : '—'}
           </td>
-          <td className="text-end">${r.gmv.toLocaleString()}</td>
+          <td className="text-end pe-3">${r.gmv.toLocaleString()}</td>
         </tr>
       ))}</tbody>
     </Table>
   );
 }
 
-function fmtTL(value: number, suffix?: string): string {
-  if (suffix === '$') return `$${value.toLocaleString()}`;
-  if (suffix === '%') return `${value.toFixed(2)}%`;
-  if (Number.isInteger(value)) return value.toLocaleString();
-  return value.toLocaleString();
+function VideosTable({ rows }: { rows: { username: string; video_url: string; gmv: number }[] }) {
+  if (rows.length === 0) return <p className="text-muted small mb-0 px-3 pb-3">No data</p>;
+  return (
+    <Table size="sm" className="mb-0 align-middle">
+      <thead><tr><th className="ps-3">Video</th><th className="text-end pe-3">GMV Generated</th></tr></thead>
+      <tbody>{rows.map((r, i) => (
+        <tr key={i}>
+          <td className="ps-3 fw-semibold">
+            {r.video_url
+              ? <a href={r.video_url} target="_blank" rel="noreferrer">{r.username || r.video_url}</a>
+              : (r.username || '—')}
+          </td>
+          <td className="text-end pe-3">${r.gmv.toLocaleString()}</td>
+        </tr>
+      ))}</tbody>
+    </Table>
+  );
 }
 
-function TLSection({
-  title, anchor, SectionHeader, headers, rows, extraRows, money,
-}: {
-  title: string;
-  anchor: string;
-  SectionHeader: (props: { title: string; section: CommentSection }) => JSX.Element;
-  headers: [string, string, string];
-  rows: Array<[string, ThisLast] | [string, ThisLast, '$' | '%']>;
-  extraRows?: { label: string; this: string; last: string }[];
-  money?: boolean;
+function tiktokLink(handle: string): string {
+  const clean = handle.trim().replace(/^@+/, '').replace(/\s+/g, '');
+  return `https://www.tiktok.com/@${encodeURIComponent(clean)}`;
+}
+
+function KpiCard({ label, value, prev, cur, money, dec, sub }: {
+  label: string; value: string; prev?: number; cur: number;
+  money?: boolean; dec?: boolean; sub?: string;
 }) {
   return (
-    <Card className="mb-3" data-section={anchor}>
-      <Card.Header><SectionHeader title={title} section={anchor} /></Card.Header>
-      <Card.Body className="p-0">
-        <Table size="sm" responsive className="mb-0 align-middle">
-          <thead><tr>{headers.map(h => <th key={h}>{h}</th>)}</tr></thead>
-          <tbody>
-            {rows.map(([label, val, suf], i) => {
-              const sfx = suf ?? (money ? '$' : undefined);
-              return (
-                <tr key={i}>
-                  <td>{label}</td>
-                  <td>{fmtTL(val.this, sfx)}</td>
-                  <td>{fmtTL(val.last, sfx)}</td>
-                </tr>
-              );
-            })}
-            {extraRows?.map((r, i) => (
-              <tr key={`e${i}`}>
-                <td>{r.label}</td>
-                <td>{r.this || <span className="text-muted">—</span>}</td>
-                <td>{r.last || <span className="text-muted">—</span>}</td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      </Card.Body>
-    </Card>
+    <Col xs={6} md={4} xl={2}>
+      <Card className="h-100 shadow-sm" style={{ borderLeft: '4px solid #e8862e' }}>
+        <Card.Body className="py-3">
+          <div className="ac-label">{label}</div>
+          <div className="fs-4 fw-bold mt-1">{value}</div>
+          <Delta cur={cur} prev={prev} money={money} dec={dec} />
+          {sub && <small className="text-muted d-block mt-1">{sub}</small>}
+        </Card.Body>
+      </Card>
+    </Col>
+  );
+}
+
+function MiniStat({ label, tl, money, integer, suffix }: {
+  label: string; tl: ThisLast; money?: boolean; integer?: boolean; suffix?: string;
+}) {
+  const fmt = (n: number) =>
+    money ? `$${n.toLocaleString()}`
+    : integer ? n.toLocaleString()
+    : suffix ? `${n.toFixed(2)}${suffix}`
+    : n.toLocaleString();
+  return (
+    <Col md={3}>
+      <div className="p-3 rounded h-100" style={{ background: '#f8fafc', border: '1px solid #e5e7eb' }}>
+        <div className="ac-label">{label}</div>
+        <div className="fs-5 fw-semibold mt-1">{fmt(tl.this)}</div>
+        <Delta cur={tl.this} prev={tl.last} money={money} />
+      </div>
+    </Col>
+  );
+}
+
+function Delta({ cur, prev, money, dec }: { cur: number; prev?: number; money?: boolean; dec?: boolean; }) {
+  if (prev == null) return <small className="text-muted">—</small>;
+  if (prev === 0 && cur === 0) return <small className="text-muted">no change</small>;
+  const diff = cur - prev;
+  const pct = prev === 0 ? 100 : (diff / prev) * 100;
+  const up = diff >= 0;
+  const color = up ? 'text-success' : 'text-danger';
+  const icon = up ? 'bi-arrow-up-right' : 'bi-arrow-down-right';
+  const fmt = (n: number) => money ? `$${Math.abs(n).toLocaleString()}` : dec ? Math.abs(n).toFixed(2) : Math.abs(n).toLocaleString();
+  return (
+    <small className={color}>
+      <i className={`bi ${icon}`} /> {fmt(diff)} ({pct >= 0 ? '+' : ''}{pct.toFixed(1)}%)
+    </small>
   );
 }
 

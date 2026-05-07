@@ -404,6 +404,32 @@ export default function SharedReports() {
         </div>
         <MonthlyReportDashboard
           c={normalizeMonthlyContent(openMonthly.content)}
+          p={(() => {
+            const [y, mm] = openMonthly.month.split('-').map(Number);
+            const prevYM = `${new Date(y, mm - 2, 1).getFullYear()}-${String(new Date(y, mm - 2, 1).getMonth() + 1).padStart(2, '0')}`;
+            const pr = monthlyReports.find(r => r.brand_id === openMonthly.brand_id && r.month === prevYM);
+            return pr ? normalizeMonthlyContent(pr.content) : null;
+          })()}
+          hasPrev={(() => {
+            const [y, mm] = openMonthly.month.split('-').map(Number);
+            const prevYM = `${new Date(y, mm - 2, 1).getFullYear()}-${String(new Date(y, mm - 2, 1).getMonth() + 1).padStart(2, '0')}`;
+            return monthlyReports.some(r => r.brand_id === openMonthly.brand_id && r.month === prevYM);
+          })()}
+          trendData={(() => {
+            const sameBrand = monthlyReports
+              .filter(r => r.brand_id === openMonthly.brand_id && r.month <= openMonthly.month)
+              .sort((a, b) => a.month.localeCompare(b.month))
+              .slice(-8);
+            return sameBrand.map(t => {
+              const n = normalizeMonthlyContent(t.content);
+              const [y, mm] = t.month.split('-').map(Number);
+              return {
+                label: new Date(y, mm - 1, 1).toLocaleString(undefined, { month: 'short' }),
+                'Total Sales':   n.total_sales.month,
+                'Affiliate GMV': n.gmv_breakdown.affiliate_gmv.this,
+              };
+            });
+          })()}
           monthLabel={fmtMonthLabel(openMonthly.month)}
           brandName={activeBrand.name}
           clientName={activeBrand.client}
