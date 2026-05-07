@@ -129,11 +129,13 @@ export default function MonthlyReports() {
 
   const openCreate = (b: Brand) => {
     setCreateBrand(b);
-    // default to most-recent month that doesn't yet have a report for this brand
-    const existing = new Set(reports.filter(r => r.brand_id === b.id).map(r => r.month));
-    let m = thisMonth();
-    while (existing.has(m)) m = shiftMonth(m, -1);
-    setCreateMonth(m);
+    // Default to the month right AFTER the brand's most recent report
+    // (e.g. last is May 2026 → default to June 2026). For brand-new brands
+    // with no reports yet, default to the current month. The user can
+    // change it in the modal if needed.
+    const existing = reports.filter(r => r.brand_id === b.id).map(r => r.month).sort();
+    const latest = existing[existing.length - 1];
+    setCreateMonth(latest ? shiftMonth(latest, 1) : thisMonth());
     setErr(null);
     setShow(true);
   };
@@ -335,12 +337,12 @@ export default function MonthlyReports() {
           ) : (
             <Row className="g-2">
               {brands.map(b => {
-                const existingCount = reports.filter(r => r.brand_id === b.id).length;
                 const last = reports
                   .filter(r => r.brand_id === b.id)
                   .map(r => r.month)
                   .sort()
                   .pop();
+                const next = last ? shiftMonth(last, 1) : thisMonth();
                 return (
                   <Col md={4} lg={3} key={b.id}>
                     <Button
@@ -350,9 +352,7 @@ export default function MonthlyReports() {
                     >
                       <div className="fw-semibold">{b.name}</div>
                       <small className="text-muted d-block">
-                        {existingCount === 0
-                          ? 'No reports yet — pick a month'
-                          : `Last: ${last ? fmtMonth(last) : '—'}`}
+                        Next: {fmtMonth(next)}
                       </small>
                     </Button>
                   </Col>
