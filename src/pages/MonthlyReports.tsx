@@ -86,6 +86,16 @@ export default function MonthlyReports() {
 
   useEffect(() => { load(); }, [isBob]);
 
+  // Re-fetch on tab focus so deletes / creates from a sibling tab stay in
+  // sync. Also catches the case where the user lands here from a back-nav
+  // and the "Next: ..." button needs to reflect the latest report set.
+  useEffect(() => {
+    const onFocus = () => load();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isBob]);
+
   const brandMap = useMemo(() => {
     const m = new Map<string, Brand>();
     brands.forEach(b => m.set(b.id, b));
