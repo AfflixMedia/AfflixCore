@@ -1,0 +1,23 @@
+node_modules
+dist
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+.vite
+
+.vercel
+tsconfig.tsbuildinfo
+
+.vercel
+
+# Supabase CLI artefacts
+supabase/.temp/
+supabase/.branches/
+
+# direnv — per-project CLI tokens (never commit)
+.envrc
+
+.vercel
+.env*
