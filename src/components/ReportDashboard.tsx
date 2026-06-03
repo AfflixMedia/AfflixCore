@@ -7,6 +7,7 @@ import {
 import { WeeklyReportContent, ListingQuality, CustomSection, CustomField, StandardSectionId } from '../lib/reportSchema';
 import DOMPurify from 'dompurify';
 import SectionComments, { Comment, CommentSection } from './SectionComments';
+import PaidCollabSectionBlock, { PaidCollabPrefetch } from './paidcollab/PaidCollabSectionBlock';
 
 export interface TrendPoint { label: string; GMV: number; 'Affiliate GMV': number; }
 
@@ -39,7 +40,7 @@ export interface ApprovalActionConfig {
 
 export default function ReportDashboard({
   c, p, trendData, hasPrev, commentsConfig, prevTopVideos, openSectionOnLoad, highlightCommentId,
-  approvalDecisions, approvalAction,
+  approvalDecisions, approvalAction, paidCollab, onOpenPaidCollabProgram,
 }: {
   c: WeeklyReportContent;
   p: WeeklyReportContent | null;
@@ -55,6 +56,11 @@ export default function ReportDashboard({
   approvalDecisions?: ApprovalDecisionView[];
   /** Public mode: inline approve / request-changes form for the current link. */
   approvalAction?: ApprovalActionConfig;
+  /** Prefetched paid-collab data — supplied on shared links so paid-collab
+   *  custom sections can render without a Supabase query. */
+  paidCollab?: PaidCollabPrefetch;
+  /** When provided, paid-collab sections show a "View full program" button. */
+  onOpenPaidCollabProgram?: (programId: string) => void;
 }) {
   const o = c.overall, po = p?.overall;
   const vp = c.video_performance, pvp = p?.video_performance;
@@ -96,7 +102,7 @@ export default function ReportDashboard({
     product_highlights: 'Product Highlights',
     shop_health: 'Shop Health',
     insights: 'Insights',
-    approval: 'Approval Needed',
+    approval: 'Approval Needed / Action Items',
   };
 
   const customSectionFor = (section: CommentSection): CustomSection | null => {
@@ -117,6 +123,29 @@ export default function ReportDashboard({
     // section (where staff routinely start threads themselves).
     // Public: always show (clients can comment).
     if (commentsConfig.mode === 'authed' && n === 0 && section !== 'approval') return null;
+    // On public client view, the approval thread is the primary follow-up
+    // channel (decisions are immutable), so make it a labelled, high-contrast
+    // button that's readable on the orange/dark themed header.
+    const isPublicApproval = commentsConfig.mode === 'public' && section === 'approval';
+    if (isPublicApproval) {
+      return (
+        <Button
+          size="sm"
+          className="ms-2 fw-semibold"
+          style={{
+            backgroundColor: '#fff',
+            color: '#0d6efd',
+            borderColor: '#0d6efd',
+            whiteSpace: 'nowrap',
+          }}
+          onClick={() => setFeedbackSection(section)}
+          title="Open the conversation thread"
+        >
+          <i className="bi bi-chat-left-text me-1" />
+          {n > 0 ? `Thread (${n})` : 'Open thread'}
+        </Button>
+      );
+    }
     return (
       <Button size="sm" variant="outline-primary" className="ms-2 d-inline-flex align-items-center gap-1"
         onClick={() => setFeedbackSection(section)}
@@ -139,6 +168,9 @@ export default function ReportDashboard({
       <CustomSectionView
         key={s.id}
         section={s}
+        prevSection={(p?.custom_sections ?? []).find(ps => ps.id === s.id) ?? null}
+        paidCollab={paidCollab}
+        onOpenPaidCollabProgram={onOpenPaidCollabProgram}
         feedbackSlot={<FeedbackIcon section={`cs:${s.id}`} />}
       />
     ));
@@ -355,26 +387,44 @@ export default function ReportDashboard({
             <Table size="sm" responsive className="mb-0 align-middle">
               <thead><tr>
                 <th>Product</th>
-                <th className="text-end">Total Units</th>
-                <th className="text-end">Affiliate Units</th>
+                <th className="text-end">Total Units Sold</th>
+                <th className="text-end">Affiliate Units Sold</th>
                 <th className="text-end">Total GMV</th>
+                <th className="text-end">Affiliate GMV</th>
                 <th className="text-end">Videos</th>
                 <th>Listing Quality</th>
               </tr></thead>
               <tbody>
-                {c.product_highlights.map((r, i) => (
-                  <tr key={i}>
-                    <td>
-                      <div className="fw-semibold">{r.product_name || '—'}</div>
-                      {r.product_id && <small className="text-muted">{r.product_id}</small>}
-                    </td>
-                    <td className="text-end">{r.total_units_sold}</td>
-                    <td className="text-end">{r.affiliate_units_sold}</td>
-                    <td className="text-end">${r.total_gmv.toLocaleString()}</td>
-                    <td className="text-end">{r.videos_posted}</td>
-                    <td><QualityBadge q={r.listing_quality} /></td>
-                  </tr>
-                ))}
+                {c.product_highlights.map((r, i) => {
+                  // Match the same product in the previous report (by id, else name)
+                  // to show the affiliate-GMV change week-over-week.
+                  const prevRow = (p?.product_highlights ?? []).find(pr =>
+                    (r.product_id && pr.product_id === r.product_id) ||
+                    (!r.product_id && pr.product_name && pr.product_name === r.product_name));
+                  const prevAffGmv = prevRow ? Number(prevRow.affiliate_gmv || 0) : null;
+                  const affDelta = prevAffGmv !== null ? r.affiliate_gmv - prevAffGmv : null;
+                  return (
+                    <tr key={i}>
+                      <td>
+                        <div className="fw-semibold">{r.product_name || '—'}</div>
+                        {r.product_id && <small className="text-muted">{r.product_id}</small>}
+                      </td>
+                      <td className="text-end">{r.total_units_sold}</td>
+                      <td className="text-end">{r.affiliate_units_sold}</td>
+                      <td className="text-end">${r.total_gmv.toLocaleString()}</td>
+                      <td className="text-end">
+                        <div>${r.affiliate_gmv.toLocaleString()}</div>
+                        {affDelta !== null && affDelta !== 0 && (
+                          <small className={affDelta > 0 ? 'text-success' : 'text-danger'}>
+                            {affDelta > 0 ? '▲' : '▼'} ${Math.abs(affDelta).toLocaleString()}
+                          </small>
+                        )}
+                      </td>
+                      <td className="text-end">{r.videos_posted}</td>
+                      <td><QualityBadge q={r.listing_quality} /></td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </Table>
           )}
@@ -412,12 +462,25 @@ export default function ReportDashboard({
       {renderCustomAt('insights')}
 
       {/* Approval Needed */}
-      {c.approval?.enabled && (
+      {c.approval?.enabled && (() => {
+        const expiresAt = c.approval?.expires_at ?? null;
+        const expired = !!expiresAt && new Date(expiresAt).getTime() < Date.now();
+        return (
         <Card className="mb-3" data-section="approval" border="warning">
           <Card.Header className="d-flex justify-content-between align-items-center" style={{ background: '#fff8ef' }}>
             <span className="fw-semibold">
               <i className="bi bi-shield-check me-2 text-warning" />
-              Approval Needed
+              Approval Needed / Action Items
+              {expired && (
+                <Badge bg="secondary" className="ms-2">
+                  <i className="bi bi-clock-history me-1" />Auto-popup expired
+                </Badge>
+              )}
+              {!expired && expiresAt && (
+                <Badge bg="light" text="dark" className="ms-2 border">
+                  <i className="bi bi-clock me-1" />Popup until {new Date(expiresAt).toLocaleDateString()}
+                </Badge>
+              )}
             </span>
             <div className="d-flex align-items-center gap-2">
               {approvalDecisions && approvalDecisions.length > 0 && (
@@ -429,6 +492,13 @@ export default function ReportDashboard({
             </div>
           </Card.Header>
           <Card.Body>
+            {expired && (
+              <Alert variant="light" className="border small py-2 mb-3">
+                <i className="bi bi-info-circle me-1" />
+                The auto-popup window closed on <strong>{new Date(expiresAt!).toLocaleString()}</strong>.
+                You can still submit a decision or reply in the thread below.
+              </Alert>
+            )}
             <div className="ac-rte-view ac-approval-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(c.approval.content) }} />
 
             {commentsConfig?.mode === 'public' && approvalAction && (
@@ -471,7 +541,8 @@ export default function ReportDashboard({
             )}
           </Card.Body>
         </Card>
-      )}
+        );
+      })()}
 
       {/* Custom Sections */}
     </div>
@@ -510,19 +581,47 @@ function ApprovalActionInline({ action }: { action: ApprovalActionConfig }) {
     }
   };
 
+  // Once a decision is recorded it's immutable — show a read-only summary
+  // and a prominent CTA pointing the client at the conversation thread.
+  if (myDecision) {
+    return (
+      <div className="mt-4 pt-3 border-top">
+        <Alert variant={myDecision.decision === 'approved' ? 'success' : 'warning'} className="py-2 mb-3">
+          <div className="d-flex align-items-center gap-2 mb-1">
+            <i className={`bi ${myDecision.decision === 'approved' ? 'bi-check-circle-fill' : 'bi-arrow-repeat'}`} />
+            <strong>
+              You {myDecision.decision === 'approved' ? 'approved' : 'requested changes on'} this report.
+            </strong>
+          </div>
+          <div className="small">
+            Recorded by <strong>{myDecision.decided_by_name}</strong> on{' '}
+            {new Date(myDecision.decided_at).toLocaleString()}.
+          </div>
+          {myDecision.comment && (
+            <blockquote className="mb-0 mt-2 small ps-2"
+                        style={{ borderLeft: '3px solid rgba(0,0,0,.15)', whiteSpace: 'pre-wrap' }}>
+              {myDecision.comment}
+            </blockquote>
+          )}
+        </Alert>
+        <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 small">
+          <div className="text-muted">
+            <i className="bi bi-lock-fill me-1" />
+            Your decision is locked. The conversation stays open — use the <strong>thread</strong> above to follow up.
+          </div>
+          <div className="text-muted">
+            <i className="bi bi-arrow-up-right me-1" />
+            Tap <strong>Open thread</strong> at the top of this card.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mt-4 pt-3 border-top">
-      {myDecision && (
-        <Alert variant={myDecision.decision === 'approved' ? 'success' : 'warning'} className="py-2 small mb-3">
-          <strong>Your previous decision:</strong>{' '}
-          {myDecision.decision === 'approved' ? 'Approved' : 'Changes requested'}
-          {' '}by {myDecision.decided_by_name} on {new Date(myDecision.decided_at).toLocaleDateString()}.
-          {myDecision.comment && <div className="mt-1 fst-italic">"{myDecision.comment}"</div>}
-        </Alert>
-      )}
-
       <div className="fw-semibold small text-uppercase text-muted mb-2" style={{ letterSpacing: '.5px' }}>
-        {myDecision ? 'Update your decision' : 'Submit your decision'}
+        Submit your decision
       </div>
 
       {err && <Alert variant="danger" className="py-2 small mb-2">{err}</Alert>}
@@ -554,7 +653,7 @@ function ApprovalActionInline({ action }: { action: ApprovalActionConfig }) {
 
       <Form.Control
         as="textarea" rows={2}
-        placeholder="Comment (optional)"
+        placeholder="Comment (optional) — your decision is final once submitted, but the thread stays open."
         value={comment}
         onChange={e => setComment(e.target.value)}
         disabled={submitting}
@@ -562,17 +661,56 @@ function ApprovalActionInline({ action }: { action: ApprovalActionConfig }) {
 
       <div className="d-flex justify-content-end mt-2">
         <Button size="sm" onClick={submit} disabled={submitting || !choice || !name.trim()}>
-          {submitting ? 'Submitting…' : myDecision ? 'Update decision' : 'Submit decision'}
+          {submitting ? 'Submitting…' : 'Submit decision'}
         </Button>
       </div>
     </div>
   );
 }
 
-function CustomSectionView({ section, feedbackSlot }: { section: CustomSection; feedbackSlot?: React.ReactNode }) {
+export function CustomSectionView({ section, prevSection, paidCollab, onOpenPaidCollabProgram, feedbackSlot }: {
+  section: CustomSection;
+  prevSection?: CustomSection | null;
+  paidCollab?: PaidCollabPrefetch;
+  onOpenPaidCollabProgram?: (programId: string) => void;
+  feedbackSlot?: React.ReactNode;
+}) {
   const isTable = section.is_repeater;
+  if (section.is_paid_collab) {
+    return (
+      <Card className="mb-3" data-section={`cs:${section.id}`}>
+        <Card.Header className="d-flex justify-content-between align-items-center">
+          <span className="fw-semibold">{section.name || 'Paid Collab'}</span>
+          {feedbackSlot}
+        </Card.Header>
+        <Card.Body>
+          {section.description && <p className="text-muted small mb-3">{section.description}</p>}
+          {section.paid_collab_program_id
+            ? <>
+                <PaidCollabSectionBlock
+                  programId={section.paid_collab_program_id}
+                  prefetched={paidCollab}
+                  compare={!!section.compare_with_previous}
+                  week={section.paid_collab_week ?? null}
+                  onOpenProgram={onOpenPaidCollabProgram}
+                />
+                {section.body && section.body.replace(/<[^>]*>/g, '').trim().length > 0 && (
+                  <div className="ac-rte-view mt-3 pt-3 border-top"
+                       dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(section.body) }} />
+                )}
+              </>
+            : <p className="text-muted small mb-0">No paid collab program linked to this section yet.</p>}
+        </Card.Body>
+      </Card>
+    );
+  }
   const hasContent = isTable ? (section.fields.length > 0) : (section.body && section.body.replace(/<[^>]*>/g, '').trim().length > 0);
   if (!hasContent) return null;
+  // Numeric column comparison vs the previous report's matching section.
+  const numericFields = isTable ? section.fields.filter(f => f.type === 'number') : [];
+  const showCompare = !!section.compare_with_previous && isTable && numericFields.length > 0;
+  const sumCol = (sec: CustomSection | null | undefined, fieldId: string) =>
+    (sec?.rows ?? []).reduce((s, r) => s + (Number(r[fieldId]) || 0), 0);
   return (
     <Card className="mb-3" data-section={`cs:${section.id}`}>
       <Card.Header className="d-flex justify-content-between align-items-center">
@@ -582,17 +720,43 @@ function CustomSectionView({ section, feedbackSlot }: { section: CustomSection; 
       <Card.Body>
         {section.description && <p className="text-muted small mb-3">{section.description}</p>}
         {isTable ? (
-          section.rows.length === 0 ? <p className="text-muted small mb-0">No data</p> : (
-            <Table size="sm" responsive className="mb-0 align-middle">
-              <thead><tr>{section.fields.map(f => <th key={f.id}>{f.label}</th>)}</tr></thead>
-              <tbody>
-                {section.rows.map((row, i) => (
-                  <tr key={i}>
-                    {section.fields.map(f => <td key={f.id}>{renderValue(f, row[f.id])}</td>)}
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
+          showCompare ? (
+            // Comparison mode — numeric columns as tiles with growth %.
+            <div className="d-flex flex-wrap gap-2">
+              {numericFields.map(f => {
+                const cur = sumCol(section, f.id);
+                const prev = prevSection ? sumCol(prevSection, f.id) : null;
+                const pct = (prev !== null && prev !== 0) ? ((cur - prev) / prev) * 100 : null;
+                return (
+                  <div key={f.id} className="bm-tile" style={{ flex: '1 1 160px', padding: 14 }}>
+                    <div className="bm-tile-label">{f.label}</div>
+                    <div className="bm-tile-value" style={{ fontSize: '1.35rem' }}>{cur.toLocaleString()}</div>
+                    {pct !== null ? (
+                      <div className={`bm-tile-sub fw-semibold ${pct >= 0 ? 'text-success' : 'text-danger'}`}>
+                        {pct >= 0 ? '▲' : '▼'} {Math.abs(pct).toFixed(1)}% vs previous
+                      </div>
+                    ) : prev !== null && prev === 0 && cur > 0 ? (
+                      <div className="bm-tile-sub text-success fw-semibold">▲ New this period</div>
+                    ) : (
+                      <div className="bm-tile-sub text-muted">&nbsp;</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            section.rows.length === 0 ? <p className="text-muted small mb-0">No data</p> : (
+              <Table size="sm" responsive className="mb-0 align-middle">
+                <thead><tr>{section.fields.map(f => <th key={f.id}>{f.label}</th>)}</tr></thead>
+                <tbody>
+                  {section.rows.map((row, i) => (
+                    <tr key={i}>
+                      {section.fields.map(f => <td key={f.id}>{renderValue(f, row[f.id])}</td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            )
           )
         ) : (
           <div className="ac-rte-view" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(section.body) }} />

@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { Spinner } from 'react-bootstrap';
 import Login from './pages/Login';
 import SignUp from './pages/SignUp';
 import Layout from './layout/Layout';
@@ -6,24 +7,50 @@ import Dashboard from './pages/Dashboard';
 import Brands from './pages/Brands';
 import BrandDetail from './pages/BrandDetail';
 import APCs from './pages/APCs';
+import PaidCollabClients from './pages/PaidCollabClients';
+import PaidCollabHandlers from './pages/PaidCollabHandlers';
 import Clients from './pages/Clients';
 import ClientAccess from './pages/ClientAccess';
 import Resources from './pages/Resources';
 import NotificationsPage from './pages/Notifications';
 import SharedReports from './pages/SharedReports';
 import Reporting from './pages/Reporting';
+import BudgetManager from './pages/BudgetManager';
+import CompanyBudget from './pages/CompanyBudget';
 import WeeklyReports from './pages/WeeklyReports';
 import WeeklyReportEdit from './pages/WeeklyReportEdit';
 import WeeklyReportView from './pages/WeeklyReportView';
 import MonthlyReports from './pages/MonthlyReports';
 import MonthlyReportEdit from './pages/MonthlyReportEdit';
 import MonthlyReportView from './pages/MonthlyReportView';
+import PaidCollabHome from './pages/paid-collab/PaidCollabHome';
+import PaidCollabPortal from './pages/paid-collab/PaidCollabPortal';
+import PaidCollabBrandView from './pages/paid-collab/PaidCollabBrandView';
+import PaidCollabPrograms from './pages/paid-collab/PaidCollabPrograms';
+import PaidCollabProgramView from './pages/paid-collab/PaidCollabProgramView';
+import PaidCollabCreators from './pages/paid-collab/PaidCollabCreators';
+import PaidCollabVideos from './pages/paid-collab/PaidCollabVideos';
+import ReportingCanvasList from './pages/templates/ReportingCanvasList';
+import ReportingCanvasEditor from './pages/templates/ReportingCanvasEditor';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { useAuth } from './auth/AuthContext';
 
 function RoleHome() {
-  const { profile } = useAuth();
-  return <Navigate to={profile?.role === 'apc' ? '/brands' : '/dashboard'} replace />;
+  const { profile, loading } = useAuth();
+  // Wait for the profile to load before routing — otherwise a paid_collab_client
+  // would briefly fall through to /dashboard and hit the role guard's denied page.
+  if (loading || !profile) {
+    return (
+      <div className="d-flex justify-content-center align-items-center" style={{ minHeight: '40vh' }}>
+        <Spinner animation="border" />
+      </div>
+    );
+  }
+  if (profile.role === 'paid_collab_client' || profile.role === 'paid_collab_handler') {
+    return <Navigate to="/paid-collab" replace />;
+  }
+  if (profile.role === 'apc') return <Navigate to="/brands" replace />;
+  return <Navigate to="/dashboard" replace />;
 }
 
 export default function App() {
@@ -41,21 +68,35 @@ export default function App() {
         }
       >
         <Route index element={<RoleHome />} />
-        <Route path="dashboard" element={<Dashboard />} />
-        <Route path="brands" element={<Brands />} />
-        <Route path="brands/:id" element={<BrandDetail />} />
+        <Route path="dashboard" element={<ProtectedRoute roles={['bob', 'apc']}><Dashboard /></ProtectedRoute>} />
+        <Route path="brands" element={<ProtectedRoute roles={['bob', 'apc']}><Brands /></ProtectedRoute>} />
+        <Route path="brands/:id" element={<ProtectedRoute roles={['bob', 'apc']}><BrandDetail /></ProtectedRoute>} />
         <Route path="apcs" element={<ProtectedRoute roles={['bob']}><APCs /></ProtectedRoute>} />
+        <Route path="paid-collab-clients" element={<ProtectedRoute roles={['bob']}><PaidCollabClients /></ProtectedRoute>} />
+        <Route path="paid-collab-handlers" element={<ProtectedRoute roles={['bob']}><PaidCollabHandlers /></ProtectedRoute>} />
         <Route path="clients" element={<ProtectedRoute roles={['bob']}><Clients /></ProtectedRoute>} />
         <Route path="client-access" element={<ProtectedRoute roles={['bob']}><ClientAccess /></ProtectedRoute>} />
-        <Route path="resources" element={<Resources />} />
+        <Route path="resources" element={<ProtectedRoute roles={['bob', 'apc']}><Resources /></ProtectedRoute>} />
+        <Route path="budget" element={<Navigate to="/budget/brands" replace />} />
+        <Route path="budget/brands" element={<ProtectedRoute roles={['bob']}><BudgetManager /></ProtectedRoute>} />
+        <Route path="budget/company" element={<ProtectedRoute roles={['bob']}><CompanyBudget /></ProtectedRoute>} />
         <Route path="notifications" element={<NotificationsPage />} />
-        <Route path="reporting/weekly" element={<WeeklyReports />} />
-        <Route path="reporting/weekly/:id" element={<WeeklyReportView />} />
-        <Route path="reporting/weekly/:id/edit" element={<WeeklyReportEdit />} />
-        <Route path="reporting/monthly" element={<MonthlyReports />} />
-        <Route path="reporting/monthly/:id" element={<MonthlyReportView />} />
-        <Route path="reporting/monthly/:id/edit" element={<MonthlyReportEdit />} />
-        <Route path="reporting/bi-weekly" element={<Reporting kind="Bi-Weekly" />} />
+        <Route path="reporting/weekly" element={<ProtectedRoute roles={['bob', 'apc']}><WeeklyReports /></ProtectedRoute>} />
+        <Route path="reporting/weekly/:id" element={<ProtectedRoute roles={['bob', 'apc']}><WeeklyReportView /></ProtectedRoute>} />
+        <Route path="reporting/weekly/:id/edit" element={<ProtectedRoute roles={['bob', 'apc']}><WeeklyReportEdit /></ProtectedRoute>} />
+        <Route path="reporting/monthly" element={<ProtectedRoute roles={['bob', 'apc']}><MonthlyReports /></ProtectedRoute>} />
+        <Route path="reporting/monthly/:id" element={<ProtectedRoute roles={['bob', 'apc']}><MonthlyReportView /></ProtectedRoute>} />
+        <Route path="reporting/monthly/:id/edit" element={<ProtectedRoute roles={['bob', 'apc']}><MonthlyReportEdit /></ProtectedRoute>} />
+        <Route path="reporting/bi-weekly" element={<ProtectedRoute roles={['bob', 'apc']}><Reporting kind="Bi-Weekly" /></ProtectedRoute>} />
+        <Route path="paid-collab" element={<ProtectedRoute roles={['paid_collab_client', 'paid_collab_handler']}><PaidCollabHome /></ProtectedRoute>} />
+        <Route path="paid-collab/brands" element={<ProtectedRoute roles={['paid_collab_client', 'paid_collab_handler']}><PaidCollabPortal /></ProtectedRoute>} />
+        <Route path="paid-collab/brands/:id" element={<ProtectedRoute roles={['paid_collab_client', 'paid_collab_handler']}><PaidCollabBrandView /></ProtectedRoute>} />
+        <Route path="paid-collab/programs" element={<ProtectedRoute roles={['paid_collab_client', 'paid_collab_handler']}><PaidCollabPrograms /></ProtectedRoute>} />
+        <Route path="paid-collab/programs/:programId" element={<ProtectedRoute roles={['paid_collab_client', 'paid_collab_handler']}><PaidCollabProgramView /></ProtectedRoute>} />
+        <Route path="paid-collab/creators" element={<ProtectedRoute roles={['paid_collab_client', 'paid_collab_handler']}><PaidCollabCreators /></ProtectedRoute>} />
+        <Route path="paid-collab/videos" element={<ProtectedRoute roles={['paid_collab_client', 'paid_collab_handler']}><PaidCollabVideos /></ProtectedRoute>} />
+        <Route path="templates" element={<ProtectedRoute roles={['bob', 'apc']}><ReportingCanvasList /></ProtectedRoute>} />
+        <Route path="templates/:id" element={<ProtectedRoute roles={['bob']}><ReportingCanvasEditor /></ProtectedRoute>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

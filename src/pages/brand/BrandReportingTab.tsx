@@ -34,10 +34,11 @@ function fmtMonth(yyyymm: string) {
 }
 
 export default function BrandReportingTab({
-  brand, isBob, onShareEnabledChanged,
+  brand, isBob, canEdit, onShareEnabledChanged,
 }: {
   brand: Brand;
   isBob: boolean;
+  canEdit: boolean;
   onShareEnabledChanged: (next: boolean) => void;
 }) {
   const nav = useNavigate();
@@ -106,7 +107,7 @@ export default function BrandReportingTab({
             <Form.Check
               type="switch"
               id="brand-share-master"
-              disabled={!isBob || savingShare}
+              disabled={!canEdit || savingShare}
               checked={!!brand.share_enabled}
               onChange={e => toggleBrandShare(e.target.checked)}
               label={brand.share_enabled ? 'Sharing enabled' : 'Sharing disabled'}
@@ -161,6 +162,7 @@ export default function BrandReportingTab({
                               <Form.Check
                                 type="switch"
                                 id={`w-share-${r.id}`}
+                                disabled={!canEdit}
                                 checked={r.is_shared}
                                 onChange={e => toggleWeeklyShare(r, e.target.checked)}
                                 label={r.is_shared ? 'Shareable' : 'Not shared'}
@@ -220,6 +222,7 @@ export default function BrandReportingTab({
                               <Form.Check
                                 type="switch"
                                 id={`m-share-${r.id}`}
+                                disabled={!canEdit}
                                 checked={r.is_shared}
                                 onChange={e => toggleMonthlyShare(r, e.target.checked)}
                                 label={r.is_shared ? 'Shareable' : 'Not shared'}

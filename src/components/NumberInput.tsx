@@ -40,6 +40,10 @@ export default function NumberInput({ value, onChange, blankZero = true, ...rest
       {...rest}
       type="number"
       value={text}
+      // Disable mouse-wheel changing the value — scrolling the page while a
+      // number input is focused must NOT alter the input. Blurring is the
+      // cross-browser standard fix.
+      onWheel={e => (e.currentTarget as HTMLInputElement).blur()}
       onChange={e => {
         const v = e.target.value;
         setText(v);

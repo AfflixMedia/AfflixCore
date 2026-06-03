@@ -69,6 +69,7 @@ serve(async (req) => {
     const includeReports         = link.include_reports          !== false;
     const includeMonthlyReports  = link.include_monthly_reports  === true;
     const includeResources       = link.include_resources        !== false;
+    const includePaidCollab      = link.include_paid_collab      === true;
 
     const [
       { data: client },
@@ -78,7 +79,7 @@ serve(async (req) => {
       { data: rawResources },
     ] = await Promise.all([
       admin.from('clients').select('id,name').eq('id', link.client_id).single(),
-      admin.from('brands').select('id,name,client,client_id,share_enabled').in('id', brandIds),
+      admin.from('brands').select('id,name,client,client_id,share_enabled,payment_popup_default').in('id', brandIds),
       includeReports
         ? admin.from('weekly_reports').select('*').in('brand_id', brandIds)
             .eq('is_shared', true)
@@ -142,6 +143,61 @@ serve(async (req) => {
     ]);
     const approval_decisions = [...(weeklyDecisions ?? []), ...(monthlyDecisions ?? [])];
 
+    // Paid Collab — only loaded when the link explicitly opts in.
+    let paid_collab_programs: any[] = [];
+    let paid_collab_creators: any[] = [];
+    let paid_collab_videos: any[] = [];
+    let paid_collab_products: any[] = [];
+    let paid_collab_program_products: any[] = [];
+    let paid_collab_program_notes: any[] = [];
+    let paid_collab_threads: any[] = [];
+    let paid_collab_performance: any[] = [];
+    let paid_collab_video_performance: any[] = [];
+    if (includePaidCollab && brands.length > 0) {
+      const allowedIds = brands.map((b: any) => b.id);
+      const { data: progRows } = await admin
+        .from('paid_creator_programs').select('*').in('brand_id', allowedIds);
+      paid_collab_programs = progRows ?? [];
+      if (paid_collab_programs.length > 0) {
+        const progIds = paid_collab_programs.map((p: any) => p.id);
+        const [
+          { data: cRows },
+          { data: nRows },
+          { data: ppRows },
+          { data: bpRows },
+          { data: tRows },
+        ] = await Promise.all([
+          admin.from('paid_creators').select('*').in('program_id', progIds),
+          admin.from('paid_program_notes').select('*').in('program_id', progIds)
+            .order('created_at', { ascending: false }),
+          admin.from('paid_program_products').select('*').in('program_id', progIds),
+          admin.from('brand_products').select('*').in('brand_id', allowedIds),
+          admin.from('paid_program_threads').select('*').in('program_id', progIds)
+            .order('created_at', { ascending: true }),
+        ]);
+        paid_collab_creators = cRows ?? [];
+        paid_collab_program_notes = nRows ?? [];
+        paid_collab_program_products = ppRows ?? [];
+        paid_collab_products = bpRows ?? [];
+        paid_collab_threads = tRows ?? [];
+        if (paid_collab_creators.length > 0) {
+          const creatorIds = paid_collab_creators.map((c: any) => c.id);
+          const [{ data: vRows }, { data: perfRows }] = await Promise.all([
+            admin.from('paid_creator_videos').select('*').in('creator_id', creatorIds),
+            admin.from('paid_creator_performance').select('*').in('creator_id', creatorIds),
+          ]);
+          paid_collab_videos = vRows ?? [];
+          paid_collab_performance = perfRows ?? [];
+          if (paid_collab_videos.length > 0) {
+            const videoIds = paid_collab_videos.map((v: any) => v.id);
+            const { data: vpRows } = await admin
+              .from('paid_video_performance').select('*').in('video_id', videoIds);
+            paid_collab_video_performance = vpRows ?? [];
+          }
+        }
+      }
+    }
+
     return json({
       client,
       brands,
@@ -155,6 +211,16 @@ serve(async (req) => {
       include_reports: includeReports,
       include_monthly_reports: includeMonthlyReports,
       include_resources: includeResources,
+      include_paid_collab: includePaidCollab,
+      paid_collab_programs,
+      paid_collab_creators,
+      paid_collab_videos,
+      paid_collab_products,
+      paid_collab_program_products,
+      paid_collab_program_notes,
+      paid_collab_threads,
+      paid_collab_performance,
+      paid_collab_video_performance,
       link_mode: 'brand',
     });
   } catch (e) {

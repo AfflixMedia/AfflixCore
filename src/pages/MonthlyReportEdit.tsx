@@ -7,11 +7,23 @@ import {
   emptyMonthlyTopCreator, emptyMonthlyTopVideo, emptyMonthlyProduct,
   ThisLast, RichTextWithImage,
 } from '../lib/monthlyReportSchema';
-import { CustomSection, StandardSectionId } from '../lib/reportSchema';
+import { CustomSection, CustomField, CustomFieldType, StandardSectionId } from '../lib/reportSchema';
+
+// Standard-section render order — used to place a new custom section
+// above / below a clicked section.
+const MONTHLY_STD_ORDER: string[] = [
+  'start', 'total_sales', 'kpis', 'gmv_breakdown', 'top_creators', 'top_videos',
+  'video_performance', 'creators_performance', 'product_analytics', 'customers',
+  'strategy_insights', 'discounting', 'gmv_max_ads', 'paid_collabs', 'ai_content',
+  'strategy_moving_forward',
+];
+type ClickedSection =
+  | { type: 'standard'; id: string }
+  | { type: 'custom'; section: CustomSection };
 import SectionComments, { Comment, CommentSection } from '../components/SectionComments';
 import { useAuth } from '../auth/AuthContext';
 import RichTextEditor from '../components/RichTextEditor';
-import { CustomSectionInline, CustomSectionDefModal, customSectionsAt, newSection } from '../components/CustomSectionEditor';
+import { CustomSectionInline, CustomSectionDefModal, customSectionsAt, newSection, AddSectionMenu } from '../components/CustomSectionEditor';
 import NumberInput from '../components/NumberInput';
 import ImageInput from '../components/ImageInput';
 import { parseMonthlyReportPdf } from '../lib/importMonthlyReport';
@@ -32,14 +44,14 @@ const SECTION_LABELS: Record<string, string> = {
   paid_collabs: 'Paid Collabs',
   ai_content: 'AI Content',
   strategy_moving_forward: 'Strategy Moving Forward',
-  approval: 'Approval Needed',
+  approval: 'Approval Needed / Action Items',
 };
 
 interface MonthlyReportRow {
   id: string; brand_id: string; month: string;
   status: string; content: any; is_shared: boolean;
 }
-interface Brand { id: string; name: string; client: string; }
+interface Brand { id: string; name: string; client: string; client_status: string | null; }
 
 function fmtMonth(yyyymm: string): string {
   const [y, m] = yyyymm.split('-').map(Number);
@@ -57,6 +69,7 @@ export default function MonthlyReportEdit() {
   const { profile } = useAuth();
   const [report, setReport] = useState<MonthlyReportRow | null>(null);
   const [brand, setBrand] = useState<Brand | null>(null);
+  const [pcPrograms, setPcPrograms] = useState<{ id: string; name: string | null; ended_at: string | null }[]>([]);
   const [c, setC] = useState<MonthlyReportContent>(emptyMonthlyContent());
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -123,6 +136,7 @@ export default function MonthlyReportEdit() {
   const [csModalOpen, setCsModalOpen] = useState(false);
   const [csDraft, setCsDraft] = useState<CustomSection>(newSection());
   const [csIsEdit, setCsIsEdit] = useState(false);
+  const [csTargetIndex, setCsTargetIndex] = useState<number | null>(null);
 
   const [feedbackSection, setFeedbackSection] = useState<CommentSection | null>(null);
 
@@ -155,8 +169,12 @@ export default function MonthlyReportEdit() {
       setReport(r);
       const normalised = normalizeMonthlyContent(r.content);
       setC(normalised);
-      const { data: bd } = await supabase.from('brands').select('id,name,client').eq('id', r.brand_id).single();
+      const { data: bd } = await supabase.from('brands').select('id,name,client,client_status').eq('id', r.brand_id).single();
       setBrand(bd as Brand);
+      const { data: pcp } = await supabase.from('paid_creator_programs')
+        .select('id,name,ended_at').eq('brand_id', r.brand_id)
+        .order('launch_date', { ascending: false });
+      setPcPrograms((pcp as any[]) ?? []);
 
       // Auto-pull "Last Month" — only if the current report is blank, so we
       // never overwrite numbers the APC has already typed.
@@ -232,12 +250,49 @@ export default function MonthlyReportEdit() {
   const openAddCustom = () => {
     setCsDraft(newSection());
     setCsIsEdit(false);
+    setCsTargetIndex(null);
     setCsModalOpen(true);
   };
+
+  // Open the add-section modal positioned above/below a clicked section.
+  const openAddSectionRelative = (clicked: ClickedSection, placement: 'above' | 'below') => {
+    const cs = c.custom_sections;
+    let anchor: string;
+    let index: number;
+    if (clicked.type === 'custom') {
+      anchor = clicked.section.insert_after as unknown as string;
+      const idx = cs.findIndex(s => s.id === clicked.section.id);
+      index = placement === 'below' ? idx + 1 : Math.max(0, idx);
+    } else if (placement === 'below') {
+      anchor = clicked.id;
+      const firstIdx = cs.findIndex(s => (s.insert_after as unknown as string) === anchor);
+      index = firstIdx === -1 ? cs.length : firstIdx;
+    } else {
+      const stdIdx = MONTHLY_STD_ORDER.indexOf(clicked.id);
+      anchor = stdIdx > 0 ? MONTHLY_STD_ORDER[stdIdx - 1] : 'start';
+      let lastIdx = -1;
+      cs.forEach((s, i) => { if ((s.insert_after as unknown as string) === anchor) lastIdx = i; });
+      index = lastIdx === -1 ? cs.length : lastIdx + 1;
+    }
+    setCsDraft(newSection(anchor as unknown as StandardSectionId));
+    setCsIsEdit(false);
+    setCsTargetIndex(index);
+    setCsModalOpen(true);
+  };
+
   const saveCustomDef = (s: CustomSection) => {
-    if (csIsEdit) setC(prev => ({ ...prev, custom_sections: prev.custom_sections.map(x => x.id === s.id ? s : x) }));
-    else setC(prev => ({ ...prev, custom_sections: [...prev.custom_sections, s] }));
+    if (csIsEdit) {
+      setC(prev => ({ ...prev, custom_sections: prev.custom_sections.map(x => x.id === s.id ? s : x) }));
+    } else {
+      setC(prev => {
+        const arr = [...prev.custom_sections];
+        if (csTargetIndex != null) arr.splice(Math.min(csTargetIndex, arr.length), 0, s);
+        else arr.push(s);
+        return { ...prev, custom_sections: arr };
+      });
+    }
     setCsModalOpen(false);
+    setCsTargetIndex(null);
   };
   const deleteCustom = (id: string) =>
     setC(prev => ({ ...prev, custom_sections: prev.custom_sections.filter(s => s.id !== id) }));
@@ -251,10 +306,35 @@ export default function MonthlyReportEdit() {
       <CustomSectionInline
         key={s.id}
         section={s}
+        paidCollabPrograms={pcPrograms}
         onChange={patch => updateCustom(s.id, patch)}
         onEditDef={() => { setCsDraft(s); setCsIsEdit(true); setCsModalOpen(true); }}
         onRemove={() => deleteCustom(s.id)}
-        headerExtra={<FeedbackButton section={`cs:${s.id}`} />}
+        onAddSection={(placement) => openAddSectionRelative({ type: 'custom', section: s }, placement)}
+        headerExtra={
+          <>
+            <Dropdown>
+              <Dropdown.Toggle size="sm" variant="outline-info" title="Add a saved preset as a new section">
+                <i className="bi bi-bookmark" />
+              </Dropdown.Toggle>
+              <Dropdown.Menu align="end" style={{ minWidth: 240 }}>
+                <Dropdown.Header>Add preset as a new section below</Dropdown.Header>
+                {customPresets.length === 0 ? (
+                  <Dropdown.ItemText className="text-muted small">No saved presets yet.</Dropdown.ItemText>
+                ) : customPresets.map(p => (
+                  <Dropdown.Item key={p.id} as="button" onClick={() => addPresetSectionBelow(s, p)}>
+                    <i className="bi bi-box-arrow-in-down me-2" />{p.name}
+                  </Dropdown.Item>
+                ))}
+              </Dropdown.Menu>
+            </Dropdown>
+            <Button size="sm" variant="outline-info"
+              onClick={() => saveCustomSectionAsPreset(s)} title="Save this section as a reusable preset">
+              <i className="bi bi-bookmark-plus" />
+            </Button>
+            <FeedbackButton section={`cs:${s.id}`} />
+          </>
+        }
       />
     ));
   };
@@ -302,9 +382,57 @@ export default function MonthlyReportEdit() {
     setPresetMsg(`Added "${cs.name}" from preset.`);
   };
 
+  // Save one custom section as a reusable preset.
+  const saveCustomSectionAsPreset = async (s: CustomSection) => {
+    const name = window.prompt('Save this section as a preset. Name:', s.name || 'Untitled section');
+    if (!name) return;
+    const payload = {
+      name: s.name,
+      description: s.description,
+      is_repeater: s.is_repeater,
+      insert_after: s.insert_after,
+      fields: s.fields.map(f => ({ label: f.label, type: f.type, options: f.options })),
+    };
+    const { data, error } = await supabase.from('monthly_section_presets')
+      .insert({ name: name.trim(), payload, created_by: profile?.id ?? null })
+      .select().single();
+    if (error) { alert(error.message); return; }
+    setPresets(prev => [data as PresetRow, ...prev]);
+    setPresetMsg(`Saved preset "${(data as PresetRow).name}".`);
+  };
+
+  // Add a saved preset as a NEW section, placed right below the clicked one.
+  const addPresetSectionBelow = (clicked: CustomSection, preset: PresetRow) => {
+    const p = preset.payload ?? {};
+    const cs: CustomSection = {
+      ...newSection(clicked.insert_after),
+      name: String(p.name ?? preset.name ?? ''),
+      description: String(p.description ?? ''),
+      is_repeater: !!p.is_repeater,
+      fields: Array.isArray(p.fields) ? p.fields.map((f: any): CustomField => ({
+        id: crypto.randomUUID(),
+        label: String(f.label ?? ''),
+        type: (['text', 'number', 'textarea', 'richtext', 'date', 'url', 'select'].includes(f.type) ? f.type : 'text') as CustomFieldType,
+        options: Array.isArray(f.options) ? f.options : undefined,
+      })) : [],
+      rows: [],
+    };
+    setC(prev => {
+      const arr = [...prev.custom_sections];
+      const idx = arr.findIndex(x => x.id === clicked.id);
+      arr.splice(idx === -1 ? arr.length : idx + 1, 0, cs);
+      return { ...prev, custom_sections: arr };
+    });
+    setPresetMsg(`Added "${cs.name || preset.name}" from preset below the section.`);
+  };
+
   // ---------- save ----------
   const submit = async (e: FormEvent, status: 'draft' | 'submitted') => {
     e.preventDefault();
+    if (brand?.client_status === 'closed') {
+      setErr(`${brand.name} is inactive — reactivate the brand before saving changes.`);
+      return;
+    }
     setSaving(true); setErr(null);
     const update: Record<string, any> = { content: c, status };
     if (c.approval?.enabled) update.is_shared = true;
@@ -317,6 +445,8 @@ export default function MonthlyReportEdit() {
   if (loading) return <div className="text-center py-5"><Spinner animation="border" /></div>;
   if (err && !report) return <Alert variant="danger">{err}</Alert>;
   if (!report || !brand) return null;
+
+  const brandInactive = brand.client_status === 'closed';
 
   // ---------- small inline UI helpers ----------
   const FeedbackButton = ({ section }: { section: CommentSection }) => {
@@ -363,7 +493,11 @@ export default function MonthlyReportEdit() {
   const HeaderWithFeedback = ({ title, sectionId }: { title: string; sectionId: keyof MonthlyReportContent }) => (
     <div className="d-flex justify-content-between align-items-center w-100">
       <span className="fw-semibold">{title}</span>
-      <span><StdPresetMenu sectionId={sectionId} /><FeedbackButton section={sectionId as string} /></span>
+      <span className="d-inline-flex align-items-center gap-2">
+        <StdPresetMenu sectionId={sectionId} />
+        <AddSectionMenu onPick={(pl) => openAddSectionRelative({ type: 'standard', id: sectionId as string }, pl)} />
+        <FeedbackButton section={sectionId as string} />
+      </span>
     </div>
   );
   // Render a "Metric / This Month / Last Month" row as a JSX expression — NOT
@@ -386,6 +520,15 @@ export default function MonthlyReportEdit() {
 
   return (
     <div className="ac-themed">
+      {brandInactive && (
+        <Alert variant="warning" className="d-flex align-items-center gap-2">
+          <i className="bi bi-lock-fill" />
+          <div>
+            <strong>{brand.name} is inactive.</strong>{' '}
+            You can review the data but Save is disabled until the brand is reactivated.
+          </div>
+        </Alert>
+      )}
       <div className="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
         <div>
           <h2 className="mb-1">{brand.name} <small className="text-muted fs-6">— {brand.client}</small></h2>
@@ -440,8 +583,8 @@ export default function MonthlyReportEdit() {
             <i className="bi bi-plus-square me-1" /> Add custom section
           </Button>
           <Button variant="outline-secondary" onClick={() => nav('/reporting/monthly')}>Cancel</Button>
-          <Button variant="outline-primary" disabled={saving} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
-          <Button variant="primary" disabled={saving} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
+          <Button variant="outline-primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
+          <Button variant="primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
         </div>
       </div>
 
@@ -695,7 +838,7 @@ export default function MonthlyReportEdit() {
         <Card.Header className="d-flex justify-content-between align-items-center">
           <span className="fw-semibold">
             <i className="bi bi-shield-check me-2 text-warning" />
-            Approval Needed
+            Approval Needed / Action Items
           </span>
           <div className="d-flex align-items-center gap-2">
             <FeedbackButton section="approval" />
@@ -719,6 +862,27 @@ export default function MonthlyReportEdit() {
               placeholder="Describe what needs the client's approval this month…"
               minHeight={180}
             />
+            <div className="mt-3 row g-2 align-items-end">
+              <Form.Group className="col-md-5">
+                <Form.Label className="small fw-semibold">Auto-popup expires at <span className="text-muted">(optional)</span></Form.Label>
+                <Form.Control
+                  type="datetime-local"
+                  value={c.approval?.expires_at ? c.approval.expires_at.slice(0, 16) : ''}
+                  onChange={e => setC(prev => ({
+                    ...prev,
+                    approval: {
+                      ...prev.approval,
+                      expires_at: e.target.value ? new Date(e.target.value).toISOString() : null,
+                    },
+                  }))}
+                />
+              </Form.Group>
+              <div className="col-md-7">
+                <Form.Text className="text-muted">
+                  After this date the popup stops auto-opening — but the client can still view the Approval Needed / Action Items card, submit a decision, and reply in the thread. Leave empty for no expiry.
+                </Form.Text>
+              </div>
+            </div>
           </Card.Body>
         )}
       </Card>
@@ -729,6 +893,7 @@ export default function MonthlyReportEdit() {
         initial={csDraft}
         onSave={saveCustomDef}
         isEdit={csIsEdit}
+        hidePosition={!csIsEdit && csTargetIndex != null}
         key={csDraft.id}
       />
 
@@ -756,8 +921,8 @@ export default function MonthlyReportEdit() {
 
       <div className="d-flex justify-content-end gap-2 mb-4">
         <Button variant="outline-secondary" onClick={() => nav('/reporting/monthly')}>Cancel</Button>
-        <Button variant="outline-primary" disabled={saving} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
-        <Button variant="primary" disabled={saving} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
+        <Button variant="outline-primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
+        <Button variant="primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
       </div>
     </div>
   );

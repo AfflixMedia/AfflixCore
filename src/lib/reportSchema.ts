@@ -39,6 +39,7 @@ export interface ProductRow {
   total_units_sold: number;
   affiliate_units_sold: number;
   total_gmv: number;
+  affiliate_gmv: number;
   videos_posted: number;
   listing_quality: ListingQuality;
   notes: string;
@@ -60,6 +61,10 @@ export interface Insights { summary: string; }  // summary is now HTML (rich tex
 export interface ApprovalRequest {
   enabled: boolean;
   content: string;  // rich text HTML — what is being requested for approval
+  /** Optional ISO timestamp. After this time the auto-popup stops appearing
+   *  for clients, but the section is still viewable and decisions / comments
+   *  can still be posted from the inline Approval Needed card. */
+  expires_at?: string | null;
 }
 
 export type CustomFieldType = 'text' | 'number' | 'textarea' | 'richtext' | 'date' | 'url' | 'select';
@@ -82,6 +87,16 @@ export interface CustomSection {
   fields: CustomField[];      // table-mode columns
   rows: Record<string, any>[]; // table-mode rows
   insert_after: StandardSectionId; // where to inject this section in form/dashboard order
+  /** When true, the dashboard renders a comparison of numeric columns vs the
+   *  previous week/month report's matching section (by id). */
+  compare_with_previous?: boolean;
+  /** When true, this is a "paid collab" section — the dashboard renders live
+   *  data for the linked paid creator program instead of table/text content. */
+  is_paid_collab?: boolean;
+  /** The linked paid creator program (when is_paid_collab). */
+  paid_collab_program_id?: string | null;
+  /** Optional specific week (period_start YYYY-MM-DD) to show; null = overall. */
+  paid_collab_week?: string | null;
 }
 
 export interface WeeklyReportContent {
@@ -140,7 +155,7 @@ export const emptyTopCreator = (): TopCreator => ({ name: '', videos: 0, items_s
 export const emptyTopVideo   = (): TopVideo   => ({ creator_name: '', video_url: '', items_sold: 0, gmv: 0 });
 export const emptyProduct    = (): ProductRow => ({
   product_id: '', product_name: '', total_units_sold: 0, affiliate_units_sold: 0,
-  total_gmv: 0, videos_posted: 0, listing_quality: '', notes: '',
+  total_gmv: 0, affiliate_gmv: 0, videos_posted: 0, listing_quality: '', notes: '',
 });
 
 // Backward-compat loader: map old report shapes onto the new one gracefully.
@@ -181,6 +196,7 @@ export function normalizeContent(raw: any): WeeklyReportContent {
         total_units_sold: num(p.total_units_sold ?? p.units_sold),
         affiliate_units_sold: num(p.affiliate_units_sold),
         total_gmv: num(p.total_gmv ?? p.gmv),
+        affiliate_gmv: num(p.affiliate_gmv),
         videos_posted: num(p.videos_posted ?? p.new_videos),
         listing_quality: (p.listing_quality ?? '') as ListingQuality,
         notes: str(p.notes),
@@ -240,12 +256,17 @@ export function normalizeContent(raw: any): WeeklyReportContent {
           fields,
           rows,
           insert_after: VALID_POS.includes(s.insert_after) ? s.insert_after : 'insights',
+          compare_with_previous: !!s.compare_with_previous,
+          is_paid_collab: !!s.is_paid_collab,
+          paid_collab_program_id: s.paid_collab_program_id ?? null,
+          paid_collab_week: s.paid_collab_week ?? null,
         };
       })
     : [];
   const approval: ApprovalRequest = {
     enabled: !!src.approval?.enabled,
     content: str(src.approval?.content),
+    expires_at: src.approval?.expires_at ?? null,
   };
   return {
     overall,

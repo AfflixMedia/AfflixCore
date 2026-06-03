@@ -52,9 +52,24 @@ serve(async (req) => {
     const cleanName = String(decided_by_name).trim().slice(0, 80);
     const cleanComment = comment ? String(comment).trim().slice(0, 4000) : null;
 
-    // One decision per (report × link). Re-submitting overwrites.
+    // Decisions are immutable: one per (report × link). If the client has
+    // already decided on this report via this link, refuse the update — they
+    // should follow up via the comment thread instead.
+    const { data: existing } = await admin.from('report_approval_decisions')
+      .select('id, decision, decided_at')
+      .eq('report_id', report_id)
+      .eq('share_link_id', link.id)
+      .maybeSingle();
+    if (existing) {
+      return json({
+        error: 'Your decision has already been recorded. Decisions can\'t be changed — please reply in the report\'s Approval Needed thread to follow up.',
+        code: 'DECISION_ALREADY_RECORDED',
+        existing,
+      }, 409);
+    }
+
     const { data: inserted, error } = await admin.from('report_approval_decisions')
-      .upsert({
+      .insert({
         report_id,
         report_type,
         share_link_id: link.id,
@@ -62,7 +77,7 @@ serve(async (req) => {
         comment: cleanComment,
         decided_by_name: cleanName,
         decided_at: new Date().toISOString(),
-      }, { onConflict: 'report_id,share_link_id' })
+      })
       .select().single();
     if (error) return json({ error: error.message }, 500);
 

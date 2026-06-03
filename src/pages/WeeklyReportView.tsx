@@ -6,16 +6,21 @@ import jsPDF from 'jspdf';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/AuthContext';
 import { useNotifications } from '../notifications/NotificationsContext';
-import { addDays, formatRange, formatHuman } from '../lib/dates';
+import { addDays, formatRange, formatHuman, formatWeekShort } from '../lib/dates';
 import { WeeklyReportContent, normalizeContent } from '../lib/reportSchema';
 import ReportDashboard, { TrendPoint, ApprovalDecisionView } from '../components/ReportDashboard';
+import CanvasRenderer from '../components/canvas/CanvasRenderer';
+import {
+  CanvasSchema, parseTemplateRow, buildMetricBagFromReportContent,
+} from '../lib/reportingCanvas';
 import { Comment, CommentSection } from '../components/SectionComments';
 
 interface ReportRow {
   id: string; brand_id: string; week_start: string; week_end: string;
   week_number: number; status: string; content: WeeklyReportContent;
+  template_id?: string | null;
 }
-interface Brand { id: string; name: string; client: string; }
+interface Brand { id: string; name: string; client: string; client_status: string | null; }
 
 export default function WeeklyReportView() {
   const { id } = useParams<{ id: string }>();
@@ -29,6 +34,8 @@ export default function WeeklyReportView() {
   const [prev, setPrev] = useState<ReportRow | null>(null);
   const [brand, setBrand] = useState<Brand | null>(null);
   const [trend, setTrend] = useState<ReportRow[]>([]);
+  // Optional canvas template overlay — populated when the report has template_id.
+  const [templateSchema, setTemplateSchema] = useState<CanvasSchema | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [decisions, setDecisions] = useState<ApprovalDecisionView[]>([]);
   const [loading, setLoading] = useState(true);
@@ -106,16 +113,25 @@ export default function WeeklyReportView() {
       if (error) { setErr(error.message); setLoading(false); return; }
       const r = cur as ReportRow;
       setReport(r);
-      const { data: bd } = await supabase.from('brands').select('id,name,client').eq('id', r.brand_id).single();
+      const { data: bd } = await supabase.from('brands').select('id,name,client,client_status').eq('id', r.brand_id).single();
       setBrand(bd as Brand);
+      if (r.template_id) {
+        const { data: tpl } = await supabase
+          .from('report_templates').select('*').eq('id', r.template_id).maybeSingle();
+        if (tpl) setTemplateSchema(parseTemplateRow(tpl).schema_json);
+      } else {
+        setTemplateSchema(null);
+      }
       const prevEnd = addDays(r.week_start, -1);
       const { data: pv } = await supabase.from('weekly_reports')
         .select('*').eq('brand_id', r.brand_id).eq('week_end', prevEnd).maybeSingle();
       setPrev(pv as ReportRow | null);
+      // The 8 most recent weeks up to and including this report (newest-first
+      // from the query, reversed to oldest-first for the trend chart).
       const { data: tr } = await supabase.from('weekly_reports')
         .select('*').eq('brand_id', r.brand_id)
-        .lte('week_start', r.week_start).order('week_start', { ascending: true }).limit(8);
-      setTrend((tr as ReportRow[]) ?? []);
+        .lte('week_start', r.week_start).order('week_start', { ascending: false }).limit(8);
+      setTrend(((tr as ReportRow[]) ?? []).slice().reverse());
       const { data: cm } = await supabase.from('report_comments')
         .select('*').eq('report_id', r.id).order('created_at', { ascending: true });
       setComments((cm as Comment[]) ?? []);
@@ -139,7 +155,7 @@ export default function WeeklyReportView() {
   const trendData: TrendPoint[] = useMemo(() => trend.map(t => {
     const n = normalizeContent(t.content);
     return {
-      label: formatHuman(t.week_start).slice(0, 6),
+      label: formatWeekShort(t.week_start, t.week_end),
       GMV: n.overall.total_gmv,
       'Affiliate GMV': n.overall.affiliate_gmv,
     };
@@ -161,6 +177,8 @@ export default function WeeklyReportView() {
   if (loading) return <div className="text-center py-5"><Spinner animation="border" /></div>;
   if (err || !report || !brand) return <Alert variant="danger">{err ?? 'Not found'}</Alert>;
 
+  const brandActive = brand.client_status !== 'closed';
+
   return (
     <>
       <div className="d-flex align-items-start gap-3 mb-3 flex-wrap">
@@ -172,10 +190,12 @@ export default function WeeklyReportView() {
           <Button variant="outline-secondary" onClick={exportPdf} disabled={exporting} title="Download a PDF copy of the dashboard">
             <i className="bi bi-printer me-1" /> {exporting ? 'Building PDF…' : 'Export PDF'}
           </Button>
-          <Button variant="primary" onClick={() => nav(`/reporting/weekly/${id}/edit`)}>
-            <i className="bi bi-pencil me-1" /> Edit data
-          </Button>
-          {profile?.role === 'bob' && (
+          {brandActive && (
+            <Button variant="primary" onClick={() => nav(`/reporting/weekly/${id}/edit`)}>
+              <i className="bi bi-pencil me-1" /> Edit data
+            </Button>
+          )}
+          {profile?.role === 'bob' && brandActive && (
             <Button variant="outline-danger" onClick={async () => {
               if (!confirm(`Delete this report permanently?`)) return;
               const { error } = await supabase.from('weekly_reports').delete().eq('id', report!.id);
@@ -188,6 +208,16 @@ export default function WeeklyReportView() {
         </div>
       </div>
 
+      {!brandActive && (
+        <Alert variant="warning" className="d-flex align-items-center gap-2">
+          <i className="bi bi-lock-fill" />
+          <div>
+            <strong>{brand.name} is inactive.</strong>{' '}
+            This report is read-only — reactivate the brand to edit or delete it.
+          </div>
+        </Alert>
+      )}
+
       <div ref={exportRef} className="ac-report-export-area">
         <div className="d-flex align-items-start gap-3 mb-4 flex-wrap">
           <div className="flex-grow-1 min-w-0">
@@ -199,6 +229,25 @@ export default function WeeklyReportView() {
             </div>
           </div>
         </div>
+
+        {templateSchema && (
+          <div className="mb-4">
+            <div className="d-flex align-items-center gap-2 mb-2">
+              <Badge bg="warning" text="dark">
+                <i className="bi bi-easel2 me-1" />Canvas template
+              </Badge>
+              <small className="text-muted">Rendered above the standard dashboard for this report.</small>
+            </div>
+            <CanvasRenderer
+              schema={templateSchema}
+              metricBag={{
+                current: buildMetricBagFromReportContent(c),
+                previous: prev ? buildMetricBagFromReportContent(p) : {},
+              }}
+            />
+            <hr className="my-4" />
+          </div>
+        )}
 
         <ReportDashboard
           c={c}

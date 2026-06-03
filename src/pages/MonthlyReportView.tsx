@@ -9,13 +9,18 @@ import { useNotifications } from '../notifications/NotificationsContext';
 import { MonthlyReportContent, normalizeMonthlyContent } from '../lib/monthlyReportSchema';
 import MonthlyReportDashboard, { MonthlyTrendPoint } from '../components/MonthlyReportDashboard';
 import { ApprovalDecisionView } from '../components/ReportDashboard';
+import CanvasRenderer from '../components/canvas/CanvasRenderer';
+import {
+  CanvasSchema, parseTemplateRow, buildMetricBagFromReportContent,
+} from '../lib/reportingCanvas';
 import { Comment, CommentSection } from '../components/SectionComments';
 
 interface MonthlyRow {
   id: string; brand_id: string; month: string;
   status: string; content: any;
+  template_id?: string | null;
 }
-interface Brand { id: string; name: string; client: string; }
+interface Brand { id: string; name: string; client: string; client_status: string | null; }
 
 function shiftMonth(yyyymm: string, delta: number) {
   const [y, m] = yyyymm.split('-').map(Number);
@@ -37,6 +42,7 @@ export default function MonthlyReportView() {
   const { profile } = useAuth();
   const { notifications, markRead } = useNotifications();
   const [report, setReport] = useState<MonthlyRow | null>(null);
+  const [templateSchema, setTemplateSchema] = useState<CanvasSchema | null>(null);
   const [brand, setBrand] = useState<Brand | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [decisions, setDecisions] = useState<ApprovalDecisionView[]>([]);
@@ -93,8 +99,15 @@ export default function MonthlyReportView() {
       if (error) { setErr(error.message); setLoading(false); return; }
       const r = cur as MonthlyRow;
       setReport(r);
-      const { data: bd } = await supabase.from('brands').select('id,name,client').eq('id', r.brand_id).single();
+      const { data: bd } = await supabase.from('brands').select('id,name,client,client_status').eq('id', r.brand_id).single();
       setBrand(bd as Brand);
+      if (r.template_id) {
+        const { data: tpl } = await supabase
+          .from('report_templates').select('*').eq('id', r.template_id).maybeSingle();
+        if (tpl) setTemplateSchema(parseTemplateRow(tpl).schema_json);
+      } else {
+        setTemplateSchema(null);
+      }
       // Previous month (for "Last Month" auto-comparison) and 8-month trend
       const prevMonth = shiftMonth(r.month, -1);
       const { data: pv } = await supabase.from('monthly_reports')
@@ -149,6 +162,8 @@ export default function MonthlyReportView() {
   if (loading) return <div className="text-center py-5"><Spinner animation="border" /></div>;
   if (err || !report || !brand) return <Alert variant="danger">{err ?? 'Not found'}</Alert>;
 
+  const brandActive = brand.client_status !== 'closed';
+
   return (
     <>
       <div className="d-flex align-items-start gap-3 mb-3 flex-wrap">
@@ -160,10 +175,12 @@ export default function MonthlyReportView() {
           <Button variant="outline-secondary" onClick={exportPdf} disabled={exporting} title="Download a PDF copy">
             <i className="bi bi-printer me-1" /> {exporting ? 'Building PDF…' : 'Export PDF'}
           </Button>
-          <Button variant="primary" onClick={() => nav(`/reporting/monthly/${id}/edit`)}>
-            <i className="bi bi-pencil me-1" /> Edit data
-          </Button>
-          {profile?.role === 'bob' && (
+          {brandActive && (
+            <Button variant="primary" onClick={() => nav(`/reporting/monthly/${id}/edit`)}>
+              <i className="bi bi-pencil me-1" /> Edit data
+            </Button>
+          )}
+          {profile?.role === 'bob' && brandActive && (
             <Button variant="outline-danger" onClick={async () => {
               if (!confirm(`Delete this monthly report permanently?`)) return;
               const { error } = await supabase.from('monthly_reports').delete().eq('id', report!.id);
@@ -176,6 +193,16 @@ export default function MonthlyReportView() {
         </div>
       </div>
 
+      {!brandActive && (
+        <Alert variant="warning" className="d-flex align-items-center gap-2">
+          <i className="bi bi-lock-fill" />
+          <div>
+            <strong>{brand.name} is inactive.</strong>{' '}
+            This report is read-only — reactivate the brand to edit or delete it.
+          </div>
+        </Alert>
+      )}
+
       <div ref={exportRef} className="ac-report-export-area">
         <div className="d-flex align-items-start gap-3 mb-4 flex-wrap">
           <div className="flex-grow-1 min-w-0">
@@ -187,6 +214,25 @@ export default function MonthlyReportView() {
             </div>
           </div>
         </div>
+
+        {templateSchema && (
+          <div className="mb-4">
+            <div className="d-flex align-items-center gap-2 mb-2">
+              <Badge bg="warning" text="dark">
+                <i className="bi bi-easel2 me-1" />Canvas template
+              </Badge>
+              <small className="text-muted">Rendered above the standard dashboard for this report.</small>
+            </div>
+            <CanvasRenderer
+              schema={templateSchema}
+              metricBag={{
+                current: buildMetricBagFromReportContent(c),
+                previous: prev ? buildMetricBagFromReportContent((prev as any).content) : {},
+              }}
+            />
+            <hr className="my-4" />
+          </div>
+        )}
 
         <MonthlyReportDashboard
           c={c}

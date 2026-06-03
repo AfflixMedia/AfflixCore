@@ -1,60 +1,28 @@
-import { useEffect, useState, FormEvent } from 'react';
-import { Card, Button, Modal, Form, Row, Col, Alert, Badge, Spinner, InputGroup } from 'react-bootstrap';
+import { useState, FormEvent } from 'react';
+import { Modal, Form, Alert, Button, InputGroup, Badge } from 'react-bootstrap';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../auth/AuthContext';
-import { resourceIcon } from '../../lib/resourceIcon';
-
-interface Resource {
-  id: string;
-  name: string;
-  url: string;
-  description: string | null;
-  scope: 'general' | 'brand';
-  brand_id: string | null;
-  is_shared: boolean;
-  created_at: string;
-}
+import FolderExplorer from '../../components/resources/FolderExplorer';
+import type { Resource } from '../../lib/resourceFolders';
 
 const DESC_MAX = 240;
 
-export default function BrandResourcesTab({ brandId, brandName }: { brandId: string; brandName: string }) {
+export default function BrandResourcesTab({ brandId, brandName, canEdit }: { brandId: string; brandName: string; canEdit: boolean }) {
   const { user, profile } = useAuth();
   const isBob = profile?.role === 'bob';
-  const [items, setItems] = useState<Resource[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
 
+  // Add/edit modal owned by the page (the explorer just delegates).
   const [show, setShow] = useState(false);
   const [editing, setEditing] = useState<Resource | null>(null);
+  const [defaultFolderId, setDefaultFolderId] = useState<string | null>(null);
   const [form, setForm] = useState({ name: '', url: '', description: '' });
   const [saving, setSaving] = useState(false);
-  const [search, setSearch] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
-  const load = async () => {
-    setLoading(true); setErr(null);
-    const { data, error } = await supabase.from('resources').select('*')
-      .eq('brand_id', brandId).order('created_at', { ascending: false });
-    if (error) setErr(error.message);
-    else setItems(((data as any[]) ?? []).map(x => ({ ...x, is_shared: !!x.is_shared })) as Resource[]);
-    setLoading(false);
-  };
-
-  const toggleShared = async (r: Resource, next: boolean) => {
-    const prev = items;
-    setItems(items.map(x => x.id === r.id ? { ...x, is_shared: next } : x));
-    const { error } = await supabase.from('resources').update({ is_shared: next }).eq('id', r.id);
-    if (error) { alert(error.message); setItems(prev); }
-  };
-  useEffect(() => { load(); }, [brandId]);
-
-  const filtered = items.filter(r => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return `${r.name} ${r.url} ${r.description ?? ''}`.toLowerCase().includes(q);
-  });
-
-  const openAdd = () => {
+  const openAdd = (folderId: string | null) => {
     setEditing(null);
+    setDefaultFolderId(folderId);
     setForm({ name: '', url: '', description: '' });
     setErr(null); setShow(true);
   };
@@ -68,121 +36,68 @@ export default function BrandResourcesTab({ brandId, brandName }: { brandId: str
     e.preventDefault();
     setSaving(true); setErr(null);
     const fullUrl = form.url.startsWith('http') ? form.url : `https://${form.url}`;
-    const payload = {
+    const payload: any = {
       name: form.name.trim(),
       url: fullUrl.trim(),
       description: form.description.trim() || null,
-      scope: 'brand' as const,
+      scope: 'brand',
       brand_id: brandId,
       created_by: user?.id,
     };
+    if (!editing) payload.folder_id = defaultFolderId;
     const res = editing
       ? await supabase.from('resources').update(payload).eq('id', editing.id)
       : await supabase.from('resources').insert(payload);
     setSaving(false);
     if (res.error) setErr(res.error.message);
-    else { setShow(false); load(); }
+    else { setShow(false); setReloadKey(k => k + 1); }
   };
 
   const remove = async (r: Resource) => {
     if (!confirm(`Delete resource "${r.name}"?`)) return;
-    const prev = items;
-    setItems(items.filter(x => x.id !== r.id));
     const { error } = await supabase.from('resources').delete().eq('id', r.id);
-    if (error) { alert(error.message); setItems(prev); }
+    if (error) { alert(error.message); return; }
+    setReloadKey(k => k + 1);
+  };
+
+  const toggleShared = async (r: Resource, next: boolean) => {
+    const { error } = await supabase.from('resources').update({ is_shared: next }).eq('id', r.id);
+    if (error) { alert(error.message); return; }
+    setReloadKey(k => k + 1);
   };
 
   return (
     <>
-      <Card className="mb-3">
-        <Card.Body className="py-2">
-          <Row className="g-2 align-items-center">
-            <Col md>
-              <InputGroup size="sm">
-                <InputGroup.Text><i className="bi bi-search" /></InputGroup.Text>
-                <Form.Control placeholder={`Search resources for ${brandName}…`}
-                  value={search} onChange={e => setSearch(e.target.value)} />
-                {search && (
-                  <Button variant="outline-secondary" onClick={() => setSearch('')}>
-                    <i className="bi bi-x-lg" />
-                  </Button>
-                )}
-              </InputGroup>
-            </Col>
-            <Col md="auto">
-              <Button onClick={openAdd}>
-                <i className="bi bi-plus-lg me-1" /> Add Resource
-              </Button>
-            </Col>
-          </Row>
-        </Card.Body>
-      </Card>
-
-      {loading ? <div className="text-center py-4"><Spinner animation="border" /></div>
-        : err ? <Alert variant="danger">{err}</Alert>
-        : filtered.length === 0 ? (
-          <Card body className="text-center text-muted">
-            {search ? 'No resources match your search.' : `No resources for ${brandName} yet — add one above.`}
-          </Card>
-        ) : (
-          <Row className="g-3">
-            {filtered.map(r => {
-              const ic = resourceIcon(r.url);
-              return (
-                <Col md={6} lg={4} key={r.id}>
-                  <Card className="h-100 shadow-sm" style={{ borderLeft: `4px solid ${ic.color}` }}>
-                    <Card.Body>
-                      <div className="d-flex align-items-start justify-content-between mb-2">
-                        <div style={{ fontSize: '1.8rem', color: ic.color, lineHeight: 1 }}>
-                          <i className={`bi ${ic.icon}`} />
-                        </div>
-                        <div className="d-flex flex-column align-items-end gap-1">
-                          <Badge bg="info">{brandName}</Badge>
-                          {r.is_shared
-                            ? <Badge bg="success" className="d-inline-flex align-items-center gap-1">
-                                <i className="bi bi-globe" /> Shared
-                              </Badge>
-                            : <Badge bg="light" text="dark" className="d-inline-flex align-items-center gap-1">
-                                <i className="bi bi-lock" /> Private
-                              </Badge>}
-                        </div>
-                      </div>
-                      <h6 className="mb-1">{r.name}</h6>
-                      <div className="text-muted small text-truncate mb-2">
-                        <i className="bi bi-link-45deg" /> {ic.label}
-                      </div>
-                      {r.description && <p className="small text-muted mb-2" style={{ whiteSpace: 'pre-wrap' }}>{r.description}</p>}
-                      {isBob && (
-                        <div className="mb-2">
-                          <Form.Check
-                            type="switch"
-                            id={`share-${r.id}`}
-                            checked={!!r.is_shared}
-                            onChange={e => toggleShared(r, e.target.checked)}
-                            label={<small className="text-muted">Share with clients</small>}
-                          />
-                        </div>
-                      )}
-                      <div className="d-flex justify-content-between align-items-center mt-3">
-                        <a href={r.url} target="_blank" rel="noreferrer" className="btn btn-sm btn-outline-primary">
-                          Open <i className="bi bi-box-arrow-up-right ms-1" />
-                        </a>
-                        <div>
-                          <Button size="sm" variant="outline-secondary" className="me-2" onClick={() => openEdit(r)}>
-                            <i className="bi bi-pencil" />
-                          </Button>
-                          <Button size="sm" variant="outline-danger" onClick={() => remove(r)}>
-                            <i className="bi bi-trash" />
-                          </Button>
-                        </div>
-                      </div>
-                    </Card.Body>
-                  </Card>
-                </Col>
-              );
-            })}
-          </Row>
+      <FolderExplorer
+        scope={{ kind: 'brand', brandId }}
+        canEdit={canEdit}
+        reloadKey={reloadKey}
+        onAddResource={openAdd}
+        onEditResource={openEdit}
+        onDeleteResource={remove}
+        renderResourceExtras={(r) => (
+          <>
+            <div className="mb-2">
+              {r.is_shared
+                ? <Badge bg="success" className="d-inline-flex align-items-center gap-1">
+                    <i className="bi bi-globe" /> Shared
+                  </Badge>
+                : <Badge bg="light" text="dark" className="d-inline-flex align-items-center gap-1">
+                    <i className="bi bi-lock" /> Private
+                  </Badge>}
+            </div>
+            {isBob && canEdit && (
+              <Form.Check
+                type="switch"
+                id={`share-${r.id}`}
+                checked={!!r.is_shared}
+                onChange={e => toggleShared(r, e.target.checked)}
+                label={<small className="text-muted">Share with clients</small>}
+              />
+            )}
+          </>
         )}
+      />
 
       <Modal show={show} onHide={() => setShow(false)} centered>
         <Form onSubmit={submit}>

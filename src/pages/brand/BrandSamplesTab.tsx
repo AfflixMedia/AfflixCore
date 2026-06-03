@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, FormEvent } from 'react';
-import { Card, Form, Button, Row, Col, Table, Modal, Spinner, Alert, Badge, ProgressBar } from 'react-bootstrap';
+import { Card, Form, Button, Row, Col, Table, Modal, Spinner, Alert, Badge } from 'react-bootstrap';
 import {
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid,
-  BarChart, Bar, Legend,
+  ResponsiveContainer, AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip,
+  CartesianGrid, Legend, LabelList,
 } from 'recharts';
 import { supabase } from '../../lib/supabase';
 import { toISO } from '../../lib/dates';
@@ -25,6 +25,7 @@ interface DailyEntry {
   reason_of_drop: string | null;
   others_count: number;
   product_counts: Record<string, number>;
+  dump_usernames: string | null;
 }
 interface WeeklyGmv {
   brand_id: string;
@@ -60,15 +61,30 @@ function weekRangeLabel(yyyymm: string, idx: number): string {
   const monthName = new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'short' });
   return `${monthName} ${start}–${end}`;
 }
+function prevMonthOf(yyyymm: string): string {
+  const [y, m] = yyyymm.split('-').map(Number);
+  const d = new Date(y, m - 2, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+function isWeekend(iso: string): boolean {
+  const wd = new Date(iso + 'T00:00:00').getDay();
+  return wd === 0 || wd === 6;
+}
 const sumValues = (m: Record<string, number>) =>
   Object.values(m).reduce((s, v) => s + (v ?? 0), 0);
+
+const SECTION_HEADING_STYLE: React.CSSProperties = { textTransform: 'none', letterSpacing: 0 };
 
 export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string; canEdit: boolean }) {
   const [month, setMonth] = useState<string>(currentMonth());
   const [products, setProducts] = useState<SampleProduct[]>([]);
   const [periodGoal, setPeriodGoal] = useState<number>(0);
+  const [hasGoalRow, setHasGoalRow] = useState(false);
+  const [goalEditing, setGoalEditing] = useState(false);
   const [days, setDays] = useState<DailyEntry[]>([]);
+  const [prevDays, setPrevDays] = useState<DailyEntry[]>([]);
   const [weekly, setWeekly] = useState<WeeklyGmv[]>([]);
+  const [editingWeeks, setEditingWeeks] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [savingGoal, setSavingGoal] = useState(false);
@@ -93,7 +109,7 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
     days.reduce((s, d) => s + (d.new_videos ?? 0), 0),
   [days]);
   const avgSps = useMemo(() => {
-    const xs = days.map(d => d.daily_sps).filter((n): n is number => n != null);
+    const xs = days.filter(d => !isWeekend(d.entry_date)).map(d => d.daily_sps).filter((n): n is number => n != null);
     if (xs.length === 0) return null;
     return xs.reduce((a, b) => a + b, 0) / xs.length;
   }, [days]);
@@ -116,9 +132,43 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
     allDates.map(date => {
       const d = dayByDate.get(date);
       const total = d ? sumValues(d.product_counts) + (d.others_count ?? 0) : 0;
-      return { label: date.slice(8), Approved: total };
+      return { label: date.slice(8), Approved: total, weekend: isWeekend(date) };
     }),
   [allDates, dayByDate]);
+
+  const prevMonthYyyymm = useMemo(() => prevMonthOf(month), [month]);
+  const prevAllDates = useMemo(() => daysInMonth(prevMonthYyyymm), [prevMonthYyyymm]);
+  const prevDayByDate = useMemo(() => {
+    const m = new Map<string, DailyEntry>();
+    for (const d of prevDays) m.set(d.entry_date, d);
+    return m;
+  }, [prevDays]);
+  const prevDailyChartData = useMemo(() =>
+    prevAllDates.map(date => {
+      const d = prevDayByDate.get(date);
+      const total = d ? sumValues(d.product_counts) + (d.others_count ?? 0) : 0;
+      return { label: date.slice(8), Approved: total };
+    }),
+  [prevAllDates, prevDayByDate]);
+  const prevTotalApproved = useMemo(() =>
+    prevDays.reduce((s, d) => s + sumValues(d.product_counts) + (d.others_count ?? 0), 0),
+  [prevDays]);
+
+  const weeklyChartData = useMemo(() => {
+    return weekIndices.map(idx => {
+      const range = weekRangeLabel(month, idx);
+      const start = (idx - 1) * 7 + 1;
+      const end = idx * 7;
+      let approved = 0;
+      for (const d of days) {
+        const day = Number(d.entry_date.slice(8));
+        if (day >= start && day <= end) {
+          approved += sumValues(d.product_counts) + (d.others_count ?? 0);
+        }
+      }
+      return { label: range.replace(/^[A-Z][a-z]+ /, ''), Approved: approved };
+    }).filter(r => r.label);
+  }, [weekIndices, days, month]);
 
   const productChartData = useMemo(() =>
     products.map(p => ({
@@ -140,12 +190,18 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
     const monthFirst = `${month}-01`;
     const [y, m] = month.split('-').map(Number);
     const monthLast = toISO(new Date(y, m, 0));
-    const [pRes, gRes, dRes, wRes] = await Promise.all([
+    const prevYyyymm = prevMonthOf(month);
+    const [py, pm] = prevYyyymm.split('-').map(Number);
+    const prevFirst = `${prevYyyymm}-01`;
+    const prevLast = toISO(new Date(py, pm, 0));
+    const [pRes, gRes, dRes, wRes, prevRes] = await Promise.all([
       supabase.from('brand_samples_products').select('*').eq('brand_id', brandId).order('sort_order').order('created_at'),
       supabase.from('brand_samples_periods').select('*').eq('brand_id', brandId).eq('month', month).maybeSingle(),
       supabase.from('brand_samples_daily').select('*').eq('brand_id', brandId)
         .gte('entry_date', monthFirst).lte('entry_date', monthLast).order('entry_date'),
       supabase.from('brand_samples_weekly_gmv').select('*').eq('brand_id', brandId).eq('month', month),
+      supabase.from('brand_samples_daily').select('*').eq('brand_id', brandId)
+        .gte('entry_date', prevFirst).lte('entry_date', prevLast).order('entry_date'),
     ]);
     if (pRes.error) { setErr(pRes.error.message); setLoading(false); return; }
     if (gRes.error && !gRes.error.message?.includes('No rows')) {
@@ -153,14 +209,25 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
     }
     if (dRes.error) { setErr(dRes.error.message); setLoading(false); return; }
     if (wRes.error) { setErr(wRes.error.message); setLoading(false); return; }
+    if (prevRes.error) { setErr(prevRes.error.message); setLoading(false); return; }
 
     setProducts((pRes.data ?? []) as SampleProduct[]);
-    setPeriodGoal((gRes.data as any)?.total_goal ?? 0);
+    setPrevDays(((prevRes.data ?? []) as any[]).map(r => ({
+      ...r,
+      product_counts: r.product_counts ?? {},
+      dump_usernames: r.dump_usernames ?? null,
+    })) as DailyEntry[]);
+    const goalRow = gRes.data as any;
+    setPeriodGoal(goalRow?.total_goal ?? 0);
+    setHasGoalRow(!!goalRow);
+    setGoalEditing(!goalRow);
     setDays(((dRes.data ?? []) as any[]).map(r => ({
       ...r,
       product_counts: r.product_counts ?? {},
+      dump_usernames: r.dump_usernames ?? null,
     })) as DailyEntry[]);
     setWeekly((wRes.data ?? []) as WeeklyGmv[]);
+    setEditingWeeks(new Set());
     setLoading(false);
   };
 
@@ -172,13 +239,15 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
     const { error } = await supabase.from('brand_samples_periods')
       .upsert({ brand_id: brandId, month, total_goal: periodGoal }, { onConflict: 'brand_id,month' });
     setSavingGoal(false);
-    if (error) setErr(error.message);
+    if (error) { setErr(error.message); return; }
+    setHasGoalRow(true);
+    setGoalEditing(false);
   };
 
   // Products manager
   const [productModal, setProductModal] = useState(false);
   const emptyProduct = (): SampleProduct => ({
-    id: '', brand_id: brandId, external_product_id: '', name: '', monthly_goal: null, sort_order: products.length,
+    id: '', brand_id: brandId, external_product_id: '', name: '', monthly_goal: null, sort_order: 0,
   });
   const [productDraft, setProductDraft] = useState<SampleProduct>(emptyProduct());
   const [productEditing, setProductEditing] = useState<SampleProduct | null>(null);
@@ -192,7 +261,6 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
       external_product_id: productDraft.external_product_id?.trim() || null,
       name: productDraft.name.trim(),
       monthly_goal: productDraft.monthly_goal ?? null,
-      sort_order: productDraft.sort_order ?? 0,
     };
     const res = productEditing
       ? await supabase.from('brand_samples_products').update(payload).eq('id', productEditing.id)
@@ -211,6 +279,7 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
   // Daily entry editor
   const [dayModal, setDayModal] = useState(false);
   const [dayDraft, setDayDraft] = useState<DailyEntry | null>(null);
+  const [usersModal, setUsersModal] = useState<DailyEntry | null>(null);
   const openEditDay = (date: string) => {
     const existing = dayByDate.get(date);
     setDayDraft(existing
@@ -218,13 +287,14 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
       : {
           brand_id: brandId, entry_date: date,
           new_videos: null, daily_sps: null, reason_of_drop: '',
-          others_count: 0, product_counts: {},
+          others_count: 0, product_counts: {}, dump_usernames: null,
         });
     setDayModal(true);
   };
   const dayDraftTotal = dayDraft
     ? sumValues(dayDraft.product_counts) + (dayDraft.others_count ?? 0)
     : 0;
+  const dayIsWeekend = dayDraft ? isWeekend(dayDraft.entry_date) : false;
   const submitDay = async (e: FormEvent) => {
     e.preventDefault();
     if (!dayDraft) return;
@@ -232,10 +302,12 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
       brand_id: brandId,
       entry_date: dayDraft.entry_date,
       new_videos: dayDraft.new_videos,
-      daily_sps: dayDraft.daily_sps,
+      // Weekend rows: only persist new_videos + reason_of_drop, force approvals to zero/null
+      daily_sps: dayIsWeekend ? null : dayDraft.daily_sps,
       reason_of_drop: dayDraft.reason_of_drop?.trim() || null,
-      others_count: dayDraft.others_count ?? 0,
-      product_counts: dayDraft.product_counts ?? {},
+      others_count: dayIsWeekend ? 0 : (dayDraft.others_count ?? 0),
+      product_counts: dayIsWeekend ? {} : (dayDraft.product_counts ?? {}),
+      dump_usernames: dayIsWeekend ? null : (dayDraft.dump_usernames?.trim() || null),
     };
     const { error } = await supabase.from('brand_samples_daily')
       .upsert(payload, { onConflict: 'brand_id,entry_date' });
@@ -252,8 +324,8 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
     load();
   };
 
-  // Weekly GMV inline edit
-  const setWeeklyGmv = async (idx: number, val: number) => {
+  // Weekly GMV row-level save
+  const saveWeeklyGmv = async (idx: number, val: number) => {
     const { error } = await supabase.from('brand_samples_weekly_gmv')
       .upsert({ brand_id: brandId, month, week_index: idx, affiliate_gmv: val },
               { onConflict: 'brand_id,month,week_index' });
@@ -263,6 +335,18 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
       next.push({ brand_id: brandId, month, week_index: idx, affiliate_gmv: val });
       return next.sort((a, b) => a.week_index - b.week_index);
     });
+    setEditingWeeks(prev => {
+      const next = new Set(prev);
+      next.delete(idx);
+      return next;
+    });
+  };
+  const toggleWeekEdit = (idx: number, on: boolean) => {
+    setEditingWeeks(prev => {
+      const next = new Set(prev);
+      if (on) next.add(idx); else next.delete(idx);
+      return next;
+    });
   };
 
   const weeklyAvgSps = (idx: number): number | null => {
@@ -271,7 +355,7 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
     const xs = days
       .filter(d => {
         const day = Number(d.entry_date.slice(8));
-        return day >= start && day <= end && d.daily_sps != null;
+        return day >= start && day <= end && !isWeekend(d.entry_date) && d.daily_sps != null;
       })
       .map(d => d.daily_sps as number);
     if (xs.length === 0) return null;
@@ -280,6 +364,60 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
 
   const goalPct = periodGoal > 0 ? Math.min(100, Math.round((totalApproved / periodGoal) * 100)) : 0;
 
+  // CSV export modal
+  const [csvModal, setCsvModal] = useState(false);
+  const [csvFrom, setCsvFrom] = useState<string>(`${month}-01`);
+  const [csvTo, setCsvTo] = useState<string>(toISO(new Date(Number(month.split('-')[0]), Number(month.split('-')[1]), 0)));
+  const [csvBusy, setCsvBusy] = useState(false);
+  const [csvErr, setCsvErr] = useState<string | null>(null);
+
+  const downloadCsv = async () => {
+    setCsvBusy(true); setCsvErr(null);
+    try {
+      const { data, error } = await supabase
+        .from('brand_samples_daily')
+        .select('entry_date, dump_usernames')
+        .eq('brand_id', brandId)
+        .gte('entry_date', csvFrom)
+        .lte('entry_date', csvTo)
+        .order('entry_date');
+      if (error) throw error;
+      const rows: string[] = ['Date,Username'];
+      let count = 0;
+      for (const r of (data ?? []) as { entry_date: string; dump_usernames: string | null }[]) {
+        if (!r.dump_usernames) continue;
+        const users = r.dump_usernames
+          .split(/\r?\n/)
+          .map(s => s.trim())
+          .filter(Boolean);
+        for (const u of users) {
+          const safe = u.includes(',') || u.includes('"') ? `"${u.replace(/"/g, '""')}"` : u;
+          rows.push(`${r.entry_date},${safe}`);
+          count += 1;
+        }
+      }
+      if (count === 0) {
+        setCsvErr('No approved-creator usernames found in that range.');
+        setCsvBusy(false);
+        return;
+      }
+      const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `approved-creators-${csvFrom}-to-${csvTo}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setCsvBusy(false);
+      setCsvModal(false);
+    } catch (e: any) {
+      setCsvErr(e?.message ?? 'Failed to export');
+      setCsvBusy(false);
+    }
+  };
+
   return (
     <>
       {/* Header: month + monthly goal */}
@@ -287,56 +425,68 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
         <Card.Body>
           <Row className="g-3 align-items-end">
             <Col md={3}>
-              <Form.Label className="small">Month</Form.Label>
+              <Form.Label className="small fw-semibold">Month</Form.Label>
               <Form.Control type="month" value={month} onChange={e => setMonth(e.target.value)} />
             </Col>
             <Col md={3}>
-              <Form.Label className="small">Total monthly goal</Form.Label>
-              <NumberInput disabled={!canEdit} value={periodGoal} onChange={n => setPeriodGoal(n)} />
+              <Form.Label className="small fw-semibold">Total monthly goal</Form.Label>
+              <NumberInput
+                disabled={!canEdit || !goalEditing}
+                value={periodGoal}
+                onChange={n => setPeriodGoal(n)}
+                placeholder="e.g. 200"
+              />
             </Col>
-            <Col md={3}>
-              <Button className="w-100" disabled={!canEdit || savingGoal} onClick={saveGoal}>
-                {savingGoal ? 'Saving…' : 'Save monthly goal'}
-              </Button>
+            <Col md={3} className="d-flex gap-2">
+              {goalEditing ? (
+                <>
+                  <Button className="flex-grow-1" disabled={!canEdit || savingGoal} onClick={saveGoal}>
+                    {savingGoal ? 'Saving…' : (hasGoalRow ? 'Update goal' : 'Save goal')}
+                  </Button>
+                  {hasGoalRow && (
+                    <Button variant="outline-secondary" disabled={savingGoal}
+                      onClick={() => { setGoalEditing(false); load(); }}>
+                      Cancel
+                    </Button>
+                  )}
+                </>
+              ) : (
+                <Button variant="outline-secondary" className="flex-grow-1"
+                  disabled={!canEdit} onClick={() => setGoalEditing(true)}>
+                  <i className="bi bi-pencil me-1" /> Edit goal
+                </Button>
+              )}
             </Col>
             <Col md={3} className="text-md-end">
               <div className="text-muted small">{monthLabel(month)}</div>
             </Col>
           </Row>
 
+          {/* Beautiful, colorful KPI tiles */}
           <Row className="g-3 mt-1">
-            <Col md={6}>
-              <div className="p-3 rounded h-100" style={{ background: '#f8fafc', border: '1px solid #e5e7eb' }}>
-                <div className="ac-label">Goal progress</div>
-                <div className="d-flex align-items-baseline gap-2 mt-1">
-                  <span className="fs-4 fw-bold">{totalApproved.toLocaleString()}</span>
-                  <span className="text-muted">/ {periodGoal.toLocaleString()}</span>
-                  <Badge bg={goalPct >= 100 ? 'success' : goalPct >= 75 ? 'warning' : 'secondary'} className="ms-1">
-                    {goalPct}%
-                  </Badge>
-                </div>
-                <ProgressBar
-                  now={goalPct}
-                  variant={goalPct >= 100 ? 'success' : 'warning'}
-                  className="mt-2"
-                  style={{ height: 8 }}
-                />
-              </div>
+            <Col xl={6}>
+              <GoalProgressTile approved={totalApproved} goal={periodGoal} pct={goalPct} />
             </Col>
-            <Col md={2}><MiniStat label="New videos" value={totalNewVideos.toLocaleString()} /></Col>
-            <Col md={2}><MiniStat label="Avg SPS" value={avgSps == null ? '—' : avgSps.toFixed(2)} /></Col>
-            <Col md={2}><MiniStat label="Days entered" value={`${daysWithEntry} / ${allDates.length}`} /></Col>
+            <Col md={4} xl={2}>
+              <KpiTile icon="bi-camera-video" color="#0d6efd" label="New Videos" value={totalNewVideos.toLocaleString()} />
+            </Col>
+            <Col md={4} xl={2}>
+              <KpiTile icon="bi-graph-up" color="#20c997" label="Avg SPS" value={avgSps == null ? '—' : avgSps.toFixed(2)} />
+            </Col>
+            <Col md={4} xl={2}>
+              <KpiTile icon="bi-calendar-check" color="#6610f2" label="Days Entered" value={`${daysWithEntry} / ${allDates.length}`} />
+            </Col>
           </Row>
         </Card.Body>
       </Card>
 
-      {/* Tracked products */}
+      {/* Tracked Products */}
       <Card className="mb-3">
         <Card.Header className="d-flex justify-content-between align-items-center">
-          <span className="fw-semibold">Tracked products</span>
+          <span className="fw-semibold" style={SECTION_HEADING_STYLE}>Tracked Products</span>
           {canEdit && (
             <Button size="sm" onClick={openAddProduct}>
-              <i className="bi bi-plus-lg me-1" /> Add product
+              <i className="bi bi-plus-lg me-1" /> Add Product
             </Button>
           )}
         </Card.Header>
@@ -354,7 +504,7 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
                     <th>Product ID</th>
                     <th className="text-end">Goal</th>
                     <th className="text-end">Approved</th>
-                    <th>Progress</th>
+                    <th style={{ minWidth: 200 }}>Progress</th>
                     {canEdit && <th style={{ width: 100 }}></th>}
                   </tr>
                 </thead>
@@ -372,10 +522,10 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
                         </td>
                         <td className="text-end">{goal > 0 ? goal : <span className="text-muted">—</span>}</td>
                         <td className="text-end">{approved}</td>
-                        <td style={{ minWidth: 160 }}>
+                        <td>
                           {pct == null
                             ? <span className="text-muted small">No goal</span>
-                            : <ProgressBar now={pct} variant={pct >= 100 ? 'success' : 'warning'} style={{ height: 6 }} />}
+                            : <ProductProgressBar pct={pct} approved={approved} goal={goal} />}
                         </td>
                         {canEdit && (
                           <td className="text-end">
@@ -396,11 +546,16 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
         </Card.Body>
       </Card>
 
-      {/* Daily entries */}
+      {/* Daily Entries */}
       <Card className="mb-3">
-        <Card.Header>
-          <span className="fw-semibold">Daily entries</span>
-          <small className="text-muted ms-2">Click any day to add or edit its sample approvals.</small>
+        <Card.Header className="d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <div>
+            <span className="fw-semibold" style={SECTION_HEADING_STYLE}>Daily Entries</span>
+            <small className="text-muted ms-2">Click any day to add or edit. Weekends only collect videos.</small>
+          </div>
+          <Button size="sm" variant="outline-secondary" onClick={() => setCsvModal(true)}>
+            <i className="bi bi-download me-1" /> Export Approved Creators CSV
+          </Button>
         </Card.Header>
         <Card.Body className="p-0">
           <Table size="sm" responsive hover className="align-middle mb-0">
@@ -412,7 +567,7 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
                 <th className="text-end">SPS</th>
                 <th>Reason of drop</th>
                 <th>Top products</th>
-                {canEdit && <th style={{ width: 60 }}></th>}
+                {canEdit && <th style={{ width: 110 }}></th>}
               </tr>
             </thead>
             <tbody>
@@ -425,27 +580,61 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
                   .slice(0, 3)
                   .map(([pid, c]) => ({ name: products.find(p => p.id === pid)?.name ?? '?', c })) : [];
                 const dayNum = Number(date.slice(8));
+                const weekend = isWeekend(date);
+                const hasUsers = !!(d?.dump_usernames && d.dump_usernames.trim().length > 0);
                 return (
-                  <tr key={date} role={canEdit ? 'button' : undefined}
-                      onClick={() => canEdit && openEditDay(date)}
-                      style={{ cursor: canEdit ? 'pointer' : 'default' }}>
-                    <td className="fw-semibold">
+                  <tr key={date}
+                      style={{
+                        cursor: canEdit ? 'pointer' : 'default',
+                        backgroundColor: weekend ? 'rgba(232, 134, 46, 0.05)' : undefined,
+                      }}>
+                    <td className="fw-semibold" onClick={() => canEdit && openEditDay(date)}>
                       {new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', weekday: 'short' })}
                       <small className="text-muted ms-2">W{weekIndexFor(dayNum)}</small>
+                      {weekend && <Badge bg="warning" text="dark" className="ms-2"><i className="bi bi-cup-hot me-1" />Weekend</Badge>}
                     </td>
-                    <td className="text-end">{d?.new_videos ?? <span className="text-muted">—</span>}</td>
-                    <td className="text-end fw-semibold">{total > 0 ? total : <span className="text-muted fw-normal">—</span>}</td>
-                    <td className="text-end">{d?.daily_sps != null ? d.daily_sps.toFixed(1) : <span className="text-muted">—</span>}</td>
-                    <td className="small text-muted" style={{ maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {d?.reason_of_drop || ''}
+                    <td className="text-end" onClick={() => canEdit && openEditDay(date)}>
+                      {d?.new_videos ?? <span className="text-muted">—</span>}
                     </td>
-                    <td className="small text-muted">
-                      {top.length === 0 ? '' : top.map(t => `${t.name}: ${t.c}`).join(', ')}
-                      {d && d.others_count > 0 && (top.length > 0 ? `, Others: ${d.others_count}` : `Others: ${d.others_count}`)}
-                    </td>
+                    {weekend ? (
+                      <td colSpan={4} className="text-center text-muted fst-italic small"
+                          style={{ backgroundColor: 'rgba(0,0,0,0.02)' }}
+                          onClick={() => canEdit && openEditDay(date)}>
+                        No approvals on weekends
+                      </td>
+                    ) : (
+                      <>
+                        <td className="text-end fw-semibold" onClick={() => canEdit && openEditDay(date)}>
+                          {total > 0 ? total : <span className="text-muted fw-normal">—</span>}
+                        </td>
+                        <td className="text-end" onClick={() => canEdit && openEditDay(date)}>
+                          {d?.daily_sps != null ? d.daily_sps.toFixed(1) : <span className="text-muted">—</span>}
+                        </td>
+                        <td className="small text-muted"
+                            style={{ maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                            onClick={() => canEdit && openEditDay(date)}>
+                          {d?.reason_of_drop || ''}
+                        </td>
+                        <td className="small text-muted" onClick={() => canEdit && openEditDay(date)}>
+                          {top.length === 0 ? '' : top.map(t => `${t.name}: ${t.c}`).join(', ')}
+                          {d && d.others_count > 0 && (top.length > 0 ? `, Others: ${d.others_count}` : `Others: ${d.others_count}`)}
+                        </td>
+                      </>
+                    )}
                     {canEdit && (
                       <td className="text-end">
-                        <i className="bi bi-pencil text-muted" />
+                        {hasUsers && !weekend && (
+                          <Button size="sm" variant="link" className="p-0 me-2 text-secondary"
+                            onClick={(e) => { e.stopPropagation(); setUsersModal(d!); }}
+                            title="View approved creator usernames">
+                            <i className="bi bi-eye" />
+                          </Button>
+                        )}
+                        <Button size="sm" variant="link" className="p-0 text-primary"
+                          onClick={(e) => { e.stopPropagation(); openEditDay(date); }}
+                          title="Edit">
+                          <i className="bi bi-pencil" />
+                        </Button>
                       </td>
                     )}
                   </tr>
@@ -456,18 +645,19 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
         </Card.Body>
       </Card>
 
-      {/* Weekly GMV + charts row */}
+      {/* Weekly Summary + charts row */}
       <Row className="g-3 mb-3">
         <Col lg={5}>
           <Card className="h-100">
-            <Card.Header><span className="fw-semibold">Weekly summary</span></Card.Header>
+            <Card.Header><span className="fw-semibold" style={SECTION_HEADING_STYLE}>Weekly Summary</span></Card.Header>
             <Card.Body className="p-0">
               <Table size="sm" className="align-middle mb-0">
                 <thead>
                   <tr>
                     <th>Week</th>
                     <th className="text-end">Avg SPS</th>
-                    <th className="text-end">Affiliate GMV</th>
+                    <th>Affiliate GMV</th>
+                    {canEdit && <th style={{ width: 70 }}></th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -476,22 +666,34 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
                     if (!range) return null;
                     const sps = weeklyAvgSps(idx);
                     const gmvRow = weekly.find(w => w.week_index === idx);
+                    const hasValue = gmvRow?.affiliate_gmv != null;
+                    const editingThis = editingWeeks.has(idx);
                     return (
                       <tr key={idx}>
                         <td className="fw-semibold">{range}</td>
                         <td className="text-end">{sps == null ? <span className="text-muted">—</span> : sps.toFixed(2)}</td>
-                        <td className="text-end" style={{ minWidth: 160 }}>
-                          {canEdit ? (
-                            <NumberInput
-                              step="0.01"
-                              value={gmvRow?.affiliate_gmv ?? 0}
-                              onChange={n => setWeeklyGmv(idx, n)}
-                              size="sm"
+                        <td style={{ minWidth: 180 }}>
+                          {editingThis ? (
+                            <WeeklyGmvEditor
+                              initial={gmvRow?.affiliate_gmv ?? 0}
+                              onSave={(v) => saveWeeklyGmv(idx, v)}
+                              onCancel={() => toggleWeekEdit(idx, false)}
                             />
                           ) : (
-                            gmvRow?.affiliate_gmv != null ? `$${gmvRow.affiliate_gmv.toLocaleString()}` : '—'
+                            hasValue
+                              ? <span className="fw-semibold">${gmvRow!.affiliate_gmv!.toLocaleString()}</span>
+                              : <span className="text-muted small fst-italic">Not set</span>
                           )}
                         </td>
+                        {canEdit && (
+                          <td className="text-end">
+                            {!editingThis && (
+                              <Button size="sm" variant="outline-secondary" onClick={() => toggleWeekEdit(idx, true)}>
+                                <i className="bi bi-pencil" />
+                              </Button>
+                            )}
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -503,35 +705,131 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
 
         <Col lg={7}>
           <Card className="h-100">
-            <Card.Header><span className="fw-semibold">Daily approvals</span></Card.Header>
+            <Card.Header><span className="fw-semibold" style={SECTION_HEADING_STYLE}>Daily Approvals</span></Card.Header>
             <Card.Body style={{ height: 280 }}>
               <ResponsiveContainer>
-                <LineChart data={dailyChartData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="label" />
-                  <YAxis />
-                  <Tooltip />
-                  <Line type="monotone" dataKey="Approved" stroke="#e8862e" strokeWidth={3} dot={{ r: 3 }} />
-                </LineChart>
+                <AreaChart data={dailyChartData} margin={{ top: 10, right: 20, left: -8, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="approvedAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%"  stopColor="#e8862e" stopOpacity={0.55} />
+                      <stop offset="100%" stopColor="#e8862e" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#eef0f3" vertical={false} />
+                  <XAxis dataKey="label" stroke="#6c757d" fontSize={11} tickLine={false} axisLine={false} />
+                  <YAxis stroke="#6c757d" fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} />
+                  <Tooltip
+                    cursor={{ stroke: '#e8862e', strokeWidth: 1, strokeOpacity: 0.3 }}
+                    contentStyle={{ borderRadius: 8, border: '1px solid #e9ecef' }}
+                  />
+                  <Area
+                    type="monotone" dataKey="Approved" stroke="#e8862e" strokeWidth={2.5}
+                    fill="url(#approvedAreaGrad)" dot={{ r: 3, fill: '#e8862e' }}
+                    activeDot={{ r: 5, fill: '#fff', stroke: '#e8862e', strokeWidth: 2 }}
+                  />
+                </AreaChart>
               </ResponsiveContainer>
             </Card.Body>
           </Card>
         </Col>
       </Row>
 
+      {/* Weekly Approvals chart */}
+      <Card className="mb-3">
+        <Card.Header><span className="fw-semibold" style={SECTION_HEADING_STYLE}>Weekly Approvals</span></Card.Header>
+        <Card.Body style={{ height: 280 }}>
+          <ResponsiveContainer>
+            <BarChart data={weeklyChartData} margin={{ top: 20, right: 20, left: -8, bottom: 0 }}>
+              <defs>
+                <linearGradient id="weeklyBarGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%"  stopColor="#e8862e" stopOpacity={1} />
+                  <stop offset="100%" stopColor="#f5a960" stopOpacity={0.8} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#eef0f3" vertical={false} />
+              <XAxis dataKey="label" stroke="#6c757d" fontSize={12} tickLine={false} axisLine={false} />
+              <YAxis stroke="#6c757d" fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} />
+              <Tooltip contentStyle={{ borderRadius: 8, border: '1px solid #e9ecef' }} />
+              <Bar dataKey="Approved" fill="url(#weeklyBarGrad)" radius={[8, 8, 0, 0]} barSize={48}>
+                <LabelList dataKey="Approved" position="top" fill="#2c2c2c" fontSize={12} fontWeight={600} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </Card.Body>
+      </Card>
+
+      {/* Previous month daily approvals (for comparison) */}
+      <Card className="mb-3">
+        <Card.Header className="d-flex align-items-center justify-content-between flex-wrap gap-2">
+          <span className="fw-semibold" style={SECTION_HEADING_STYLE}>
+            Previous Month Daily Approvals
+          </span>
+          <span className="text-muted small">
+            {monthLabel(prevMonthYyyymm)} · {prevTotalApproved.toLocaleString()} total approved
+          </span>
+        </Card.Header>
+        <Card.Body style={{ height: 280 }}>
+          {prevTotalApproved === 0 ? (
+            <div className="d-flex align-items-center justify-content-center h-100 text-muted">
+              <div className="text-center">
+                <i className="bi bi-calendar-x fs-1 d-block mb-2 opacity-50" />
+                No approvals recorded for {monthLabel(prevMonthYyyymm)}.
+              </div>
+            </div>
+          ) : (
+            <ResponsiveContainer>
+              <AreaChart data={prevDailyChartData} margin={{ top: 10, right: 20, left: -8, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="prevApprovedAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%"  stopColor="#6c7796" stopOpacity={0.5} />
+                    <stop offset="100%" stopColor="#6c7796" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#eef0f3" vertical={false} />
+                <XAxis dataKey="label" stroke="#6c757d" fontSize={11} tickLine={false} axisLine={false} />
+                <YAxis stroke="#6c757d" fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} />
+                <Tooltip
+                  cursor={{ stroke: '#6c7796', strokeWidth: 1, strokeOpacity: 0.3 }}
+                  contentStyle={{ borderRadius: 8, border: '1px solid #e9ecef' }}
+                />
+                <Area
+                  type="monotone" dataKey="Approved" stroke="#6c7796" strokeWidth={2.5}
+                  fill="url(#prevApprovedAreaGrad)" dot={{ r: 3, fill: '#6c7796' }}
+                  activeDot={{ r: 5, fill: '#fff', stroke: '#6c7796', strokeWidth: 2 }}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+        </Card.Body>
+      </Card>
+
       {productChartData.length > 0 && (
         <Card className="mb-3">
-          <Card.Header><span className="fw-semibold">Per-product totals vs goal</span></Card.Header>
-          <Card.Body style={{ height: 320 }}>
+          <Card.Header><span className="fw-semibold" style={SECTION_HEADING_STYLE}>Per-Product Totals vs Goal</span></Card.Header>
+          <Card.Body style={{ height: 340 }}>
             <ResponsiveContainer>
-              <BarChart data={productChartData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="name" interval={0} angle={-20} textAnchor="end" height={80} />
-                <YAxis />
-                <Tooltip />
+              <BarChart data={productChartData} margin={{ top: 20, right: 20, left: -8, bottom: 60 }}>
+                <defs>
+                  <linearGradient id="prodApprovedGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%"  stopColor="#e8862e" stopOpacity={1} />
+                    <stop offset="100%" stopColor="#f5a960" stopOpacity={0.7} />
+                  </linearGradient>
+                  <linearGradient id="prodGoalGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%"  stopColor="#6c7796" stopOpacity={0.95} />
+                    <stop offset="100%" stopColor="#9aa4c2" stopOpacity={0.7} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#eef0f3" vertical={false} />
+                <XAxis dataKey="name" interval={0} angle={-15} textAnchor="end" stroke="#6c757d" fontSize={11} tickLine={false} />
+                <YAxis stroke="#6c757d" fontSize={11} tickLine={false} axisLine={false} />
+                <Tooltip contentStyle={{ borderRadius: 8, border: '1px solid #e9ecef' }} />
                 <Legend />
-                <Bar dataKey="Approved" fill="#e8862e" radius={[6,6,0,0]} />
-                <Bar dataKey="Goal"     fill="#6e6e80" radius={[6,6,0,0]} />
+                <Bar dataKey="Approved" fill="url(#prodApprovedGrad)" radius={[8, 8, 0, 0]} barSize={28}>
+                  <LabelList dataKey="Approved" position="top" fill="#2c2c2c" fontSize={11} fontWeight={600} />
+                </Bar>
+                <Bar dataKey="Goal" fill="url(#prodGoalGrad)" radius={[8, 8, 0, 0]} barSize={28}>
+                  <LabelList dataKey="Goal" position="top" fill="#2c2c2c" fontSize={11} fontWeight={600} />
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </Card.Body>
@@ -540,7 +838,7 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
 
       {dropReasons.length > 0 && (
         <Card className="mb-3">
-          <Card.Header><span className="fw-semibold">Drop reasons this month</span></Card.Header>
+          <Card.Header><span className="fw-semibold" style={SECTION_HEADING_STYLE}>Drop Reasons This Month</span></Card.Header>
           <Card.Body>
             <ul className="mb-0 small">
               {dropReasons.map(d => (
@@ -558,116 +856,152 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
       <Modal show={productModal} onHide={() => setProductModal(false)} centered>
         <Form onSubmit={submitProduct}>
           <Modal.Header closeButton>
-            <Modal.Title>{productEditing ? 'Edit product' : 'Add product'}</Modal.Title>
+            <Modal.Title>{productEditing ? 'Edit Product' : 'Add Product'}</Modal.Title>
           </Modal.Header>
           <Modal.Body>
             <Row className="g-3">
               <Col md={12}>
-                <Form.Label className="small">Product name *</Form.Label>
+                <Form.Label className="small fw-semibold">Product name *</Form.Label>
                 <Form.Control required value={productDraft.name}
+                  placeholder="e.g. Wireless Headphones"
                   onChange={e => setProductDraft({ ...productDraft, name: e.target.value })} />
               </Col>
               <Col md={12}>
-                <Form.Label className="small">External product ID <span className="text-muted">(optional)</span></Form.Label>
+                <Form.Label className="small fw-semibold">External product ID <span className="text-muted">(optional)</span></Form.Label>
                 <Form.Control value={productDraft.external_product_id ?? ''}
                   onChange={e => setProductDraft({ ...productDraft, external_product_id: e.target.value })}
                   placeholder="e.g. 1729401883758137709"
                   style={{ fontFamily: 'monospace' }} />
               </Col>
-              <Col md={6}>
-                <Form.Label className="small">Monthly goal <span className="text-muted">(blank = no goal)</span></Form.Label>
+              <Col md={12}>
+                <Form.Label className="small fw-semibold">Monthly goal <span className="text-muted">(blank = no goal)</span></Form.Label>
                 <NumberInput value={productDraft.monthly_goal ?? 0}
+                  placeholder="e.g. 75"
                   onChange={n => setProductDraft({ ...productDraft, monthly_goal: n || null })} />
-              </Col>
-              <Col md={6}>
-                <Form.Label className="small">Sort order</Form.Label>
-                <NumberInput value={productDraft.sort_order}
-                  onChange={n => setProductDraft({ ...productDraft, sort_order: n })} />
               </Col>
             </Row>
           </Modal.Body>
           <Modal.Footer>
             <Button variant="secondary" onClick={() => setProductModal(false)}>Cancel</Button>
             <Button type="submit" disabled={!productDraft.name.trim()}>
-              {productEditing ? 'Save' : 'Add product'}
+              {productEditing ? 'Save' : 'Add Product'}
             </Button>
           </Modal.Footer>
         </Form>
       </Modal>
 
       {/* Daily entry modal */}
-      <Modal show={dayModal} onHide={() => setDayModal(false)} centered size="lg">
+      <Modal show={dayModal} onHide={() => setDayModal(false)} centered size="lg" scrollable>
         {dayDraft && (
           <Form onSubmit={submitDay}>
             <Modal.Header closeButton>
-              <Modal.Title>
+              <Modal.Title className="d-flex align-items-center gap-2 flex-wrap">
                 {new Date(dayDraft.entry_date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                {dayIsWeekend && (
+                  <Badge bg="warning" text="dark"><i className="bi bi-cup-hot me-1" />Weekend</Badge>
+                )}
               </Modal.Title>
             </Modal.Header>
             <Modal.Body>
+              {dayIsWeekend && (
+                <Alert variant="warning" className="py-2 small">
+                  <i className="bi bi-info-circle me-1" />
+                  Sample approvals don't happen on weekends — only new-video counts are collected.
+                </Alert>
+              )}
+
               <Row className="g-3">
-                <Col md={4}>
-                  <Form.Label className="small">New videos</Form.Label>
+                <Col md={dayIsWeekend ? 12 : 4}>
+                  <Form.Label className="small fw-semibold">New videos</Form.Label>
                   <NumberInput value={dayDraft.new_videos ?? 0}
+                    placeholder="e.g. 8"
                     onChange={n => setDayDraft({ ...dayDraft, new_videos: n })} />
                 </Col>
-                <Col md={4}>
-                  <Form.Label className="small">Daily SPS</Form.Label>
-                  <NumberInput step="0.1" value={dayDraft.daily_sps ?? 0}
-                    onChange={n => setDayDraft({ ...dayDraft, daily_sps: n })} />
-                </Col>
-                <Col md={4}>
-                  <Form.Label className="small">Total approved <small className="text-muted">(auto)</small></Form.Label>
-                  <Form.Control disabled value={dayDraftTotal} />
-                </Col>
+                {!dayIsWeekend && (
+                  <>
+                    <Col md={4}>
+                      <Form.Label className="small fw-semibold">Daily SPS</Form.Label>
+                      <NumberInput step="0.1" value={dayDraft.daily_sps ?? 0}
+                        placeholder="e.g. 4.2"
+                        onChange={n => setDayDraft({ ...dayDraft, daily_sps: n })} />
+                    </Col>
+                    <Col md={4}>
+                      <Form.Label className="small fw-semibold">Total approved <small className="text-muted">(auto)</small></Form.Label>
+                      <Form.Control disabled value={dayDraftTotal} />
+                    </Col>
+                  </>
+                )}
+
                 <Col md={12}>
-                  <Form.Label className="small">Reason of drop <span className="text-muted">(optional)</span></Form.Label>
+                  <Form.Label className="small fw-semibold">Reason of drop <span className="text-muted">(optional)</span></Form.Label>
                   <Form.Control as="textarea" rows={2}
+                    placeholder="e.g. Held off approvals — waiting for new product launch"
                     value={dayDraft.reason_of_drop ?? ''}
                     onChange={e => setDayDraft({ ...dayDraft, reason_of_drop: e.target.value })} />
                 </Col>
 
-                <Col md={12}>
-                  <hr className="my-2" />
-                  <div className="fw-semibold mb-2">Per-product approvals</div>
-                  {products.length === 0 ? (
-                    <Alert variant="info" className="mb-0 py-2">
-                      Add tracked products above to record per-product breakdowns.
-                    </Alert>
-                  ) : (
-                    <Row className="g-2">
-                      {products.map(p => (
-                        <Col md={6} key={p.id}>
-                          <div className="d-flex align-items-center gap-2">
-                            <div className="flex-grow-1 small text-truncate" title={p.name}>{p.name}</div>
-                            <div style={{ width: 110 }}>
-                              <NumberInput
-                                size="sm"
-                                value={dayDraft.product_counts[p.id] ?? 0}
-                                onChange={n => setDayDraft({
-                                  ...dayDraft,
-                                  product_counts: { ...dayDraft.product_counts, [p.id]: n },
-                                })}
-                              />
+                {!dayIsWeekend && (
+                  <>
+                    <Col md={12}>
+                      <hr className="my-2" />
+                      <div className="fw-semibold mb-2">Per-product approvals</div>
+                      {products.length === 0 ? (
+                        <Alert variant="info" className="mb-0 py-2">
+                          Add tracked products above to record per-product breakdowns.
+                        </Alert>
+                      ) : (
+                        <Row className="g-2">
+                          {products.map(p => (
+                            <Col md={6} key={p.id}>
+                              <div className="d-flex align-items-center gap-2">
+                                <div className="flex-grow-1 small text-truncate" title={p.name}>{p.name}</div>
+                                <div style={{ width: 110 }}>
+                                  <NumberInput
+                                    size="sm"
+                                    placeholder="0"
+                                    value={dayDraft.product_counts[p.id] ?? 0}
+                                    onChange={n => setDayDraft({
+                                      ...dayDraft,
+                                      product_counts: { ...dayDraft.product_counts, [p.id]: n },
+                                    })}
+                                  />
+                                </div>
+                              </div>
+                            </Col>
+                          ))}
+                          <Col md={6}>
+                            <div className="d-flex align-items-center gap-2">
+                              <div className="flex-grow-1 small fst-italic">Others</div>
+                              <div style={{ width: 110 }}>
+                                <NumberInput
+                                  size="sm"
+                                  placeholder="0"
+                                  value={dayDraft.others_count ?? 0}
+                                  onChange={n => setDayDraft({ ...dayDraft, others_count: n })}
+                                />
+                              </div>
                             </div>
-                          </div>
-                        </Col>
-                      ))}
-                      <Col md={6}>
-                        <div className="d-flex align-items-center gap-2">
-                          <div className="flex-grow-1 small fst-italic">Others</div>
-                          <div style={{ width: 110 }}>
-                            <NumberInput
-                              size="sm"
-                              value={dayDraft.others_count ?? 0}
-                              onChange={n => setDayDraft({ ...dayDraft, others_count: n })}
-                            />
-                          </div>
-                        </div>
-                      </Col>
-                    </Row>
-                  )}
-                </Col>
+                          </Col>
+                        </Row>
+                      )}
+                    </Col>
+
+                    <Col md={12}>
+                      <hr className="my-2" />
+                      <Form.Label className="small fw-semibold">Dump usernames</Form.Label>
+                      <Form.Control as="textarea" rows={5}
+                        value={dayDraft.dump_usernames ?? ''}
+                        placeholder="Please paste the usernames of approved creators (one per line)
+e.g.
+@creator1
+@creator2"
+                        onChange={e => setDayDraft({ ...dayDraft, dump_usernames: e.target.value })} />
+                      <Form.Text className="text-muted">
+                        These usernames will be available in the CSV export and via the eye icon next to this day.
+                      </Form.Text>
+                    </Col>
+                  </>
+                )}
               </Row>
             </Modal.Body>
             <Modal.Footer className="d-flex justify-content-between">
@@ -686,15 +1020,166 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
           </Form>
         )}
       </Modal>
+
+      {/* Approved creators usernames view modal */}
+      <Modal show={!!usersModal} onHide={() => setUsersModal(null)} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>
+            <i className="bi bi-people me-2" />
+            Approved Creators — {usersModal && new Date(usersModal.entry_date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {usersModal?.dump_usernames
+            ? (
+              <pre className="mb-0 p-3 rounded border bg-light" style={{ whiteSpace: 'pre-wrap', maxHeight: 360, overflowY: 'auto' }}>
+                {usersModal.dump_usernames}
+              </pre>
+            )
+            : <p className="text-muted mb-0">No usernames recorded.</p>}
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setUsersModal(null)}>Close</Button>
+        </Modal.Footer>
+      </Modal>
+
+      {/* CSV export modal */}
+      <Modal show={csvModal} onHide={() => setCsvModal(false)} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>Export Approved Creators</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {csvErr && <Alert variant="danger" className="py-2">{csvErr}</Alert>}
+          <p className="text-muted small">
+            Choose a date range. We'll export one row per username with the date it was approved.
+          </p>
+          <Row className="g-3">
+            <Col md={6}>
+              <Form.Label className="small fw-semibold">From</Form.Label>
+              <Form.Control type="date" value={csvFrom} onChange={e => setCsvFrom(e.target.value)} />
+            </Col>
+            <Col md={6}>
+              <Form.Label className="small fw-semibold">To</Form.Label>
+              <Form.Control type="date" value={csvTo} onChange={e => setCsvTo(e.target.value)} />
+            </Col>
+          </Row>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setCsvModal(false)} disabled={csvBusy}>Cancel</Button>
+          <Button onClick={downloadCsv} disabled={csvBusy || !csvFrom || !csvTo || csvFrom > csvTo}>
+            {csvBusy ? 'Preparing…' : (<><i className="bi bi-download me-1" /> Download CSV</>)}
+          </Button>
+        </Modal.Footer>
+      </Modal>
     </>
   );
 }
 
-function MiniStat({ label, value }: { label: string; value: string }) {
+// =====================================================================
+// Goal progress tile — large, gradient bar, percentage centered
+// =====================================================================
+
+function GoalProgressTile({ approved, goal, pct }: { approved: number; goal: number; pct: number }) {
+  const color = pct >= 100 ? '#198754' : pct >= 75 ? '#e8862e' : pct >= 40 ? '#fd7e14' : '#dc3545';
   return (
-    <div className="p-3 rounded h-100" style={{ background: '#f8fafc', border: '1px solid #e5e7eb' }}>
-      <div className="ac-label">{label}</div>
-      <div className="fs-5 fw-semibold mt-1">{value}</div>
+    <div className="p-3 rounded h-100 position-relative" style={{
+      background: 'linear-gradient(135deg, #fff5e6 0%, #ffe8c4 100%)',
+      border: '1px solid #f5d8a8',
+    }}>
+      <div className="d-flex align-items-center justify-content-between">
+        <div>
+          <div className="small fw-semibold text-muted">Goal Progress</div>
+          <div className="d-flex align-items-baseline gap-2 mt-1">
+            <span className="fw-bold" style={{ fontSize: '1.7rem', color: '#2c2c2c' }}>{approved.toLocaleString()}</span>
+            <span className="text-muted">/ {goal.toLocaleString() || '—'}</span>
+          </div>
+        </div>
+        <div
+          className="d-flex align-items-center justify-content-center rounded-circle text-white fw-bold"
+          style={{
+            width: 56, height: 56, fontSize: '1rem',
+            background: `conic-gradient(${color} ${pct}%, rgba(0,0,0,0.06) ${pct}% 100%)`,
+          }}
+        >
+          <div className="bg-white rounded-circle d-flex align-items-center justify-content-center"
+            style={{ width: 44, height: 44, color }}>
+            {pct}%
+          </div>
+        </div>
+      </div>
+      <div className="mt-3 position-relative" style={{ height: 14, borderRadius: 999, background: 'rgba(0,0,0,0.06)', overflow: 'hidden' }}>
+        <div style={{
+          width: `${pct}%`, height: '100%',
+          background: `linear-gradient(90deg, ${color} 0%, ${color}cc 100%)`,
+          transition: 'width .4s ease',
+        }} />
+      </div>
+    </div>
+  );
+}
+
+// =====================================================================
+// Generic colored KPI tile (icon + label + value)
+// =====================================================================
+
+function KpiTile({ icon, color, label, value }: { icon: string; color: string; label: string; value: string }) {
+  return (
+    <div className="p-3 rounded h-100 d-flex align-items-center gap-3" style={{
+      background: `linear-gradient(135deg, ${color}1a 0%, ${color}0d 100%)`,
+      border: `1px solid ${color}33`,
+    }}>
+      <div
+        className="d-flex align-items-center justify-content-center rounded text-white flex-shrink-0"
+        style={{ width: 44, height: 44, backgroundColor: color }}
+      >
+        <i className={`bi ${icon}`} style={{ fontSize: '1.2rem' }} />
+      </div>
+      <div className="min-w-0">
+        <div className="small fw-semibold text-muted text-truncate">{label}</div>
+        <div className="fw-bold" style={{ fontSize: '1.15rem', color: '#2c2c2c' }}>{value}</div>
+      </div>
+    </div>
+  );
+}
+
+// =====================================================================
+// Beautiful per-product progress bar (used in the products table)
+// =====================================================================
+
+function ProductProgressBar({ pct, approved, goal }: { pct: number; approved: number; goal: number }) {
+  const color = pct >= 100 ? '#198754' : pct >= 75 ? '#e8862e' : pct >= 40 ? '#fd7e14' : '#dc3545';
+  return (
+    <div className="d-flex align-items-center gap-2">
+      <div className="position-relative flex-grow-1"
+        style={{ height: 14, borderRadius: 999, background: 'rgba(0,0,0,0.06)', overflow: 'hidden', minWidth: 120 }}>
+        <div style={{
+          width: `${pct}%`, height: '100%',
+          background: `linear-gradient(90deg, ${color} 0%, ${color}cc 100%)`,
+          transition: 'width .3s ease',
+        }} />
+      </div>
+      <span className="small fw-semibold" style={{ color, minWidth: 38, textAlign: 'right' }}>{pct}%</span>
+      <span className="small text-muted" style={{ minWidth: 50 }}>{approved}/{goal}</span>
+    </div>
+  );
+}
+
+// =====================================================================
+// Inline editor for the weekly Affiliate GMV column
+// (own state so the user can type freely without firing the server)
+// =====================================================================
+
+function WeeklyGmvEditor({ initial, onSave, onCancel }: { initial: number; onSave: (v: number) => void; onCancel: () => void }) {
+  const [val, setVal] = useState(initial);
+  return (
+    <div className="d-flex gap-1">
+      <NumberInput size="sm" step="0.01" value={val} placeholder="e.g. 1250" onChange={setVal} />
+      <Button size="sm" variant="primary" onClick={() => onSave(val)} title="Save">
+        <i className="bi bi-check2" />
+      </Button>
+      <Button size="sm" variant="outline-secondary" onClick={onCancel} title="Cancel">
+        <i className="bi bi-x" />
+      </Button>
     </div>
   );
 }

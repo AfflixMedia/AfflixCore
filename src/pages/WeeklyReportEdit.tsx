@@ -11,8 +11,18 @@ import {
 import SectionComments, { Comment, CommentSection } from '../components/SectionComments';
 import { useAuth } from '../auth/AuthContext';
 import RichTextEditor from '../components/RichTextEditor';
-import { CustomSectionInline, CustomSectionDefModal, customSectionsAt, newSection } from '../components/CustomSectionEditor';
-import { CustomSection, StandardSectionId } from '../lib/reportSchema';
+import { CustomSectionInline, CustomSectionDefModal, customSectionsAt, newSection, AddSectionMenu } from '../components/CustomSectionEditor';
+import { CustomSection, CustomField, CustomFieldType, StandardSectionId } from '../lib/reportSchema';
+
+// Standard-section render order — used to place a new custom section
+// "above" / "below" a clicked section.
+const WEEKLY_STD_ORDER: StandardSectionId[] = [
+  'start', 'overall', 'top_creators', 'top_videos', 'video_performance',
+  'gmv_max', 'product_highlights', 'shop_health', 'insights',
+];
+type ClickedSection =
+  | { type: 'standard'; id: StandardSectionId }
+  | { type: 'custom'; section: CustomSection };
 import NumberInput from '../components/NumberInput';
 import { parseReportPdf } from '../lib/importReport';
 
@@ -31,7 +41,7 @@ interface ReportRow {
   id: string; brand_id: string; week_start: string; week_end: string;
   week_number: number; status: string; content: any;
 }
-interface Brand { id: string; name: string; client: string; }
+interface Brand { id: string; name: string; client: string; client_status: string | null; }
 
 export default function WeeklyReportEdit() {
   const { id } = useParams<{ id: string }>();
@@ -47,6 +57,7 @@ export default function WeeklyReportEdit() {
 
   const [showComments, setShowComments] = useState(false);
   const [priorReports, setPriorReports] = useState<ReportRow[]>([]);
+  const [pcPrograms, setPcPrograms] = useState<{ id: string; name: string | null; ended_at: string | null }[]>([]);
   const [selectedPriorId, setSelectedPriorId] = useState<string>('');
   const [priorComments, setPriorComments] = useState<Comment[]>([]);
   const [loadingComments, setLoadingComments] = useState(false);
@@ -54,6 +65,8 @@ export default function WeeklyReportEdit() {
   const [csModalOpen, setCsModalOpen] = useState(false);
   const [csDraft, setCsDraft] = useState<CustomSection>(newSection());
   const [csIsEdit, setCsIsEdit] = useState(false);
+  // Where to splice a newly-added section (null = append at end).
+  const [csTargetIndex, setCsTargetIndex] = useState<number | null>(null);
 
   const [feedbackSection, setFeedbackSection] = useState<CommentSection | null>(null);
 
@@ -129,8 +142,12 @@ export default function WeeklyReportEdit() {
       const r = data as ReportRow;
       setReport(r);
       setC(normalizeContent(r.content));
-      const { data: bd } = await supabase.from('brands').select('id,name,client').eq('id', r.brand_id).single();
+      const { data: bd } = await supabase.from('brands').select('id,name,client,client_status').eq('id', r.brand_id).single();
       setBrand(bd as Brand);
+      const { data: pcp } = await supabase.from('paid_creator_programs')
+        .select('id,name,ended_at').eq('brand_id', r.brand_id)
+        .order('launch_date', { ascending: false });
+      setPcPrograms((pcp as any[]) ?? []);
       const { data: priors } = await supabase.from('weekly_reports')
         .select('*').eq('brand_id', r.brand_id).lt('week_start', r.week_start)
         .order('week_start', { ascending: false }).limit(12);
@@ -169,6 +186,31 @@ export default function WeeklyReportEdit() {
     };
     setC(prev => ({ ...prev, custom_sections: [...prev.custom_sections, cs] }));
     setPresetMsg(`Added "${cs.name}" from preset.`);
+  };
+
+  // Add a saved preset as a NEW section, placed right below the clicked one.
+  const addPresetSectionBelow = (clicked: CustomSection, preset: PresetRow) => {
+    const p = preset.payload ?? {};
+    const cs: CustomSection = {
+      ...newSection(clicked.insert_after),
+      name: String(p.name ?? preset.name ?? ''),
+      description: String(p.description ?? ''),
+      is_repeater: !!p.is_repeater,
+      fields: Array.isArray(p.fields) ? p.fields.map((f: any): CustomField => ({
+        id: crypto.randomUUID(),
+        label: String(f.label ?? ''),
+        type: (['text', 'number', 'textarea', 'richtext', 'date', 'url', 'select'].includes(f.type) ? f.type : 'text') as CustomFieldType,
+        options: Array.isArray(f.options) ? f.options : undefined,
+      })) : [],
+      rows: [],
+    };
+    setC(prev => {
+      const arr = [...prev.custom_sections];
+      const idx = arr.findIndex(x => x.id === clicked.id);
+      arr.splice(idx === -1 ? arr.length : idx + 1, 0, cs);
+      return { ...prev, custom_sections: arr };
+    });
+    setPresetMsg(`Added "${cs.name || preset.name}" from preset below the section.`);
   };
 
   const saveSectionAsPreset = async (s: CustomSection) => {
@@ -318,6 +360,10 @@ export default function WeeklyReportEdit() {
 
   const submit = async (e: FormEvent, status: 'draft' | 'submitted') => {
     e.preventDefault();
+    if (brand?.client_status === 'closed') {
+      setErr(`${brand.name} is inactive — reactivate the brand before saving changes.`);
+      return;
+    }
     setSaving(true); setErr(null);
     // If the report is asking the client for approval, the client has to be
     // able to see it via the share link, so auto-enable per-report sharing.
@@ -362,6 +408,8 @@ export default function WeeklyReportEdit() {
   if (loading) return <div className="text-center py-5"><Spinner animation="border" /></div>;
   if (err && !report) return <Alert variant="danger">{err}</Alert>;
   if (!report || !brand) return null;
+
+  const brandInactive = brand.client_status === 'closed';
 
   const sectionFeedbackCount = (section: CommentSection) =>
     comments.filter(c => c.section === section).length;
@@ -424,18 +472,57 @@ export default function WeeklyReportEdit() {
       <div className="d-flex align-items-center gap-2">
         {extra}
         {sectionId && <StdPresetMenu sectionId={sectionId} />}
+        <AddSectionMenu onPick={(pl) => openAddSectionRelative({ type: 'standard', id: section as StandardSectionId }, pl)} />
         <FeedbackButton section={section} />
       </div>
     </div>
   );
 
   // Custom section management
-  const openAddCustom = () => { setCsDraft(newSection('insights')); setCsIsEdit(false); setCsModalOpen(true); };
+  const openAddCustom = () => {
+    setCsDraft(newSection('insights')); setCsIsEdit(false); setCsTargetIndex(null); setCsModalOpen(true);
+  };
   const openEditCustom = (s: CustomSection) => { setCsDraft({ ...s, fields: s.fields.map(f => ({ ...f })) }); setCsIsEdit(true); setCsModalOpen(true); };
+
+  // Open the add-section modal positioned above/below a clicked section.
+  const openAddSectionRelative = (clicked: ClickedSection, placement: 'above' | 'below') => {
+    const cs = c.custom_sections;
+    let anchor: StandardSectionId;
+    let index: number;
+    if (clicked.type === 'custom') {
+      anchor = clicked.section.insert_after;
+      const idx = cs.findIndex(s => s.id === clicked.section.id);
+      index = placement === 'below' ? idx + 1 : Math.max(0, idx);
+    } else if (placement === 'below') {
+      anchor = clicked.id;
+      const firstIdx = cs.findIndex(s => s.insert_after === anchor);
+      index = firstIdx === -1 ? cs.length : firstIdx;
+    } else {
+      const stdIdx = WEEKLY_STD_ORDER.indexOf(clicked.id);
+      anchor = stdIdx > 0 ? WEEKLY_STD_ORDER[stdIdx - 1] : 'start';
+      let lastIdx = -1;
+      cs.forEach((s, i) => { if (s.insert_after === anchor) lastIdx = i; });
+      index = lastIdx === -1 ? cs.length : lastIdx + 1;
+    }
+    setCsDraft(newSection(anchor));
+    setCsIsEdit(false);
+    setCsTargetIndex(index);
+    setCsModalOpen(true);
+  };
+
   const saveCustomDef = (s: CustomSection) => {
-    if (csIsEdit) setC({ ...c, custom_sections: c.custom_sections.map(x => x.id === s.id ? s : x) });
-    else setC({ ...c, custom_sections: [...c.custom_sections, s] });
+    if (csIsEdit) {
+      setC(prev => ({ ...prev, custom_sections: prev.custom_sections.map(x => x.id === s.id ? s : x) }));
+    } else {
+      setC(prev => {
+        const arr = [...prev.custom_sections];
+        if (csTargetIndex != null) arr.splice(Math.min(csTargetIndex, arr.length), 0, s);
+        else arr.push(s);
+        return { ...prev, custom_sections: arr };
+      });
+    }
     setCsModalOpen(false);
+    setCsTargetIndex(null);
   };
   const removeCustom = (id: string) => {
     if (!confirm('Delete this custom section and all its data?')) return;
@@ -450,11 +537,28 @@ export default function WeeklyReportEdit() {
       <CustomSectionInline
         key={s.id}
         section={s}
+        paidCollabPrograms={pcPrograms}
         onChange={(patch) => updateCustomData(s.id, patch)}
         onEditDef={() => openEditCustom(s)}
         onRemove={() => removeCustom(s.id)}
+        onAddSection={(placement) => openAddSectionRelative({ type: 'custom', section: s }, placement)}
         headerExtra={
           <>
+            <Dropdown>
+              <Dropdown.Toggle size="sm" variant="outline-info" title="Add a saved preset as a new section">
+                <i className="bi bi-bookmark" />
+              </Dropdown.Toggle>
+              <Dropdown.Menu align="end" style={{ minWidth: 240 }}>
+                <Dropdown.Header>Add preset as a new section below</Dropdown.Header>
+                {customPresets.length === 0 ? (
+                  <Dropdown.ItemText className="text-muted small">No saved presets yet.</Dropdown.ItemText>
+                ) : customPresets.map(p => (
+                  <Dropdown.Item key={p.id} as="button" onClick={() => addPresetSectionBelow(s, p)}>
+                    <i className="bi bi-box-arrow-in-down me-2" />{p.name}
+                  </Dropdown.Item>
+                ))}
+              </Dropdown.Menu>
+            </Dropdown>
             <Button size="sm" variant="outline-info" disabled={presetSavingId === s.id}
               onClick={() => saveSectionAsPreset(s)} title="Save this section as a reusable preset">
               <i className="bi bi-bookmark-plus" />
@@ -475,6 +579,15 @@ export default function WeeklyReportEdit() {
 
   return (
     <div className="ac-themed">
+      {brandInactive && (
+        <Alert variant="warning" className="d-flex align-items-center gap-2">
+          <i className="bi bi-lock-fill" />
+          <div>
+            <strong>{brand.name} is inactive.</strong>{' '}
+            You can review the data but Save is disabled until the brand is reactivated.
+          </div>
+        </Alert>
+      )}
       <div className="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
         <div>
           <h2 className="mb-1">{brand.name} <small className="text-muted fs-6">— {brand.client}</small></h2>
@@ -535,8 +648,8 @@ export default function WeeklyReportEdit() {
             <i className="bi bi-plus-square me-1" /> Add custom section
           </Button>
           <Button variant="outline-secondary" onClick={() => nav('/reporting/weekly')}>Cancel</Button>
-          <Button variant="outline-primary" disabled={saving} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
-          <Button variant="primary" disabled={saving} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
+          <Button variant="outline-primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
+          <Button variant="primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
         </div>
       </div>
 
@@ -590,7 +703,7 @@ export default function WeeklyReportEdit() {
       {renderCustomAt('overall')}
 
       {/* Top Creators */}
-      <Section title="Top Creators" onAdd={() => addRow('top_creators', emptyTopCreator)} empty={c.top_creators.length === 0} headerRight={<><StdPresetMenu sectionId="top_creators" /><FeedbackButton section="top_creators" /></>}>
+      <Section title="Top Creators" onAdd={() => addRow('top_creators', emptyTopCreator)} empty={c.top_creators.length === 0} onAddSection={(pl) => openAddSectionRelative({ type: 'standard', id: 'top_creators' }, pl)} headerRight={<><StdPresetMenu sectionId="top_creators" /><FeedbackButton section="top_creators" /></>}>
         <Table size="sm" className="mb-0 align-middle">
           <thead><tr>
             <th>Creator Name</th>
@@ -615,7 +728,7 @@ export default function WeeklyReportEdit() {
       {renderCustomAt('top_creators')}
 
       {/* Top Videos — current week only; last week auto-shown in dashboard */}
-      <Section title="Top Videos (this week)" onAdd={() => addRow('top_videos', emptyTopVideo)} empty={c.top_videos.length === 0} headerRight={<><StdPresetMenu sectionId="top_videos" /><FeedbackButton section="top_videos" /></>}>
+      <Section title="Top Videos (this week)" onAdd={() => addRow('top_videos', emptyTopVideo)} empty={c.top_videos.length === 0} onAddSection={(pl) => openAddSectionRelative({ type: 'standard', id: 'top_videos' }, pl)} headerRight={<><StdPresetMenu sectionId="top_videos" /><FeedbackButton section="top_videos" /></>}>
         <Table size="sm" className="mb-0 align-middle">
           <thead><tr>
             <th>Creator Name</th>
@@ -702,14 +815,15 @@ export default function WeeklyReportEdit() {
       {renderCustomAt('gmv_max')}
 
       {/* Product Highlights */}
-      <Section title="Product Highlights" onAdd={() => addRow('product_highlights', emptyProduct)} empty={c.product_highlights.length === 0} headerRight={<><StdPresetMenu sectionId="product_highlights" /><FeedbackButton section="product_highlights" /></>}>
+      <Section title="Product Highlights" onAdd={() => addRow('product_highlights', emptyProduct)} empty={c.product_highlights.length === 0} onAddSection={(pl) => openAddSectionRelative({ type: 'standard', id: 'product_highlights' }, pl)} headerRight={<><StdPresetMenu sectionId="product_highlights" /><FeedbackButton section="product_highlights" /></>}>
         <Table size="sm" className="mb-0 align-middle">
           <thead><tr>
             <th>Product Name</th>
             <th style={{width:180}}>Product ID</th>
-            <th style={{width:110}}>Total Units</th>
-            <th style={{width:120}}>Affiliate Units</th>
+            <th style={{width:120}}>Total Units Sold</th>
+            <th style={{width:130}}>Affiliate Units Sold</th>
             <th style={{width:140}}>Total GMV ($)</th>
+            <th style={{width:140}}>Affiliate GMV ($)</th>
             <th style={{width:120}}>Videos Posted</th>
             <th style={{width:140}}>Listing Quality</th>
             <th style={{width:50}}></th>
@@ -722,6 +836,7 @@ export default function WeeklyReportEdit() {
                 <td><NumberInput size="sm" value={r.total_units_sold} onChange={n => updRow('product_highlights', i, { total_units_sold: n })} /></td>
                 <td><NumberInput size="sm" value={r.affiliate_units_sold} onChange={n => updRow('product_highlights', i, { affiliate_units_sold: n })} /></td>
                 <td><NumberInput size="sm" step="0.01" value={r.total_gmv} onChange={n => updRow('product_highlights', i, { total_gmv: n })} /></td>
+                <td><NumberInput size="sm" step="0.01" value={r.affiliate_gmv} onChange={n => updRow('product_highlights', i, { affiliate_gmv: n })} /></td>
                 <td><NumberInput size="sm" value={r.videos_posted} onChange={n => updRow('product_highlights', i, { videos_posted: n })} /></td>
                 <td>
                   <Form.Select size="sm" value={r.listing_quality}
@@ -748,15 +863,19 @@ export default function WeeklyReportEdit() {
           <Row className="g-3">
             <Col md={3}><Form.Label className="small">Shop Performance Score (out of 5)</Form.Label>
               <Form.Control type="number" step="0.1" min={0} max={5} placeholder="Not yet assigned"
+                onWheel={e => (e.currentTarget as HTMLInputElement).blur()}
                 value={sh.shop_performance_score ?? ''} onChange={e => setSH('shop_performance_score', numOrNull(e.target.value))} /></Col>
             <Col md={3}><Form.Label className="small">Product Satisfaction (out of 5)</Form.Label>
               <Form.Control type="number" step="0.1" min={0} max={5} placeholder="Not yet rated"
+                onWheel={e => (e.currentTarget as HTMLInputElement).blur()}
                 value={sh.product_satisfaction_rating ?? ''} onChange={e => setSH('product_satisfaction_rating', numOrNull(e.target.value))} /></Col>
             <Col md={3}><Form.Label className="small">Fulfillment & Logistics (out of 5)</Form.Label>
               <Form.Control type="number" step="0.1" min={0} max={5} placeholder="Not yet rated"
+                onWheel={e => (e.currentTarget as HTMLInputElement).blur()}
                 value={sh.fulfillment_rating ?? ''} onChange={e => setSH('fulfillment_rating', numOrNull(e.target.value))} /></Col>
             <Col md={3}><Form.Label className="small">Customer Service (out of 5)</Form.Label>
               <Form.Control type="number" step="0.1" min={0} max={5} placeholder="Not yet rated"
+                onWheel={e => (e.currentTarget as HTMLInputElement).blur()}
                 value={sh.customer_service_rating ?? ''} onChange={e => setSH('customer_service_rating', numOrNull(e.target.value))} /></Col>
 
             <Col md={3}><Form.Label className="small">Dispatching on time?</Form.Label>
@@ -805,7 +924,7 @@ export default function WeeklyReportEdit() {
         <Card.Header className="d-flex justify-content-between align-items-center">
           <span className="fw-semibold">
             <i className="bi bi-shield-check me-2 text-warning" />
-            Approval Needed
+            Approval Needed / Action Items
           </span>
           <Form.Check
             type="switch"
@@ -826,6 +945,27 @@ export default function WeeklyReportEdit() {
               placeholder="Describe what needs the client's approval this week…"
               minHeight={180}
             />
+            <div className="mt-3 row g-2 align-items-end">
+              <Form.Group className="col-md-5">
+                <Form.Label className="small fw-semibold">Auto-popup expires at <span className="text-muted">(optional)</span></Form.Label>
+                <Form.Control
+                  type="datetime-local"
+                  value={c.approval?.expires_at ? c.approval.expires_at.slice(0, 16) : ''}
+                  onChange={e => setC(prev => ({
+                    ...prev,
+                    approval: {
+                      ...prev.approval,
+                      expires_at: e.target.value ? new Date(e.target.value).toISOString() : null,
+                    },
+                  }))}
+                />
+              </Form.Group>
+              <div className="col-md-7">
+                <Form.Text className="text-muted">
+                  After this date the popup stops auto-opening — but the client can still view the Approval Needed / Action Items card, submit a decision, and reply in the thread. Leave empty for no expiry.
+                </Form.Text>
+              </div>
+            </div>
           </Card.Body>
         )}
       </Card>
@@ -836,6 +976,7 @@ export default function WeeklyReportEdit() {
         initial={csDraft}
         onSave={saveCustomDef}
         isEdit={csIsEdit}
+        hidePosition={!csIsEdit && csTargetIndex != null}
         key={csDraft.id}
       />
 
@@ -863,8 +1004,8 @@ export default function WeeklyReportEdit() {
 
       <div className="d-flex justify-content-end gap-2 mb-4">
         <Button variant="outline-secondary" onClick={() => nav('/reporting/weekly')}>Cancel</Button>
-        <Button variant="outline-primary" disabled={saving} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
-        <Button variant="primary" disabled={saving} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
+        <Button variant="outline-primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
+        <Button variant="primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
       </div>
 
       <Modal show={showComments} onHide={() => setShowComments(false)} centered size="lg" scrollable>
@@ -928,13 +1069,17 @@ export default function WeeklyReportEdit() {
   );
 }
 
-function Section({ title, onAdd, empty, children, headerRight }: { title: string; onAdd: () => void; empty: boolean; children: React.ReactNode; headerRight?: React.ReactNode }) {
+function Section({ title, onAdd, empty, children, headerRight, onAddSection }: {
+  title: string; onAdd: () => void; empty: boolean; children: React.ReactNode;
+  headerRight?: React.ReactNode; onAddSection?: (placement: 'above' | 'below') => void;
+}) {
   return (
     <Card className="mb-4">
       <Card.Header className="d-flex justify-content-between align-items-center">
         <span className="fw-semibold">{title}</span>
         <div className="d-flex align-items-center gap-2">
           <Button size="sm" onClick={onAdd}><i className="bi bi-plus-lg me-1" />Add row</Button>
+          {onAddSection && <AddSectionMenu onPick={onAddSection} />}
           {headerRight}
         </div>
       </Card.Header>

@@ -8,7 +8,8 @@ import DOMPurify from 'dompurify';
 import { MonthlyReportContent, ThisLast } from '../lib/monthlyReportSchema';
 import { Comment, CommentSection } from './SectionComments';
 import SectionComments from './SectionComments';
-import { CommentsConfig, ApprovalDecisionView, ApprovalActionConfig } from './ReportDashboard';
+import { CommentsConfig, ApprovalDecisionView, ApprovalActionConfig, CustomSectionView } from './ReportDashboard';
+import { PaidCollabPrefetch } from './paidcollab/PaidCollabSectionBlock';
 
 export interface MonthlyTrendPoint {
   label: string;
@@ -32,14 +33,14 @@ const SECTION_LABELS: Record<string, string> = {
   paid_collabs: 'Paid Collabs',
   ai_content: 'AI Content',
   strategy_moving_forward: 'Strategy Moving Forward',
-  approval: 'Approval Needed',
+  approval: 'Approval Needed / Action Items',
 };
 
 export default function MonthlyReportDashboard({
   c, p, hasPrev, trendData,
   monthLabel, brandName, clientName,
   commentsConfig, approvalAction, approvalDecisions,
-  openSectionOnLoad, highlightCommentId,
+  openSectionOnLoad, highlightCommentId, paidCollab, onOpenPaidCollabProgram,
 }: {
   c: MonthlyReportContent;
   p?: MonthlyReportContent | null;
@@ -53,6 +54,8 @@ export default function MonthlyReportDashboard({
   approvalDecisions?: ApprovalDecisionView[];
   openSectionOnLoad?: CommentSection | null;
   highlightCommentId?: string | null;
+  paidCollab?: PaidCollabPrefetch;
+  onOpenPaidCollabProgram?: (programId: string) => void;
 }) {
   const [feedbackSection, setFeedbackSection] = useState<CommentSection | null>(null);
 
@@ -81,6 +84,28 @@ export default function MonthlyReportDashboard({
     if (!commentsConfig) return null;
     const n = sectionFeedbackCount(section);
     if (commentsConfig.mode === 'authed' && n === 0 && section !== 'approval') return null;
+    // On the public client view, the approval thread is the primary follow-up
+    // channel (decisions are locked) — high-contrast button on the themed header.
+    const isPublicApproval = commentsConfig.mode === 'public' && section === 'approval';
+    if (isPublicApproval) {
+      return (
+        <Button
+          size="sm"
+          className="ms-2 fw-semibold"
+          style={{
+            backgroundColor: '#fff',
+            color: '#0d6efd',
+            borderColor: '#0d6efd',
+            whiteSpace: 'nowrap',
+          }}
+          onClick={() => setFeedbackSection(section)}
+          title="Open the conversation thread"
+        >
+          <i className="bi bi-chat-left-text me-1" />
+          {n > 0 ? `Thread (${n})` : 'Open thread'}
+        </Button>
+      );
+    }
     return (
       <Button size="sm" variant="outline-primary" className="ms-2 d-inline-flex align-items-center gap-1"
         onClick={() => setFeedbackSection(section)}
@@ -99,29 +124,14 @@ export default function MonthlyReportDashboard({
 
   const renderCustomAt = (anchor: string) =>
     c.custom_sections.filter(s => (s.insert_after as unknown as string) === anchor).map(s => (
-      <Card className="mb-3" data-section={`cs:${s.id}`} key={s.id}>
-        <Card.Header className="d-flex justify-content-between align-items-center">
-          <span className="fw-semibold">{s.name || 'Custom Section'}</span>
-          <FeedbackIcon section={`cs:${s.id}`} />
-        </Card.Header>
-        <Card.Body>
-          {s.description && <p className="text-muted small mb-3">{s.description}</p>}
-          {s.is_repeater ? (
-            s.rows.length === 0 ? <p className="text-muted small mb-0">No data</p> : (
-              <Table size="sm" responsive className="mb-0 align-middle">
-                <thead><tr>{s.fields.map(f => <th key={f.id}>{f.label}</th>)}</tr></thead>
-                <tbody>
-                  {s.rows.map((row, i) => (
-                    <tr key={i}>{s.fields.map(f => <td key={f.id}>{String(row[f.id] ?? '—')}</td>)}</tr>
-                  ))}
-                </tbody>
-              </Table>
-            )
-          ) : (
-            <div className="ac-rte-view" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(s.body) }} />
-          )}
-        </Card.Body>
-      </Card>
+      <CustomSectionView
+        key={s.id}
+        section={s}
+        prevSection={(p?.custom_sections ?? []).find(ps => ps.id === s.id) ?? null}
+        paidCollab={paidCollab}
+        onOpenPaidCollabProgram={onOpenPaidCollabProgram}
+        feedbackSlot={<FeedbackIcon section={`cs:${s.id}`} />}
+      />
     ));
 
   // ---------------------------------------------------------------------------
@@ -404,12 +414,25 @@ export default function MonthlyReportDashboard({
       })}
 
       {/* Approval Needed */}
-      {c.approval?.enabled && (
+      {c.approval?.enabled && (() => {
+        const expiresAt = c.approval?.expires_at ?? null;
+        const expired = !!expiresAt && new Date(expiresAt).getTime() < Date.now();
+        return (
         <Card className="mb-3" data-section="approval" border="warning">
           <Card.Header className="d-flex justify-content-between align-items-center" style={{ background: '#fff8ef' }}>
             <span className="fw-semibold">
               <i className="bi bi-shield-check me-2 text-warning" />
-              Approval Needed
+              Approval Needed / Action Items
+              {expired && (
+                <Badge bg="secondary" className="ms-2">
+                  <i className="bi bi-clock-history me-1" />Auto-popup expired
+                </Badge>
+              )}
+              {!expired && expiresAt && (
+                <Badge bg="light" text="dark" className="ms-2 border">
+                  <i className="bi bi-clock me-1" />Popup until {new Date(expiresAt).toLocaleDateString()}
+                </Badge>
+              )}
             </span>
             <div className="d-flex align-items-center gap-2">
               {approvalDecisions && approvalDecisions.length > 0 && (
@@ -421,6 +444,13 @@ export default function MonthlyReportDashboard({
             </div>
           </Card.Header>
           <Card.Body>
+            {expired && (
+              <Alert variant="light" className="border small py-2 mb-3">
+                <i className="bi bi-info-circle me-1" />
+                The auto-popup window closed on <strong>{new Date(expiresAt!).toLocaleString()}</strong>.
+                You can still submit a decision or reply in the thread below.
+              </Alert>
+            )}
             <div className="ac-rte-view ac-approval-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(c.approval.content) }} />
             {commentsConfig?.mode === 'public' && approvalAction && <PublicApprovalForm action={approvalAction} />}
             {commentsConfig?.mode === 'authed' && (
@@ -452,7 +482,8 @@ export default function MonthlyReportDashboard({
             )}
           </Card.Body>
         </Card>
-      )}
+        );
+      })()}
     </div>
   );
 }
@@ -597,18 +628,47 @@ function PublicApprovalForm({ action }: { action: ApprovalActionConfig }) {
     }
   };
 
+  // Once a decision is recorded it's immutable — show a read-only summary and
+  // point the client at the conversation thread for follow-up.
+  if (myDecision) {
+    return (
+      <div className="mt-4 pt-3 border-top">
+        <Alert variant={myDecision.decision === 'approved' ? 'success' : 'warning'} className="py-2 mb-3">
+          <div className="d-flex align-items-center gap-2 mb-1">
+            <i className={`bi ${myDecision.decision === 'approved' ? 'bi-check-circle-fill' : 'bi-arrow-repeat'}`} />
+            <strong>
+              You {myDecision.decision === 'approved' ? 'approved' : 'requested changes on'} this report.
+            </strong>
+          </div>
+          <div className="small">
+            Recorded by <strong>{myDecision.decided_by_name}</strong> on{' '}
+            {new Date(myDecision.decided_at).toLocaleString()}.
+          </div>
+          {myDecision.comment && (
+            <blockquote className="mb-0 mt-2 small ps-2"
+                        style={{ borderLeft: '3px solid rgba(0,0,0,.15)', whiteSpace: 'pre-wrap' }}>
+              {myDecision.comment}
+            </blockquote>
+          )}
+        </Alert>
+        <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 small">
+          <div className="text-muted">
+            <i className="bi bi-lock-fill me-1" />
+            Your decision is locked. The conversation stays open — use the <strong>thread</strong> above to follow up.
+          </div>
+          <div className="text-muted">
+            <i className="bi bi-arrow-up-right me-1" />
+            Tap <strong>Open thread</strong> at the top of this card.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mt-4 pt-3 border-top">
-      {myDecision && (
-        <Alert variant={myDecision.decision === 'approved' ? 'success' : 'warning'} className="py-2 small mb-3">
-          <strong>Your previous decision:</strong>{' '}
-          {myDecision.decision === 'approved' ? 'Approved' : 'Changes requested'}
-          {' '}by {myDecision.decided_by_name} on {new Date(myDecision.decided_at).toLocaleDateString()}.
-          {myDecision.comment && <div className="mt-1 fst-italic">"{myDecision.comment}"</div>}
-        </Alert>
-      )}
       <div className="fw-semibold small text-uppercase text-muted mb-2" style={{ letterSpacing: '.5px' }}>
-        {myDecision ? 'Update your decision' : 'Submit your decision'}
+        Submit your decision
       </div>
       {err && <Alert variant="danger" className="py-2 small mb-2">{err}</Alert>}
       {justSaved && !err && <Alert variant="success" className="py-2 small mb-2">Saved. Thank you.</Alert>}
@@ -626,11 +686,12 @@ function PublicApprovalForm({ action }: { action: ApprovalActionConfig }) {
           <i className="bi bi-arrow-repeat me-1" /> Request changes
         </Button>
       </div>
-      <Form.Control as="textarea" rows={2} placeholder="Comment (optional)"
+      <Form.Control as="textarea" rows={2}
+        placeholder="Comment (optional) — your decision is final once submitted, but the thread stays open."
         value={comment} onChange={e => setComment(e.target.value)} disabled={submitting} />
       <div className="d-flex justify-content-end mt-2">
         <Button size="sm" onClick={submit} disabled={submitting || !choice || !name.trim()}>
-          {submitting ? 'Submitting…' : myDecision ? 'Update decision' : 'Submit decision'}
+          {submitting ? 'Submitting…' : 'Submit decision'}
         </Button>
       </div>
     </div>

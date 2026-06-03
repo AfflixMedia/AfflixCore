@@ -15,3 +15,6 @@ tsconfig.tsbuildinfo
 # Supabase CLI artefacts
 supabase/.temp/
 supabase/.branches/
+
+# direnv — per-project CLI tokens (never commit)
+.envrc

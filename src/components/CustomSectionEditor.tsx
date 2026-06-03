@@ -1,8 +1,15 @@
-import { useState, FormEvent } from 'react';
-import { Card, Form, Button, Row, Col, Table, Modal, Badge } from 'react-bootstrap';
+import { useEffect, useState, FormEvent } from 'react';
+import { Card, Form, Button, Row, Col, Table, Modal, Badge, Dropdown } from 'react-bootstrap';
 import { CustomField, CustomFieldType, CustomSection, StandardSectionId } from '../lib/reportSchema';
 import RichTextEditor from './RichTextEditor';
 import NumberInput from './NumberInput';
+import { supabase } from '../lib/supabase';
+import { addDays, fromISO } from '../lib/dates';
+
+function weekOptionLabel(start: string) {
+  const e = addDays(start, 6);
+  return `${fromISO(start).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${fromISO(e).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+}
 
 const TYPE_LABELS: Partial<Record<CustomFieldType, string>> = {
   text: 'Short text', number: 'Number', textarea: 'Long text',
@@ -21,17 +28,69 @@ export const POSITION_LABELS: Record<StandardSectionId, string> = {
   insights: 'After Insights (end)',
 };
 
+/* ------------------ "Add section above/below" menu ------------------ */
+
+export function AddSectionMenu({ onPick }: { onPick: (placement: 'above' | 'below') => void }) {
+  return (
+    <Dropdown>
+      <Dropdown.Toggle size="sm" variant="outline-success" title="Add a new section here">
+        <i className="bi bi-plus-lg" />
+      </Dropdown.Toggle>
+      <Dropdown.Menu align="end">
+        <Dropdown.Header>Add a new section</Dropdown.Header>
+        <Dropdown.Item as="button" onClick={() => onPick('above')}>
+          <i className="bi bi-arrow-up me-2" />Above this section
+        </Dropdown.Item>
+        <Dropdown.Item as="button" onClick={() => onPick('below')}>
+          <i className="bi bi-arrow-down me-2" />Below this section
+        </Dropdown.Item>
+      </Dropdown.Menu>
+    </Dropdown>
+  );
+}
+
 /* ------------------ Inline render of one custom section ------------------ */
 
+export interface PaidCollabProgramOption {
+  id: string;
+  name: string | null;
+  ended_at: string | null;
+}
+
 export function CustomSectionInline({
-  section, onChange, onEditDef, onRemove, headerExtra,
+  section, onChange, onEditDef, onRemove, headerExtra, paidCollabPrograms = [], onAddSection,
 }: {
   section: CustomSection;
   onChange: (patch: Partial<CustomSection>) => void;
   onEditDef: () => void;
   onRemove: () => void;
   headerExtra?: React.ReactNode;
+  paidCollabPrograms?: PaidCollabProgramOption[];
+  /** Add a brand-new section above/below this one. */
+  onAddSection?: (placement: 'above' | 'below') => void;
 }) {
+  // Available weeks for the linked paid collab program (for the week picker).
+  const [pcWeeks, setPcWeeks] = useState<string[]>([]);
+  const pcProgramId = section.is_paid_collab ? (section.paid_collab_program_id ?? null) : null;
+  useEffect(() => {
+    if (!pcProgramId) { setPcWeeks([]); return; }
+    let cancelled = false;
+    (async () => {
+      const { data: creators } = await supabase
+        .from('paid_creators').select('id').eq('program_id', pcProgramId);
+      const cids = (creators ?? []).map((x: any) => x.id);
+      if (cids.length === 0) { if (!cancelled) setPcWeeks([]); return; }
+      const { data: perf } = await supabase
+        .from('paid_creator_performance').select('period_start')
+        .in('creator_id', cids).eq('period_type', 'weekly');
+      const weeks = [...new Set((perf ?? []).map((r: any) =>
+        typeof r.period_start === 'string' ? r.period_start.slice(0, 10) : r.period_start))]
+        .sort().reverse();
+      if (!cancelled) setPcWeeks(weeks);
+    })();
+    return () => { cancelled = true; };
+  }, [pcProgramId]);
+
   const addRow = () => {
     const row: Record<string, any> = {};
     section.fields.forEach(f => { row[f.id] = f.type === 'number' ? 0 : ''; });
@@ -52,11 +111,18 @@ export function CustomSectionInline({
           {section.description && <div className="text-muted small">{section.description}</div>}
         </div>
         <div className="d-flex gap-2 align-items-center">
-          {section.is_repeater && (
+          {section.is_paid_collab && (
+            <Badge bg="primary"><i className="bi bi-people me-1" />Paid Collab</Badge>
+          )}
+          {section.compare_with_previous && !section.is_paid_collab && (
+            <Badge bg="info"><i className="bi bi-bar-chart-line me-1" />Compares to previous</Badge>
+          )}
+          {section.is_repeater && !section.is_paid_collab && (
             <Button size="sm" variant="outline-primary" onClick={addRow}>
               <i className="bi bi-plus-lg me-1" />Add row
             </Button>
           )}
+          {onAddSection && <AddSectionMenu onPick={onAddSection} />}
           <Button size="sm" variant="outline-secondary" onClick={onEditDef} title="Edit fields/position">
             <i className="bi bi-pencil" />
           </Button>
@@ -66,8 +132,52 @@ export function CustomSectionInline({
           {headerExtra}
         </div>
       </Card.Header>
-      <Card.Body className={section.is_repeater ? 'p-2' : undefined}>
-        {section.is_repeater ? (
+      <Card.Body className={section.is_repeater && !section.is_paid_collab ? 'p-2' : undefined}>
+        {section.is_paid_collab ? (
+          <>
+            <Row className="g-2">
+              <Col md={6}>
+                <Form.Label className="small fw-semibold">Linked paid collab program</Form.Label>
+                <Form.Select
+                  value={section.paid_collab_program_id ?? ''}
+                  onChange={e => onChange({ paid_collab_program_id: e.target.value || null, paid_collab_week: null })}
+                >
+                  <option value="">— Choose a program —</option>
+                  {paidCollabPrograms.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {(p.name || 'Untitled program') + (p.ended_at ? ' (ended)' : '')}
+                    </option>
+                  ))}
+                </Form.Select>
+              </Col>
+              <Col md={6}>
+                <Form.Label className="small fw-semibold">Week to show</Form.Label>
+                <Form.Select
+                  value={section.paid_collab_week ?? ''}
+                  disabled={!section.paid_collab_program_id}
+                  onChange={e => onChange({ paid_collab_week: e.target.value || null })}
+                >
+                  <option value="">Overall — all weeks</option>
+                  {pcWeeks.map(w => <option key={w} value={w}>{weekOptionLabel(w)}</option>)}
+                </Form.Select>
+              </Col>
+            </Row>
+            <Form.Text className="text-muted">
+              {paidCollabPrograms.length === 0
+                ? 'No paid collab programs exist for this brand yet.'
+                : 'Shows the program’s live data. Pick a week to scope GMV/items to that week, or leave on "Overall".'}
+            </Form.Text>
+            <div className="mt-3">
+              <Form.Label className="small fw-semibold">Notes</Form.Label>
+              <RichTextEditor
+                value={section.body ?? ''}
+                onChange={html => onChange({ body: html })}
+                placeholder="Add any notes or context about this paid collab data…"
+                minHeight={150}
+              />
+            </div>
+          </>
+        ) : section.is_repeater ? (
           section.rows.length === 0
             ? <p className="text-muted text-center py-3 mb-0 small">No rows yet — click "Add row".</p>
             : <Table size="sm" responsive className="align-middle mb-0">
@@ -144,13 +254,16 @@ function FieldInput({ field, value, onChange, size }: {
 /* ------------------ Definition modal (add / edit a section) ------------------ */
 
 export function CustomSectionDefModal({
-  show, onHide, initial, onSave, isEdit,
+  show, onHide, initial, onSave, isEdit, hidePosition,
 }: {
   show: boolean;
   onHide: () => void;
   initial: CustomSection;
   onSave: (s: CustomSection) => void;
   isEdit: boolean;
+  /** When true, the Position picker is hidden — the position is already
+   *  decided (e.g. adding via a section's "above/below" + menu). */
+  hidePosition?: boolean;
 }) {
   const [draft, setDraft] = useState<CustomSection>(initial);
   // Track the raw text of options per field so commas type freely
@@ -208,18 +321,64 @@ export function CustomSectionDefModal({
               <Form.Control value={draft.description ?? ''} onChange={e => setDraft({ ...draft, description: e.target.value })}
                 placeholder="Short helper text for this section" />
             </Col>
+            {!hidePosition && (
+              <Col md={12}>
+                <Form.Label className="small">Position</Form.Label>
+                <Form.Select value={draft.insert_after} onChange={e => setDraft({ ...draft, insert_after: e.target.value as StandardSectionId })}>
+                  {(Object.keys(POSITION_LABELS) as StandardSectionId[]).map(p => (
+                    <option key={p} value={p}>{POSITION_LABELS[p]}</option>
+                  ))}
+                </Form.Select>
+                <Form.Text className="text-muted">Where this section will appear in the form and the dashboard.</Form.Text>
+              </Col>
+            )}
             <Col md={12}>
-              <Form.Label className="small">Position</Form.Label>
-              <Form.Select value={draft.insert_after} onChange={e => setDraft({ ...draft, insert_after: e.target.value as StandardSectionId })}>
-                {(Object.keys(POSITION_LABELS) as StandardSectionId[]).map(p => (
-                  <option key={p} value={p}>{POSITION_LABELS[p]}</option>
-                ))}
-              </Form.Select>
-              <Form.Text className="text-muted">Where this section will appear in the form and the dashboard.</Form.Text>
+              <div className="border rounded p-3 bg-light">
+                <Form.Check
+                  type="switch"
+                  id="cs-paid-collab"
+                  checked={!!draft.is_paid_collab}
+                  onChange={e => setDraft({ ...draft, is_paid_collab: e.target.checked })}
+                  label={<span>
+                    <i className="bi bi-people me-1 text-primary" />
+                    <strong>Paid Collab section</strong>
+                    <span className="text-muted ms-2 small">
+                      — instead of a table/text, this section pulls live data from a paid collab program.
+                    </span>
+                  </span>}
+                />
+                <Form.Check
+                  type="switch"
+                  id="cs-compare-prev"
+                  className="mt-2"
+                  disabled={!draft.is_paid_collab && !draft.is_repeater}
+                  checked={!!draft.compare_with_previous}
+                  onChange={e => setDraft({ ...draft, compare_with_previous: e.target.checked })}
+                  label={<span>
+                    <i className="bi bi-bar-chart-line me-1 text-primary" />
+                    <strong>Compare with previous week/month</strong>
+                    <span className="text-muted ms-2 small">
+                      {draft.is_paid_collab
+                        ? '— the dashboard adds a week-over-week GMV trend for the linked program.'
+                        : !draft.is_repeater
+                          ? '— available for Table sections (and Paid Collab sections).'
+                          : '— the dashboard shows numeric columns vs the previous report with a comparison graph.'}
+                    </span>
+                  </span>}
+                />
+              </div>
             </Col>
           </Row>
 
-          {draft.is_repeater && (
+          {draft.is_paid_collab && (
+            <p className="text-muted small mt-3 mb-0">
+              <i className="bi bi-info-circle me-1" />
+              This is a Paid Collab section. When filling out the report you'll link a paid collab
+              program — the dashboard then shows that program's live creators, videos and performance.
+            </p>
+          )}
+
+          {draft.is_repeater && !draft.is_paid_collab && (
             <>
           <h6 className="mt-3">Columns</h6>
           <Table size="sm" className="align-middle">
@@ -260,7 +419,7 @@ export function CustomSectionDefModal({
           <Button size="sm" variant="outline-primary" onClick={addField}><i className="bi bi-plus-lg me-1" />Add column</Button>
             </>
           )}
-          {!draft.is_repeater && (
+          {!draft.is_repeater && !draft.is_paid_collab && (
             <p className="text-muted small mt-3 mb-0">
               <i className="bi bi-info-circle me-1" />
               This section will show as a heading + a rich-text body (similar to Insights). You can edit the body when filling out a report.
@@ -288,6 +447,10 @@ export function newSection(insertAfter: StandardSectionId = 'insights'): CustomS
     fields: [],
     rows: [],
     insert_after: insertAfter,
+    compare_with_previous: false,
+    is_paid_collab: false,
+    paid_collab_program_id: null,
+    paid_collab_week: null,
   };
 }
 

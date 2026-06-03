@@ -519,6 +519,7 @@ function parseProductHighlights(lines: Line[]): ProductRow[] {
         total_units_sold:     parseNum(totalCell.text) ?? 0,
         affiliate_units_sold: parseNum(affCell?.text) ?? 0,
         total_gmv:            parseNum(totalGmvCell?.text) ?? 0,
+        affiliate_gmv:        0,
         videos_posted:        parseNum(videosCell?.text) ?? 0,
         listing_quality:      parseListingQuality(qualityCell?.text),
         notes: '',

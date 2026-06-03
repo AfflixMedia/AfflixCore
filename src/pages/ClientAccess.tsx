@@ -11,7 +11,7 @@ type LinkMode = 'brand' | 'general';
 interface Link {
   id: string; token: string; label: string | null; client_id: string;
   brand_ids: string[]; resource_ids: string[];
-  include_reports: boolean; include_monthly_reports: boolean; include_resources: boolean;
+  include_reports: boolean; include_monthly_reports: boolean; include_resources: boolean; include_paid_collab: boolean;
   link_mode: LinkMode;
   created_at: string; revoked_at: string | null;
 }
@@ -33,6 +33,7 @@ export default function ClientAccess() {
   const [includeReports, setIncludeReports] = useState(true);
   const [includeMonthlyReports, setIncludeMonthlyReports] = useState(false);
   const [includeResources, setIncludeResources] = useState(true);
+  const [includePaidCollab, setIncludePaidCollab] = useState(false);
   const [linkMode, setLinkMode] = useState<LinkMode>('brand');
   const [pickedResourceIds, setPickedResourceIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
@@ -81,7 +82,7 @@ export default function ClientAccess() {
   const openAdd = () => {
     setEditingId(null);
     setClientId(''); setBrandIds([]); setLabel('');
-    setIncludeReports(true); setIncludeMonthlyReports(false); setIncludeResources(true);
+    setIncludeReports(true); setIncludeMonthlyReports(false); setIncludeResources(true); setIncludePaidCollab(false);
     setLinkMode('brand'); setPickedResourceIds([]);
     setErr(null); setShow(true);
   };
@@ -94,6 +95,7 @@ export default function ClientAccess() {
     setIncludeReports(l.include_reports !== false);
     setIncludeMonthlyReports(l.include_monthly_reports === true);
     setIncludeResources(l.include_resources !== false);
+    setIncludePaidCollab(l.include_paid_collab === true);
     setLinkMode((l.link_mode as LinkMode) ?? 'brand');
     setPickedResourceIds(l.resource_ids ?? []);
     setErr(null);
@@ -118,8 +120,8 @@ export default function ClientAccess() {
     setSaving(true); setErr(null);
     if (linkMode === 'brand') {
       if (brandIds.length === 0) { setErr('Pick at least one brand'); setSaving(false); return; }
-      if (!includeReports && !includeMonthlyReports && !includeResources) {
-        setErr('Pick at least one of Weekly Reports / Monthly Reports / Resources — otherwise the client sees nothing.');
+      if (!includeReports && !includeMonthlyReports && !includeResources && !includePaidCollab) {
+        setErr('Pick at least one of Weekly Reports / Monthly Reports / Resources / Paid Collab — otherwise the client sees nothing.');
         setSaving(false); return;
       }
     } else if (linkMode === 'general') {
@@ -138,6 +140,7 @@ export default function ClientAccess() {
           include_reports: includeReports,
           include_monthly_reports: includeMonthlyReports,
           include_resources: includeResources,
+          include_paid_collab: includePaidCollab,
         }
       : {
           label: label.trim() || null,
@@ -148,6 +151,7 @@ export default function ClientAccess() {
           include_reports: false,
           include_monthly_reports: false,
           include_resources: true,
+          include_paid_collab: false,
         };
     const res = editingId
       ? await supabase.from('report_share_links').update(payload).eq('id', editingId).select().single()
@@ -232,6 +236,7 @@ export default function ClientAccess() {
                               <>
                                 {l.include_reports !== false && <Badge bg="success" className="me-1"><i className="bi bi-bar-chart me-1" />Weekly</Badge>}
                                 {l.include_monthly_reports === true && <Badge bg="info" className="me-1"><i className="bi bi-calendar-month me-1" />Monthly</Badge>}
+                                {l.include_paid_collab === true && <Badge bg="warning" text="dark" className="me-1"><i className="bi bi-people me-1" />Paid Collab</Badge>}
                                 {l.include_resources !== false && <Badge bg="warning" text="dark" className="me-1"><i className="bi bi-folder2 me-1" />Resources</Badge>}
                               </>
                             )}
@@ -407,6 +412,14 @@ export default function ClientAccess() {
                         label={<><strong>Resources</strong> <span className="text-muted small">— links, docs, brand assets</span></>}
                         checked={includeResources}
                         onChange={e => setIncludeResources(e.target.checked)}
+                      />
+                      <Form.Check
+                        type="switch"
+                        className="mt-2"
+                        id="include-paid-collab"
+                        label={<><strong>Paid Collab</strong> <span className="text-muted small">— programs, creators, videos (view-only with comment thread)</span></>}
+                        checked={includePaidCollab}
+                        onChange={e => setIncludePaidCollab(e.target.checked)}
                       />
                     </div>
                     <Form.Text className="text-muted">

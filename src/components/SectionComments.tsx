@@ -41,7 +41,7 @@ const STANDARD_LABELS: Record<string, string> = {
   product_highlights: 'Product Highlights',
   shop_health: 'Shop Health',
   insights: 'Insights',
-  approval: 'Approval Needed',
+  approval: 'Approval Needed / Action Items',
 };
 
 const labelFor = (section: CommentSection, override?: string) =>

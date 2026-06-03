@@ -26,3 +26,13 @@ export function formatHuman(s: string): string {
 export function formatRange(start: string, end: string): string {
   return `${formatHuman(start)} – ${formatHuman(end)}`;
 }
+
+/** Compact week-range label for chart axes, e.g. "May 10–16" or "Apr 28 – May 4". */
+export function formatWeekShort(start: string, end: string): string {
+  const s = fromISO(start), e = fromISO(end);
+  const sMon = s.toLocaleDateString(undefined, { month: 'short' });
+  const eMon = e.toLocaleDateString(undefined, { month: 'short' });
+  return sMon === eMon
+    ? `${sMon} ${s.getDate()}–${e.getDate()}`
+    : `${sMon} ${s.getDate()} – ${eMon} ${e.getDate()}`;
+}

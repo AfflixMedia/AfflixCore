@@ -244,6 +244,10 @@ export function normalizeMonthlyContent(raw: any): MonthlyReportContent {
         insert_after: (VALID_MONTHLY_POS.includes(s.insert_after as MonthlyStandardSectionId)
           ? s.insert_after
           : 'strategy_moving_forward') as unknown as StandardSectionId,
+        compare_with_previous: !!s.compare_with_previous,
+        is_paid_collab: !!s.is_paid_collab,
+        paid_collab_program_id: s.paid_collab_program_id ?? null,
+        paid_collab_week: s.paid_collab_week ?? null,
       }))
     : [];
 
@@ -266,7 +270,11 @@ export function normalizeMonthlyContent(raw: any): MonthlyReportContent {
     ai_content:               richSec('ai_content'),
     strategy_moving_forward:  richSec('strategy_moving_forward'),
     custom_sections,
-    approval: { enabled: !!src.approval?.enabled, content: str(src.approval?.content) },
+    approval: {
+      enabled: !!src.approval?.enabled,
+      content: str(src.approval?.content),
+      expires_at: src.approval?.expires_at ?? null,
+    },
   };
 }
 
