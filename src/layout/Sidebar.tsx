@@ -100,6 +100,9 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
                 <NavLink to="/templates" title="Reporting Canvas">
                   <i className="bi bi-easel2" /> <span className="ac-nav-label">Reporting Canvas</span>
                 </NavLink>
+                <NavLink to="/testing-notifications" title="Testing Notification">
+                  <i className="bi bi-bell-slash" /> <span className="ac-nav-label">Testing Notification</span>
+                </NavLink>
               </>
             )}
           </>
