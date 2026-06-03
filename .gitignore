@@ -18,6 +18,9 @@ supabase/.branches/
 
 # direnv — per-project CLI tokens (never commit)
 .envrc
+<<<<<<< HEAD
 
 .vercel
 .env*
+=======
+>>>>>>> 7243fad59e8615861451200711c15026b9a162a3
