@@ -79,7 +79,7 @@ export default function Brands() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | ClientStatus>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | ClientStatus>('in_progress');
   const [clientFilter, setClientFilter] = useState('');
   const [scopeFilter, setScopeFilter] = useState<ScopeKey | ''>('');
 
@@ -239,17 +239,31 @@ export default function Brands() {
     <>
       <div className="ac-page-header">
         <div className="d-flex align-items-center gap-3 flex-wrap">
-          <h2>Brands</h2>
-          <span className="ac-stat-pill">
-            <span className="ac-stat-num">{brands.length}</span>
+          <h2 className="mb-0">Brands</h2>
+          <button
+            type="button"
+            className={`ac-stat-pill is-tab ${statusFilter === 'all' ? 'active' : ''}`}
+            onClick={() => setStatusFilter('all')}
+            title="Show all brands"
+          >
+            <span className="ac-stat-num" style={statusFilter === 'all' ? { color: '#fff' } : undefined}>{brands.length}</span>
             <span className="ac-stat-label">brand{brands.length === 1 ? '' : 's'}</span>
-          </span>
-          {STATUS_ORDER.map(s => counts[s] > 0 && (
-            <span className="ac-stat-pill" key={s}>
-              <span className="ac-stat-num" style={{ color: STATUS_META[s].color }}>{counts[s]}</span>
-              <span className="ac-stat-label">{STATUS_LABEL[s].toLowerCase()}</span>
-            </span>
-          ))}
+          </button>
+          {STATUS_ORDER.map(s => {
+            const active = statusFilter === s;
+            return (
+              <button
+                type="button"
+                className={`ac-stat-pill is-tab ${active ? 'active' : ''}`}
+                key={s}
+                onClick={() => setStatusFilter(s)}
+                title={`Show ${STATUS_LABEL[s].toLowerCase()} brands`}
+              >
+                <span className="ac-stat-num" style={{ color: active ? '#fff' : STATUS_META[s].color }}>{counts[s]}</span>
+                <span className="ac-stat-label">{STATUS_LABEL[s].toLowerCase()}</span>
+              </button>
+            );
+          })}
         </div>
         {isBob && (
           <Button onClick={openAdd}>

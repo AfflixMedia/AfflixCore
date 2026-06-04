@@ -510,6 +510,24 @@ a:hover { color: var(--ac-primary-2); }
   letter-spacing: 0;
   text-transform: none;
 }
+/* Clickable stat pills used as status filter tabs on the Brands page. */
+.ac-stat-pill.is-tab {
+  appearance: none;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color .15s, background .15s, box-shadow .15s;
+}
+.ac-stat-pill.is-tab:hover {
+  border-color: var(--ac-primary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .06);
+}
+.ac-stat-pill.is-tab.active {
+  background: var(--ac-primary);
+  border-color: var(--ac-primary);
+}
+.ac-stat-pill.is-tab.active .ac-stat-label {
+  color: #fff;
+}
 
 /* Empty state */
 .ac-empty {
