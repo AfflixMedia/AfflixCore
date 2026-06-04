@@ -24,6 +24,7 @@ export default function ClientAccess() {
   const [links, setLinks] = useState<Link[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
 
   const [show, setShow] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -59,6 +60,32 @@ export default function ClientAccess() {
 
   const clientMap = useMemo(() => new Map(clients.map(c => [c.id, c])), [clients]);
   const brandMap  = useMemo(() => new Map(brands.map(b => [b.id, b])), [brands]);
+
+  // Filter the share-link table by the header search box. Matches against
+  // label, client, mode, brand names, included sections and status.
+  const filteredLinks = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return links;
+    return links.filter(l => {
+      const mode: LinkMode = (l.link_mode as LinkMode) ?? 'brand';
+      const brandNames = (l.brand_ids ?? []).map(id => brandMap.get(id)?.name ?? '').join(' ');
+      const includes = [
+        l.include_reports !== false ? 'weekly' : '',
+        l.include_monthly_reports === true ? 'monthly' : '',
+        l.include_paid_collab === true ? 'paid collab' : '',
+        l.include_resources !== false ? 'resources' : '',
+      ].join(' ');
+      const hay = [
+        l.label ?? '',
+        clientMap.get(l.client_id)?.name ?? '',
+        mode === 'general' ? 'general files' : 'brand',
+        brandNames,
+        includes,
+        l.revoked_at ? 'revoked' : 'active',
+      ].join(' ').toLowerCase();
+      return hay.includes(q);
+    });
+  }, [links, search, clientMap, brandMap]);
   const brandsForClient = useMemo(
     () => brands.filter(b => b.client_id === clientId),
     [brands, clientId],
@@ -192,9 +219,24 @@ export default function ClientAccess() {
 
   return (
     <>
-      <div className="d-flex justify-content-between align-items-center mb-4">
+      <div className="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
         <h2 className="mb-0">Client Access</h2>
-        <Button onClick={openAdd}><i className="bi bi-link-45deg me-1" /> Create Share Link</Button>
+        <div className="d-flex align-items-center gap-2 flex-wrap">
+          <InputGroup size="sm" style={{ width: 280 }}>
+            <InputGroup.Text><i className="bi bi-search" /></InputGroup.Text>
+            <Form.Control
+              placeholder="Search links by label, client, brand…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+            {search && (
+              <Button variant="outline-secondary" onClick={() => setSearch('')} title="Clear search">
+                <i className="bi bi-x-lg" />
+              </Button>
+            )}
+          </InputGroup>
+          <Button onClick={openAdd}><i className="bi bi-link-45deg me-1" /> Create Share Link</Button>
+        </div>
       </div>
 
       <Card>
@@ -202,13 +244,14 @@ export default function ClientAccess() {
           {loading ? <div className="text-center py-4"><Spinner animation="border" /></div>
             : err ? <Alert variant="danger">{err}</Alert>
             : links.length === 0 ? <p className="text-muted text-center mb-0 py-4">No share links yet.</p>
+            : filteredLinks.length === 0 ? <p className="text-muted text-center mb-0 py-4">No links match your search.</p>
             : (
               <Table hover responsive className="align-middle mb-0">
                 <thead><tr>
                   <th>Label</th><th>Client</th><th>Mode</th><th>Scope</th><th>Includes</th><th>URL</th><th>Status</th><th style={{width:160}}></th>
                 </tr></thead>
                 <tbody>
-                  {links.map(l => {
+                  {filteredLinks.map(l => {
                     const cl = clientMap.get(l.client_id);
                     const mode: LinkMode = (l.link_mode as LinkMode) ?? 'brand';
                     return (
