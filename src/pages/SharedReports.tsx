@@ -11,7 +11,7 @@ import SectionComments, { Comment, CommentSection } from '../components/SectionC
 import { resourceIcon } from '../lib/resourceIcon';
 import ResourceComments, { ResourceComment } from '../components/ResourceComments';
 import ApprovalsModal, { PendingApprovalReport } from '../components/share/ApprovalsModal';
-import MonthPickerModal from '../components/share/MonthPickerModal';
+// import MonthPickerModal from '../components/share/MonthPickerModal'; // disabled — see MonthQuickPicks
 import LatestReportsModal from '../components/share/LatestReportsModal';
 import ProgramThreadPanel, { ProgramThreadComment } from '../components/paidcollab/ProgramThreadPanel';
 import {
@@ -189,6 +189,7 @@ export default function SharedReports() {
   }, [reports, activeBrandId]);
 
   const monthFiltered = useMemo(() => {
+    if (month === 'all') return brandReports;
     return brandReports.filter(r => r.week_start.slice(0, 7) === month);
   }, [brandReports, month]);
 
@@ -785,13 +786,9 @@ export default function SharedReports() {
                   <div className="d-flex justify-content-between align-items-end mb-3 flex-wrap gap-2">
                     <div>
                       <h5 className="mb-0">{activeBrand.name} — Reports</h5>
-                      <small className="text-muted">{monthFiltered.length} report{monthFiltered.length !== 1 ? 's' : ''} in {fmtMonthLabel(month)}</small>
+                      <small className="text-muted">{monthFiltered.length} report{monthFiltered.length !== 1 ? 's' : ''} {month === 'all' ? '— all months' : `in ${fmtMonthLabel(month)}`}</small>
                     </div>
-                    <div className="d-flex gap-2 align-items-end">
-                      <Button size="sm" variant="outline-primary" onClick={() => setShowMonthPicker(true)}>
-                        <i className="bi bi-calendar3 me-1" /> Change month
-                      </Button>
-                    </div>
+                    <MonthQuickPicks month={month} setMonth={setMonth} monthsWithData={monthsWithData} />
                   </div>
 
                   {brandReports.length === 0 ? (
@@ -869,7 +866,7 @@ export default function SharedReports() {
                     const brandMonthly = monthlyReports
                       .filter(r => r.brand_id === activeBrandId)
                       .sort((a, b) => b.month.localeCompare(a.month));
-                    const monthFilteredMonthly = brandMonthly.filter(r => r.month === month);
+                    const monthFilteredMonthly = month === 'all' ? brandMonthly : brandMonthly.filter(r => r.month === month);
                     const fmtMonthLabel = (yyyymm: string) => {
                       const [y, m] = yyyymm.split('-').map(Number);
                       return new Date(y, m - 1, 1).toLocaleString(undefined, { month: 'long', year: 'numeric' });
@@ -879,13 +876,9 @@ export default function SharedReports() {
                         <div className="d-flex justify-content-between align-items-end mb-3 flex-wrap gap-2">
                           <div>
                             <h5 className="mb-0">{activeBrand.name} — Monthly Reports</h5>
-                            <small className="text-muted">{monthFilteredMonthly.length} report{monthFilteredMonthly.length !== 1 ? 's' : ''} in {fmtMonthLabel(month)}</small>
+                            <small className="text-muted">{monthFilteredMonthly.length} report{monthFilteredMonthly.length !== 1 ? 's' : ''} {month === 'all' ? '— all months' : `in ${fmtMonthLabel(month)}`}</small>
                           </div>
-                          <div className="d-flex gap-2 align-items-end">
-                            <Button size="sm" variant="outline-primary" onClick={() => setShowMonthPicker(true)}>
-                              <i className="bi bi-calendar3 me-1" /> Change month
-                            </Button>
-                          </div>
+                          <MonthQuickPicks month={month} setMonth={setMonth} monthsWithData={monthsWithData} />
                         </div>
                         {brandMonthly.length === 0 ? (
                           <div className="text-center py-5 text-muted">
@@ -894,7 +887,7 @@ export default function SharedReports() {
                           </div>
                         ) : monthFilteredMonthly.length === 0 ? (
                           <div className="text-center py-4 text-muted">
-                            No monthly report for {fmtMonthLabel(month)}. Try a different month.
+                            {month === 'all' ? 'No monthly reports shared yet.' : `No monthly report for ${fmtMonthLabel(month)}. Try a different month.`}
                           </div>
                         ) : (
                           <Row className="g-3">
@@ -1101,6 +1094,8 @@ export default function SharedReports() {
         }}
         onSubmit={submitApprovals}
       />
+      {/* Month picker popup disabled — replaced by inline MonthQuickPicks
+          (latest 2 months + All). Kept here for later re-use.
       <MonthPickerModal
         show={showMonthPicker}
         monthsWithData={monthsWithData}
@@ -1108,6 +1103,7 @@ export default function SharedReports() {
         onPick={(m) => { setMonth(m); setShowMonthPicker(false); }}
         onClose={() => setShowMonthPicker(false)}
       />
+      */}
       <LatestReportsModal
         show={showLatestReports}
         brands={brands}
@@ -1169,6 +1165,56 @@ export default function SharedReports() {
 function fmtMonthLabel(yyyymm: string): string {
   const [y, m] = yyyymm.split('-').map(Number);
   return new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+}
+
+// Inline quick-pick for the 3 most-recent months — replaces the "Change month"
+// button so clients can jump straight to a month's reports without the popup.
+// (The MonthPickerModal is still mounted for later re-use.)
+function MonthQuickPicks({ month, setMonth, monthsWithData }: {
+  month: string;
+  setMonth: (m: string) => void;
+  monthsWithData: Set<string>;
+}) {
+  const shift = (yyyymm: string, delta: number): string => {
+    const [y, m] = yyyymm.split('-').map(Number);
+    const d = new Date(y, m - 1 + delta, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  };
+  const fmtShort = (yyyymm: string): string => {
+    const [y, m] = yyyymm.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'short', year: 'numeric' });
+  };
+  const cur = currentMonth();
+  const picks = [shift(cur, 0), shift(cur, -1)];
+  return (
+    <div className="d-flex gap-2 align-items-center flex-wrap">
+      {picks.map(ym => {
+        const active = ym === month;
+        const has = monthsWithData.has(ym);
+        return (
+          <Button
+            key={ym}
+            size="sm"
+            variant={active ? 'primary' : 'outline-primary'}
+            onClick={() => setMonth(ym)}
+            title={has ? `${fmtShort(ym)} — reports available` : `${fmtShort(ym)} — no reports`}
+          >
+            <i className="bi bi-calendar3 me-1" />
+            {fmtShort(ym)}
+            {has && <span className="ms-1" style={{ color: active ? '#fff' : '#198754' }}>●</span>}
+          </Button>
+        );
+      })}
+      <Button
+        size="sm"
+        variant={month === 'all' ? 'primary' : 'outline-primary'}
+        onClick={() => setMonth('all')}
+        title="Show all reports across every month"
+      >
+        <i className="bi bi-collection me-1" /> All
+      </Button>
+    </div>
+  );
 }
 
 // =====================================================================
