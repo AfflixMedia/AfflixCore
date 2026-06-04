@@ -20,6 +20,7 @@ interface Ctx {
   loading: boolean;
   markRead: (id: string) => Promise<void>;
   markAllRead: () => Promise<void>;
+  markReadByConversation: (conversationId: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
 }
 
@@ -72,6 +73,18 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     setNotifications(prev => prev.map(n => n.read_at ? n : { ...n, read_at: ts }));
     await supabase.from('notifications').update({ read_at: ts }).eq('user_id', user.id).is('read_at', null);
   };
+  // Mark every unread chat notification for one conversation as read — called
+  // when the user opens that conversation, so the bell stays in sync.
+  const markReadByConversation = async (conversationId: string) => {
+    const ids = notifications
+      .filter(n => !n.read_at && n.type === 'chat' && n.payload?.conversation_id === conversationId)
+      .map(n => n.id);
+    if (ids.length === 0) return;
+    const ts = new Date().toISOString();
+    setNotifications(prev => prev.map(n => ids.includes(n.id) ? { ...n, read_at: ts } : n));
+    await supabase.from('notifications').update({ read_at: ts }).in('id', ids);
+  };
+
   const remove = async (id: string) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
     await supabase.from('notifications').delete().eq('id', id);
@@ -80,7 +93,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   const unreadCount = notifications.filter(n => !n.read_at).length;
 
   return (
-    <NotificationsContext.Provider value={{ notifications, unreadCount, loading, markRead, markAllRead, remove }}>
+    <NotificationsContext.Provider value={{ notifications, unreadCount, loading, markRead, markAllRead, markReadByConversation, remove }}>
       {children}
     </NotificationsContext.Provider>
   );

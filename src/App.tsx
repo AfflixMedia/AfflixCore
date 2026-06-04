@@ -32,6 +32,7 @@ import PaidCollabCreators from './pages/paid-collab/PaidCollabCreators';
 import PaidCollabVideos from './pages/paid-collab/PaidCollabVideos';
 import ReportingCanvasList from './pages/templates/ReportingCanvasList';
 import ReportingCanvasEditor from './pages/templates/ReportingCanvasEditor';
+import GlobalChat from './pages/global-chat/GlobalChat';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { useAuth } from './auth/AuthContext';
 
@@ -81,6 +82,7 @@ export default function App() {
         <Route path="budget/brands" element={<ProtectedRoute roles={['bob']}><BudgetManager /></ProtectedRoute>} />
         <Route path="budget/company" element={<ProtectedRoute roles={['bob']}><CompanyBudget /></ProtectedRoute>} />
         <Route path="notifications" element={<NotificationsPage />} />
+        <Route path="chats" element={<ProtectedRoute roles={['bob', 'apc', 'paid_collab_handler']}><GlobalChat /></ProtectedRoute>} />
         <Route path="reporting/weekly" element={<ProtectedRoute roles={['bob', 'apc']}><WeeklyReports /></ProtectedRoute>} />
         <Route path="reporting/weekly/:id" element={<ProtectedRoute roles={['bob', 'apc']}><WeeklyReportView /></ProtectedRoute>} />
         <Route path="reporting/weekly/:id/edit" element={<ProtectedRoute roles={['bob', 'apc']}><WeeklyReportEdit /></ProtectedRoute>} />

@@ -14,6 +14,9 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
   const isApc = profile?.role === 'apc';
   const isPaidCollabClient = profile?.role === 'paid_collab_client';
   const isPaidCollabHandler = profile?.role === 'paid_collab_handler';
+  // Internal staff (admin / apc / handler) get the team Chats feature.
+  const isInternal = isBob || isApc || isPaidCollabHandler;
+  const chatUnread = notifications.filter(n => !n.read_at && n.type === 'chat').length;
 
   return (
     <aside className="ac-sidebar">
@@ -127,6 +130,12 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
             )}
           </>
         ))}
+        {isInternal && (
+          <NavLink to="/chats" title="Chats">
+            <i className="bi bi-chat-dots" /> <span className="ac-nav-label">Chats</span>
+            {chatUnread > 0 && <Badge bg="danger" pill className="ms-2">{chatUnread}</Badge>}
+          </NavLink>
+        )}
         <NavLink to="/notifications" title="Notifications">
           <i className="bi bi-bell" /> <span className="ac-nav-label">Notifications</span>
           {unreadCount > 0 && <Badge bg="danger" pill className="ms-2">{unreadCount}</Badge>}
