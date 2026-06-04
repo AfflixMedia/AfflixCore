@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Card, Spinner, Alert, Nav, Badge, Button } from 'react-bootstrap';
+import { Card, Spinner, Alert, Nav, Badge, Button, Dropdown, Form } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/AuthContext';
 import BrandResourcesTab from './brand/BrandResourcesTab';
@@ -47,8 +47,12 @@ export default function BrandDetail() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [assignedToMe, setAssignedToMe] = useState(false);
-  // Sibling list so we can offer prev / next navigation.
-  const [siblingIds, setSiblingIds] = useState<string[]>([]);
+  // Sibling list (id + name) so we can offer prev / next nav and a switcher dropdown.
+  const [siblings, setSiblings] = useState<{ id: string; name: string }[]>([]);
+  // Brand-switcher dropdown state.
+  const [brandPickerOpen, setBrandPickerOpen] = useState(false);
+  const [brandSearch, setBrandSearch] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
 
   const tabFromUrl = (params.get('tab') as TabKey) || 'resources';
 
@@ -62,30 +66,50 @@ export default function BrandDetail() {
           : Promise.resolve({ data: [] }),
         // RLS already scopes this to brands the user can see (Bob sees all,
         // APC sees their assigned brands).
-        supabase.from('brands').select('id').order('name'),
+        supabase.from('brands').select('id,name').order('name'),
       ]);
       if (bErr) { setErr(bErr.message); setLoading(false); return; }
       if (!b) { setErr('Brand not found.'); setLoading(false); return; }
       setBrand(b as Brand);
       setAssignedToMe(((assigns as any[])?.length ?? 0) > 0);
-      setSiblingIds(((siblings as any[]) ?? []).map(x => x.id));
+      setSiblings(((siblings as any[]) ?? []).map(x => ({ id: x.id, name: x.name })));
       setLoading(false);
     })();
   }, [id, isApc, profile?.id]);
 
   // Compute prev / next neighbour in the alphabetical list.
   const { prevId, nextId, currentIdx, totalSiblings } = useMemo(() => {
-    if (!id || siblingIds.length === 0) {
+    if (!id || siblings.length === 0) {
       return { prevId: null as string | null, nextId: null as string | null, currentIdx: -1, totalSiblings: 0 };
     }
-    const idx = siblingIds.indexOf(id);
+    const idx = siblings.findIndex(s => s.id === id);
     return {
-      prevId: idx > 0 ? siblingIds[idx - 1] : null,
-      nextId: idx >= 0 && idx < siblingIds.length - 1 ? siblingIds[idx + 1] : null,
+      prevId: idx > 0 ? siblings[idx - 1].id : null,
+      nextId: idx >= 0 && idx < siblings.length - 1 ? siblings[idx + 1].id : null,
       currentIdx: idx,
-      totalSiblings: siblingIds.length,
+      totalSiblings: siblings.length,
     };
-  }, [id, siblingIds]);
+  }, [id, siblings]);
+
+  // Brands matching the dropdown search box.
+  const filteredSiblings = useMemo(() => {
+    const q = brandSearch.trim().toLowerCase();
+    if (!q) return siblings;
+    return siblings.filter(s => s.name.toLowerCase().includes(q));
+  }, [siblings, brandSearch]);
+
+  // When the switcher opens, clear the query and focus the search box.
+  useEffect(() => {
+    if (!brandPickerOpen) return;
+    setBrandSearch('');
+    const t = setTimeout(() => searchRef.current?.focus(), 0);
+    return () => clearTimeout(t);
+  }, [brandPickerOpen]);
+
+  const goToBrand = (brandId: string) => {
+    setBrandPickerOpen(false);
+    if (brandId !== id) nav(`/brands/${brandId}?tab=${currentTab}`);
+  };
 
   const visibleTabs = useMemo(() => {
     if (isBob) return TABS;
@@ -157,10 +181,52 @@ export default function BrandDetail() {
           </div>
         </div>
 
-        {/* Prev / next brand navigation — keeps the current tab so you can
-            walk through brands without losing context. */}
+        {/* Brand switcher + prev / next navigation — keeps the current tab so
+            you can walk through brands without losing context. */}
         {totalSiblings > 1 && (
-          <div className="d-flex align-items-center gap-2">
+          <div className="d-flex align-items-center gap-2 flex-wrap">
+            <Dropdown
+              show={brandPickerOpen}
+              onToggle={(next) => setBrandPickerOpen(next)}
+              autoClose="outside"
+            >
+              <Dropdown.Toggle
+                size="sm" variant="outline-secondary" id="brand-switcher"
+                className="text-truncate" style={{ maxWidth: 220 }}
+                title="Switch brand"
+              >
+                <i className="bi bi-shop me-1" />Switch brand
+              </Dropdown.Toggle>
+              <Dropdown.Menu
+                renderOnMount
+                style={{ minWidth: 280, maxHeight: 360, overflowY: 'auto' }}
+              >
+                <div className="position-sticky top-0 bg-white px-2 pb-2" style={{ zIndex: 1 }}>
+                  <Form.Control
+                    ref={searchRef}
+                    size="sm"
+                    placeholder="Search brands…"
+                    value={brandSearch}
+                    onChange={e => setBrandSearch(e.target.value)}
+                    onKeyDown={e => e.stopPropagation()}
+                  />
+                </div>
+                {filteredSiblings.length === 0 ? (
+                  <div className="text-muted small px-3 py-2">No brands match.</div>
+                ) : (
+                  filteredSiblings.map(s => (
+                    <Dropdown.Item
+                      key={s.id}
+                      active={s.id === id}
+                      onClick={() => goToBrand(s.id)}
+                      className="text-truncate"
+                    >
+                      {s.name}
+                    </Dropdown.Item>
+                  ))
+                )}
+              </Dropdown.Menu>
+            </Dropdown>
             <Button
               size="sm" variant="outline-secondary"
               disabled={!prevId}
