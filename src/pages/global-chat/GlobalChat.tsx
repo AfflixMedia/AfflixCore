@@ -40,6 +40,8 @@ export default function GlobalChat() {
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   const [forwardMsg, setForwardMsg] = useState<ChatMessage | null>(null);
   const [showNewChat, setShowNewChat] = useState(false);
+  // First unread message id at open time — drives the "Unread messages" divider.
+  const [unreadAnchorId, setUnreadAnchorId] = useState<string | null>(null);
 
   const activeIdRef = useRef<string | null>(activeId);
   useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
@@ -48,6 +50,28 @@ export default function GlobalChat() {
   // subscription and openConversation don't resubscribe/refetch every render.
   const markReadRef = useRef(markReadByConversation);
   useEffect(() => { markReadRef.current = markReadByConversation; }, [markReadByConversation]);
+
+  // Live snapshot of participants so openConversation can read the previous
+  // last_read_at (the unread boundary) without re-running when it changes.
+  const participantsRef = useRef(participants);
+  useEffect(() => { participantsRef.current = participants; }, [participants]);
+
+  // Mark a conversation read everywhere: DB, local participant row, unread
+  // badge, and the notification bell. Used on open and on live incoming msgs.
+  const markRead = useCallback(async (conversationId: string) => {
+    if (!myId) return;
+    try { await markConversationRead(conversationId, myId); } catch { /* non-fatal */ }
+    const ts = new Date().toISOString();
+    setParticipants(prev => prev.map(p =>
+      (p.conversation_id === conversationId && p.user_id === myId) ? { ...p, last_read_at: ts } : p));
+    setOverview(prev => {
+      const next = new Map(prev);
+      const o = next.get(conversationId);
+      if (o) next.set(conversationId, { ...o, unread: 0 });
+      return next;
+    });
+    markReadRef.current(conversationId);
+  }, [myId]);
 
   // ---- Directory: every internal user we may need to name (contacts + me) ----
   const directory = useMemo(() => {
@@ -128,30 +152,31 @@ export default function GlobalChat() {
 
   useEffect(() => { if (myId) loadAll(); }, [myId, loadAll]);
 
-  // ---- Load the active conversation's messages + mark it read ----
+  // ---- Load the active conversation's messages, compute the unread anchor,
+  //      then mark it read ----
   const openConversation = useCallback(async (conversationId: string | null) => {
-    if (!conversationId) { setMessages([]); return; }
+    if (!conversationId) { setMessages([]); setUnreadAnchorId(null); return; }
     setMessagesLoading(true);
     setReplyTo(null);
     try {
+      // Capture the read boundary BEFORE marking read, so we can place the
+      // "Unread messages" divider at the first message we hadn't seen.
+      const boundary = participantsRef.current.find(
+        p => p.conversation_id === conversationId && p.user_id === myId)?.last_read_at ?? null;
       const msgs = await fetchMessages(conversationId);
+      const anchor = boundary
+        ? (msgs.find(m => m.sender_id !== myId
+            && new Date(m.created_at).getTime() > new Date(boundary).getTime())?.id ?? null)
+        : null;
       setMessages(msgs);
-      if (myId) {
-        await markConversationRead(conversationId, myId);
-        setOverview(prev => {
-          const next = new Map(prev);
-          const o = next.get(conversationId);
-          if (o) next.set(conversationId, { ...o, unread: 0 });
-          return next;
-        });
-        markReadRef.current(conversationId);
-      }
+      setUnreadAnchorId(anchor);
+      await markRead(conversationId);
     } catch (e) {
       setErr((e as Error).message);
     } finally {
       setMessagesLoading(false);
     }
-  }, [myId]);
+  }, [myId, markRead]);
 
   useEffect(() => { openConversation(activeId); }, [activeId, openConversation]);
 
@@ -165,10 +190,7 @@ export default function GlobalChat() {
           const m = payload.new as ChatMessage;
           if (m.conversation_id === activeIdRef.current) {
             setMessages(prev => prev.some(x => x.id === m.id) ? prev : [...prev, m]);
-            if (m.sender_id !== myId) {
-              markConversationRead(m.conversation_id, myId).catch(() => {});
-              markReadRef.current(m.conversation_id);
-            }
+            if (m.sender_id !== myId) markRead(m.conversation_id);
           }
           refreshOverview();
         })
@@ -177,7 +199,7 @@ export default function GlobalChat() {
         () => { reloadConversations().then(refreshOverview); })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [myId, refreshOverview, reloadConversations]);
+  }, [myId, refreshOverview, reloadConversations, markRead]);
 
   // ---- Actions ----
   const selectConversation = (conversationId: string) => {
@@ -263,6 +285,7 @@ export default function GlobalChat() {
           loading={messagesLoading}
           myId={myId}
           directory={directory}
+          unreadAnchorId={unreadAnchorId}
           replyTo={replyTo}
           onReply={setReplyTo}
           onForward={(m) => setForwardMsg(m)}
