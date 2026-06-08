@@ -11,10 +11,11 @@ interface Props {
   contacts: ChatContact[];
   loading: boolean;
   onPick: (contact: ChatContact) => void;
+  onNewGroup: () => void;
   onClose: () => void;
 }
 
-export default function NewChatModal({ show, contacts, loading, onPick, onClose }: Props) {
+export default function NewChatModal({ show, contacts, loading, onPick, onNewGroup, onClose }: Props) {
   const [q, setQ] = useState('');
 
   const filtered = useMemo(() => {
@@ -32,6 +33,11 @@ export default function NewChatModal({ show, contacts, loading, onPick, onClose 
         <Modal.Title><i className="bi bi-chat-dots me-2" />Start a chat</Modal.Title>
       </Modal.Header>
       <Modal.Body>
+        <button type="button" className="ac-contact-row mb-2" onClick={onNewGroup}>
+          <span className="ac-newgroup-icon"><i className="bi bi-people-fill" /></span>
+          <span className="fw-semibold flex-grow-1 text-start">New group</span>
+          <i className="bi bi-chevron-right text-muted" />
+        </button>
         <InputGroup className="mb-3">
           <InputGroup.Text><i className="bi bi-search" /></InputGroup.Text>
           <Form.Control

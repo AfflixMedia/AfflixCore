@@ -1,37 +1,59 @@
-// Right pane: conversation header, scrollable message stream (day separators +
-// "unread messages" divider), a floating scroll-to-bottom button, and the
+// Right pane: conversation header (with Bookmarks + group/announcement settings),
+// a scrollable message stream (day separators, "unread" divider, inline system
+// lines for membership changes), a floating scroll-to-bottom button, and the
 // composer. Data + realtime live in the GlobalChat page.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Badge, Spinner } from 'react-bootstrap';
 import Avatar from '../../components/Avatar';
 import MessageBubble from './MessageBubble';
 import MessageComposer from './MessageComposer';
-import type { ChatContact, ChatMessage, ConversationView } from './types';
-import { dayLabel, roleLabel, roleBadge } from './types';
+import type { ChatContact, ChatMessage, ChatEvent, ChatReaction, ConversationView } from './types';
+import { dayLabel, roleLabel, roleBadge, contactName, eventText } from './types';
 
 interface Props {
   view: ConversationView | null;
   messages: ChatMessage[];
+  events: ChatEvent[];             // membership log → inline system lines
   loading: boolean;
+  hasMoreOlder: boolean;           // older messages remain to page in
+  loadingOlder: boolean;          // an older page is currently loading
+  onLoadOlder: () => void;        // fetch + prepend the next older page
   myId: string;
   directory: Map<string, ChatContact>;
   unreadAnchorId: string | null;   // first unread message id at open time
+  members: ChatContact[];          // group/announcement members (for @mentions)
+  announcementCount: number;       // total internal staff (announcement header)
+  canPost: boolean;                // false → announcement read-only for non-admins
+  reactionsByMsg: Map<string, ChatReaction[]>;
+  onReact: (messageId: string, emoji: string) => void;
+  onOpenGroup: () => void;         // open the group manage modal
+  onOpenSettings: () => void;      // open announcement settings (Bob)
+  onOpenBookmarks: () => void;     // open the Bookmarks tab
   replyTo: ChatMessage | null;
   onReply: (m: ChatMessage | null) => void;
   onForward: (m: ChatMessage) => void;
-  onSend: (body: string) => void | Promise<void>;
+  onDelete: (m: ChatMessage) => void;
+  onSend: (body: string, mentions: string[]) => void | Promise<void>;
   onBack: () => void;        // mobile: back to list
 }
 
+type Item =
+  | { kind: 'msg'; at: string; m: ChatMessage }
+  | { kind: 'evt'; at: string; e: ChatEvent };
+
 export default function ChatPanel({
-  view, messages, loading, myId, directory, unreadAnchorId,
-  replyTo, onReply, onForward, onSend, onBack,
+  view, messages, events, loading, hasMoreOlder, loadingOlder, onLoadOlder,
+  myId, directory, unreadAnchorId, members, announcementCount,
+  canPost, reactionsByMsg, onReact, onOpenGroup, onOpenSettings, onOpenBookmarks,
+  replyTo, onReply, onForward, onDelete, onSend, onBack,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
-  // Which conversation we've already positioned; how many messages we'd seen.
   const positionedConvRef = useRef<string | null>(null);
   const prevCountRef = useRef(0);
+  // Pre-prepend scrollHeight, captured when an older page is requested so the
+  // viewport can be held steady once the new rows render.
+  const prependRestoreRef = useRef<number | null>(null);
 
   const convId = view?.conversation.id ?? null;
 
@@ -41,6 +63,17 @@ export default function ChatPanel({
     messages.forEach(x => m.set(x.id, x));
     return m;
   }, [messages]);
+
+  // Merge messages + membership events into one chronological timeline.
+  const items: Item[] = useMemo(() => {
+    const arr: Item[] = [];
+    messages.forEach(m => arr.push({ kind: 'msg', at: m.created_at, m }));
+    events.forEach(e => arr.push({ kind: 'evt', at: e.created_at, e }));
+    arr.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+    return arr;
+  }, [messages, events]);
+
+  const nameOf = (id: string | null) => contactName(id ? directory.get(id) ?? null : null);
 
   const isNearBottom = () => {
     const el = scrollRef.current;
@@ -54,47 +87,72 @@ export default function ChatPanel({
     el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
   };
 
-  // Initial position when a conversation's messages first load: jump to the
-  // "unread messages" divider if there is one, otherwise straight to the bottom.
-  // A ResizeObserver re-applies it as the flex container settles its height, so
-  // it can't get stuck at the top when scrollHeight isn't final on first paint.
+  // Initial position when a conversation first loads: jump to the "unread
+  // messages" divider if any, else to the bottom. A ResizeObserver re-applies it
+  // as the flex container settles, so it can't get stuck at the top.
   useLayoutEffect(() => {
     if (!convId || loading) return;
     const el = scrollRef.current;
     if (!el) return;
     positionedConvRef.current = convId;
-    prevCountRef.current = messages.length;
+    prevCountRef.current = items.length;
 
     let settled = false;
     const place = () => {
       const sep = el.querySelector('[data-unread-sep]') as HTMLElement | null;
-      if (sep) el.scrollTop = Math.max(0, sep.offsetTop - 12); // first unread
-      else el.scrollTop = el.scrollHeight;                     // latest message
+      if (sep) el.scrollTop = Math.max(0, sep.offsetTop - 12);
+      else el.scrollTop = el.scrollHeight;
     };
 
-    place();                                   // synchronous, pre-paint (no flash)
+    place();
     const raf = requestAnimationFrame(place);
     const t1 = setTimeout(() => { place(); setShowScrollBtn(!isNearBottom()); }, 80);
     const t2 = setTimeout(() => { place(); setShowScrollBtn(!isNearBottom()); settled = true; }, 280);
-    // Re-place whenever the stream's size changes during the settle window.
     const ro = new ResizeObserver(() => { if (!settled) place(); });
     ro.observe(el);
 
     return () => { cancelAnimationFrame(raf); clearTimeout(t1); clearTimeout(t2); ro.disconnect(); };
   }, [convId, loading, unreadAnchorId]);
 
-  // New messages after the initial load. Always follow your own sent message to
-  // the bottom; for incoming messages, follow only if already near the bottom,
-  // otherwise reveal the scroll-to-bottom button.
+  // When an older page finishes loading, hold the viewport on the same message
+  // (offset by however much taller the stream got). Keyed on loadingOlder so it
+  // also clears cleanly when a page returned nothing. Runs before the follow
+  // effect below and neutralises it so prepends don't yank to the bottom.
+  useLayoutEffect(() => {
+    if (loadingOlder || prependRestoreRef.current == null) return;
+    const el = scrollRef.current;
+    if (el) {
+      const delta = el.scrollHeight - prependRestoreRef.current;
+      if (delta > 0) el.scrollTop = el.scrollTop + delta;
+    }
+    prependRestoreRef.current = null;
+    prevCountRef.current = items.length;
+  }, [loadingOlder]);
+
+  // New content after the initial load. Follow your own sent message to the
+  // bottom; for incoming content, follow only if already near the bottom.
   useEffect(() => {
     if (!convId || positionedConvRef.current !== convId) return;
-    const grew = messages.length > prevCountRef.current;
-    prevCountRef.current = messages.length;
+    const grew = items.length > prevCountRef.current;
+    prevCountRef.current = items.length;
     if (!grew) return;
-    const mine = messages[messages.length - 1]?.sender_id === myId;
+    const last = items[items.length - 1];
+    const mine = last?.kind === 'msg' && last.m.sender_id === myId;
     if (mine || isNearBottom()) scrollToBottom(true);
     else setShowScrollBtn(true);
-  }, [messages.length, convId, myId]);
+  }, [items.length, convId, myId]);
+
+  // Scroll handler: toggle the jump-to-latest button and page in older history
+  // when the user reaches the top.
+  const handleStreamScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setShowScrollBtn(!isNearBottom());
+    if (hasMoreOlder && !loadingOlder && prependRestoreRef.current == null && el.scrollTop < 80) {
+      prependRestoreRef.current = el.scrollHeight;
+      onLoadOlder();
+    }
+  };
 
   if (!view) {
     return (
@@ -107,7 +165,10 @@ export default function ChatPanel({
     );
   }
 
-  const isGroup = view.conversation.is_group;
+  const isAnnouncement = view.conversation.is_announcement;
+  const isGroup = view.conversation.is_group && !isAnnouncement;
+  const mentionables = members.filter(c => c.id !== myId);
+  const memberCount = isAnnouncement ? announcementCount : members.length;
 
   return (
     <div className="ac-chat-panel">
@@ -115,52 +176,94 @@ export default function ChatPanel({
         <button type="button" className="ac-chat-back" onClick={onBack} title="Back">
           <i className="bi bi-arrow-left" />
         </button>
-        <Avatar name={view.title} variant={isGroup ? 'dark' : 'brand'} />
-        <div className="min-w-0">
+        <Avatar name={view.title} variant={isGroup || isAnnouncement ? 'dark' : 'brand'} />
+        <div className="min-w-0 flex-grow-1">
           <div className="d-flex align-items-center gap-2">
+            {isAnnouncement && <i className="bi bi-megaphone-fill text-warning" />}
             <span className="fw-semibold text-truncate">{view.title}</span>
-            {!isGroup && view.otherUser && (
+            {!isGroup && !isAnnouncement && view.otherUser && (
               <Badge bg={roleBadge(view.otherUser.role)} className="ac-role-badge">
                 {roleLabel(view.otherUser.role)}
               </Badge>
             )}
           </div>
-          {!isGroup && view.otherUser && (
+          {!isGroup && !isAnnouncement && view.otherUser && (
             <div className="text-muted small text-truncate">{view.otherUser.email}</div>
           )}
+          {(isGroup || isAnnouncement) && (
+            <div className="text-muted small text-truncate">
+              {memberCount} member{memberCount === 1 ? '' : 's'}
+              {isAnnouncement && ' · announcement'}
+            </div>
+          )}
         </div>
+        <button type="button" className="ac-chat-action" title="Bookmarks" onClick={onOpenBookmarks}>
+          <i className="bi bi-bookmark-star" />
+        </button>
+        {isGroup && (
+          <button type="button" className="ac-chat-action" title="Group info" onClick={onOpenGroup}>
+            <i className="bi bi-gear" />
+          </button>
+        )}
+        {isAnnouncement && canPost && (
+          <button type="button" className="ac-chat-action" title="Announcement settings" onClick={onOpenSettings}>
+            <i className="bi bi-gear" />
+          </button>
+        )}
       </div>
 
       <div className="ac-stream-wrap">
-        <div className="ac-chat-stream" ref={scrollRef} onScroll={() => setShowScrollBtn(!isNearBottom())}>
+        <div className="ac-chat-stream" ref={scrollRef} onScroll={handleStreamScroll}>
           {loading ? (
             <div className="text-center py-5"><Spinner animation="border" size="sm" /></div>
-          ) : messages.length === 0 ? (
+          ) : items.length === 0 ? (
             <div className="text-center text-muted py-5">No messages yet. Say hello 👋</div>
           ) : (
-            messages.map((m, i) => {
-              const prev = messages[i - 1];
-              const showDay = !prev || new Date(prev.created_at).toDateString() !== new Date(m.created_at).toDateString();
+            <>
+            {loadingOlder && <div className="text-center py-2"><Spinner animation="border" size="sm" /></div>}
+            {items.map((it, i) => {
+              const prev = items[i - 1];
+              const showDay = !prev || new Date(prev.at).toDateString() !== new Date(it.at).toDateString();
+              if (it.kind === 'evt') {
+                return (
+                  <div key={`e-${it.e.id}`}>
+                    {showDay && <div className="ac-day-sep"><span>{dayLabel(it.at)}</span></div>}
+                    <div className="ac-sys-line"><span>{eventText(it.e, nameOf)}</span></div>
+                  </div>
+                );
+              }
+              const m = it.m;
               const replyTarget = m.reply_to_id ? (msgById.get(m.reply_to_id) ?? null) : null;
+              const rxns = reactionsByMsg.get(m.id) ?? [];
+              const mine = rxns.find(r => r.user_id === myId)?.emoji ?? null;
               return (
                 <div key={m.id} data-mid={m.id}>
-                  {showDay && <div className="ac-day-sep"><span>{dayLabel(m.created_at)}</span></div>}
+                  {showDay && <div className="ac-day-sep"><span>{dayLabel(it.at)}</span></div>}
                   {m.id === unreadAnchorId && (
                     <div className="ac-unread-sep" data-unread-sep><span>Unread messages</span></div>
                   )}
                   <MessageBubble
                     message={m}
                     mine={m.sender_id === myId}
-                    isGroup={isGroup}
+                    isGroup={isGroup || isAnnouncement}
                     sender={m.sender_id ? directory.get(m.sender_id) ?? null : null}
+                    mentionNames={(m.mentions ?? []).map(id => contactName(directory.get(id) ?? null))}
                     replyTo={replyTarget}
                     replyToSender={replyTarget?.sender_id ? directory.get(replyTarget.sender_id) ?? null : null}
+                    canReply={canPost}
+                    ackMode={isAnnouncement}
+                    reactions={rxns}
+                    myReaction={mine}
+                    reactorName={nameOf}
+                    onReact={(emoji) => onReact(m.id, emoji)}
                     onReply={onReply}
                     onForward={onForward}
+                    onDelete={onDelete}
                   />
                 </div>
               );
-            })
+            })}
+            </>
           )}
         </div>
 
@@ -178,6 +281,13 @@ export default function ChatPanel({
 
       <MessageComposer
         key={view.conversation.id}
+        readOnly={!canPost}
+        readOnlyNote={
+          view.archived ? 'You’re no longer a member of this group — read only.'
+            : isAnnouncement ? 'Only the admin can post announcements.'
+            : undefined}
+        readOnlyIcon={view.archived ? 'bi-archive' : 'bi-megaphone'}
+        mentionables={mentionables}
         replyTo={replyTo}
         replyToSender={replyTo?.sender_id ? directory.get(replyTo.sender_id) ?? null : null}
         onCancelReply={() => onReply(null)}

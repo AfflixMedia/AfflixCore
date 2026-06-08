@@ -23,13 +23,23 @@ function escapeHtml(s: string): string {
     .replace(/'/g, '&#39;');
 }
 
-function inline(input: string): string {
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function inline(input: string, mentionNames: string[] = []): string {
   const stash: string[] = [];
   const put = (html: string) => `${SENT}${stash.push(html) - 1}${SENT}`;
 
   let s = input;
-  // Stash code spans and links first so emphasis rules don't corrupt them
-  // (e.g. underscores inside a URL must not become italic).
+  // Stash @mentions, code spans and links first so emphasis rules don't corrupt
+  // them (e.g. underscores inside a URL must not become italic).
+  for (const name of mentionNames) {
+    const esc = escapeHtml(name);          // input is already HTML-escaped
+    if (!esc) continue;
+    s = s.replace(new RegExp('@' + escapeRegExp(esc), 'g'),
+      () => put(`<span class="ac-mention">@${esc}</span>`));
+  }
   s = s.replace(/`([^`]+)`/g, (_m, c) => put(`<code>${c}</code>`));
   s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_m, label, url) =>
     put(`<a href="${url}" ${LINK_ATTR}>${label}</a>`));
@@ -46,8 +56,9 @@ function inline(input: string): string {
   return s.replace(new RegExp(`${SENT}(\\d+)${SENT}`, 'g'), (_m, i) => stash[Number(i)] ?? '');
 }
 
-/** Render a chat message body to sanitized HTML. */
-export function renderMessageHtml(body: string): string {
+/** Render a chat message body to sanitized HTML. `mentionNames` are the display
+ *  names that should be highlighted as @mentions. */
+export function renderMessageHtml(body: string, mentionNames: string[] = []): string {
   const lines = escapeHtml(body ?? '').split('\n');
   const out: string[] = [];
   let listType: 'ul' | 'ol' | null = null;
@@ -60,24 +71,24 @@ export function renderMessageHtml(body: string): string {
     const ol = /^\s*\d+\.\s+(.*)$/.exec(line);
     if (ul) {
       if (listType !== 'ul') { closeList(); out.push('<ul>'); listType = 'ul'; }
-      out.push(`<li>${inline(ul[1])}</li>`);
+      out.push(`<li>${inline(ul[1], mentionNames)}</li>`);
       prevText = false;
     } else if (ol) {
       if (listType !== 'ol') { closeList(); out.push('<ol>'); listType = 'ol'; }
-      out.push(`<li>${inline(ol[1])}</li>`);
+      out.push(`<li>${inline(ol[1], mentionNames)}</li>`);
       prevText = false;
     } else {
       closeList();
       if (prevText) out.push('<br>');
-      out.push(inline(line));
+      out.push(inline(line, mentionNames));
       prevText = true;
     }
   }
   closeList();
 
   return DOMPurify.sanitize(out.join(''), {
-    ALLOWED_TAGS: ['a', 'strong', 'em', 'del', 'code', 'ul', 'ol', 'li', 'br'],
-    ADD_ATTR: ['target', 'rel'],
+    ALLOWED_TAGS: ['a', 'strong', 'em', 'del', 'code', 'ul', 'ol', 'li', 'br', 'span'],
+    ADD_ATTR: ['target', 'rel', 'class'],
   });
 }
 

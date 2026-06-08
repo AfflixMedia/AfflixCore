@@ -13,23 +13,30 @@ interface Props {
   myId: string;
   onSelect: (conversationId: string) => void;
   onStartChat: () => void;
+  onOpenAnnouncement: () => void;
 }
 
 const FILTERS: { key: ChatFilter; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'unread', label: 'Unread' },
   { key: 'groups', label: 'Groups' },
+  { key: 'archived', label: 'Archive' },
 ];
 
-export default function ConversationList({ views, activeId, myId, onSelect, onStartChat }: Props) {
+export default function ConversationList({ views, activeId, myId, onSelect, onStartChat, onOpenAnnouncement }: Props) {
   const [filter, setFilter] = useState<ChatFilter>('all');
   const [q, setQ] = useState('');
 
-  const totalUnread = useMemo(() => views.reduce((s, v) => s + v.unread, 0), [views]);
+  // Archived (left/removed) chats only count toward unread in their own tab.
+  const totalUnread = useMemo(
+    () => views.reduce((s, v) => s + (v.archived ? 0 : v.unread), 0), [views]);
+  const archivedCount = useMemo(() => views.filter(v => v.archived).length, [views]);
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return views.filter(v => {
+      // Archived chats live only under the Archive tab.
+      if (filter === 'archived' ? !v.archived : v.archived) return false;
       if (filter === 'unread' && v.unread === 0) return false;
       if (filter === 'groups' && !v.conversation.is_group) return false;
       if (needle && !`${v.title} ${v.lastBody ?? ''}`.toLowerCase().includes(needle)) return false;
@@ -57,8 +64,17 @@ export default function ConversationList({ views, activeId, myId, onSelect, onSt
             >
               {f.label}
               {f.key === 'unread' && totalUnread > 0 && <span className="ms-1">({totalUnread})</span>}
+              {f.key === 'archived' && archivedCount > 0 && <span className="ms-1">({archivedCount})</span>}
             </button>
           ))}
+          <button
+            type="button"
+            className="ac-chat-filter ac-ann-filter ms-auto"
+            title="Announcements"
+            onClick={onOpenAnnouncement}
+          >
+            <i className="bi bi-megaphone-fill" />
+          </button>
         </div>
       </div>
 

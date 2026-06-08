@@ -11,12 +11,21 @@ import ConversationList from './ConversationList';
 import ChatPanel from './ChatPanel';
 import NewChatModal from './NewChatModal';
 import ForwardModal from './ForwardModal';
+import GroupModal, { GroupMember } from './GroupModal';
+import BookmarksModal from './BookmarksModal';
+import DeleteMessageModal from './DeleteMessageModal';
 import {
   listContacts, listConversations, listParticipants, fetchOverview,
   fetchMessages, getOrCreateDm, sendMessage, markConversationRead,
+  createGroup, addMember, removeMember, setMemberAdmin, renameConversation,
+  getOrCreateAnnouncement, ensureAnnouncementMembership,
+  fetchEvents, leaveConversation, deleteForEveryone, hideForMe, fetchHidden,
+  fetchReactions, setReaction, clearReaction,
+  fetchBookmarks, addBookmark, updateBookmark, deleteBookmark, setBookmarkAccess,
 } from './chatApi';
 import type {
   ChatContact, Conversation, Participant, ChatMessage, ConversationOverview, ConversationView,
+  ChatEvent, ChatReaction, ChatBookmark,
 } from './types';
 import { contactName } from './types';
 
@@ -24,6 +33,7 @@ export default function GlobalChat() {
   const { user, profile } = useAuth();
   const { markReadByConversation } = useNotifications();
   const myId = user?.id ?? '';
+  const isBob = profile?.role === 'bob';
 
   const [params, setParams] = useSearchParams();
   const activeId = params.get('c');
@@ -33,13 +43,24 @@ export default function GlobalChat() {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [overview, setOverview] = useState<Map<string, ConversationOverview>>(new Map());
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [events, setEvents] = useState<ChatEvent[]>([]);
+  const [reactions, setReactions] = useState<ChatReaction[]>([]);
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const [messagesLoading, setMessagesLoading] = useState(false);
+  const [hasMoreOlder, setHasMoreOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   const [forwardMsg, setForwardMsg] = useState<ChatMessage | null>(null);
+  const [deleteMsg, setDeleteMsg] = useState<ChatMessage | null>(null);
   const [showNewChat, setShowNewChat] = useState(false);
+  const [groupModal, setGroupModal] = useState<{ mode: 'create' | 'manage' | 'announcement' } | null>(null);
+  // Bookmarks tab.
+  const [showBookmarks, setShowBookmarks] = useState(false);
+  const [bookmarks, setBookmarks] = useState<ChatBookmark[]>([]);
+  const [bookmarksLoading, setBookmarksLoading] = useState(false);
   // First unread message id at open time — drives the "Unread messages" divider.
   const [unreadAnchorId, setUnreadAnchorId] = useState<string | null>(null);
 
@@ -62,8 +83,18 @@ export default function GlobalChat() {
     if (!myId) return;
     try { await markConversationRead(conversationId, myId); } catch { /* non-fatal */ }
     const ts = new Date().toISOString();
-    setParticipants(prev => prev.map(p =>
-      (p.conversation_id === conversationId && p.user_id === myId) ? { ...p, last_read_at: ts } : p));
+    setParticipants(prev => {
+      // Update my row — or add it, since the announcement creates its row lazily
+      // on open and the local copy wouldn't have it yet.
+      if (prev.some(p => p.conversation_id === conversationId && p.user_id === myId)) {
+        return prev.map(p =>
+          (p.conversation_id === conversationId && p.user_id === myId) ? { ...p, last_read_at: ts } : p);
+      }
+      return [...prev, {
+        conversation_id: conversationId, user_id: myId, joined_at: ts, last_read_at: ts,
+        is_admin: false, left_at: null, history_from: null,
+      }];
+    });
     setOverview(prev => {
       const next = new Map(prev);
       const o = next.get(conversationId);
@@ -83,6 +114,14 @@ export default function GlobalChat() {
     return m;
   }, [contacts, myId, profile]);
 
+  // Every internal staff member (contacts excludes me → add me back). Used for
+  // the announcement roster + member count, which are role-based not row-based.
+  const allStaff = useMemo<ChatContact[]>(() => {
+    const arr = [...contacts];
+    if (myId && profile) arr.push({ id: myId, full_name: profile.full_name, email: profile.email, role: profile.role });
+    return arr;
+  }, [contacts, myId, profile]);
+
   // ---- Build the conversation view-models the UI renders ----
   const views: ConversationView[] = useMemo(() => {
     const partsByConv = new Map<string, Participant[]>();
@@ -93,17 +132,42 @@ export default function GlobalChat() {
     });
     const list = conversations.map(conv => {
       const ov = overview.get(conv.id);
-      let title = conv.title?.trim() || 'Group';
+      const parts = partsByConv.get(conv.id) ?? [];
+      const activeParts = parts.filter(p => !p.left_at);
+      const members = activeParts
+        .map(p => directory.get(p.user_id))
+        .filter((c): c is ChatContact => !!c);
+      const archived = !!parts.find(p => p.user_id === myId)?.left_at;
+      const isCreator = !archived && conv.created_by === myId;
+      const iAmAdmin = !archived
+        && (isCreator || activeParts.some(p => p.user_id === myId && p.is_admin));
+      const canEditBookmarks = archived
+        ? false
+        : conv.is_announcement
+          ? isBob
+          : conv.is_group
+            ? (iAmAdmin || conv.bookmarks_members_can_edit)
+            : true;   // 1:1 DM — either participant
+      let title: string;
       let otherUser: ChatContact | null = null;
-      if (!conv.is_group) {
-        const others = (partsByConv.get(conv.id) ?? []).filter(p => p.user_id !== myId);
-        otherUser = others[0] ? directory.get(others[0].user_id) ?? null : null;
+      if (conv.is_announcement) {
+        title = conv.title?.trim() || 'Announcements';
+      } else if (conv.is_group) {
+        title = conv.title?.trim() || 'Group';
+      } else {
+        const other = parts.find(p => p.user_id !== myId);
+        otherUser = other ? directory.get(other.user_id) ?? null : null;
         title = contactName(otherUser);
       }
       return {
         conversation: conv,
         title,
         otherUser,
+        members,
+        iAmAdmin,
+        isCreator,
+        archived,
+        canEditBookmarks,
         lastBody: ov?.last_body ?? null,
         lastSenderId: ov?.last_sender_id ?? null,
         lastAt: ov?.last_at ?? conv.last_message_at,
@@ -112,12 +176,24 @@ export default function GlobalChat() {
     });
     list.sort((a, b) => new Date(b.lastAt ?? 0).getTime() - new Date(a.lastAt ?? 0).getTime());
     return list;
-  }, [conversations, participants, overview, directory, myId]);
+  }, [conversations, participants, overview, directory, myId, isBob]);
 
   const activeView = useMemo(
     () => views.find(v => v.conversation.id === activeId) ?? null,
     [views, activeId],
   );
+
+  // Messages I've hidden ("delete for me") are filtered out of my own view.
+  const visibleMessages = useMemo(
+    () => messages.filter(m => !hiddenIds.has(m.id)),
+    [messages, hiddenIds]);
+
+  // Reactions grouped per message for the panel.
+  const reactionsByMsg = useMemo(() => {
+    const m = new Map<string, ChatReaction[]>();
+    reactions.forEach(r => { const a = m.get(r.message_id) ?? []; a.push(r); m.set(r.message_id, a); });
+    return m;
+  }, [reactions]);
 
   // ---- Data loaders ----
   const refreshOverview = useCallback(async () => {
@@ -131,6 +207,13 @@ export default function GlobalChat() {
     const [convs, parts] = await Promise.all([listConversations(), listParticipants()]);
     setConversations(convs);
     setParticipants(parts);
+  }, []);
+
+  const reloadReactions = useCallback(async (cid: string) => {
+    try { setReactions(await fetchReactions(cid)); } catch { /* non-fatal */ }
+  }, []);
+  const reloadEvents = useCallback(async (cid: string) => {
+    try { setEvents(await fetchEvents(cid)); } catch { /* non-fatal */ }
   }, []);
 
   const loadAll = useCallback(async () => {
@@ -152,23 +235,43 @@ export default function GlobalChat() {
 
   useEffect(() => { if (myId) loadAll(); }, [myId, loadAll]);
 
-  // ---- Load the active conversation's messages, compute the unread anchor,
-  //      then mark it read ----
+  // ---- Load the active conversation's messages + events + reactions + hidden,
+  //      compute the unread anchor, then mark it read ----
   const openConversation = useCallback(async (conversationId: string | null) => {
-    if (!conversationId) { setMessages([]); setUnreadAnchorId(null); return; }
+    if (!conversationId) {
+      setMessages([]); setEvents([]); setReactions([]); setHiddenIds(new Set());
+      setUnreadAnchorId(null); setHasMoreOlder(false);
+      return;
+    }
     setMessagesLoading(true);
     setReplyTo(null);
     try {
       // Capture the read boundary BEFORE marking read, so we can place the
       // "Unread messages" divider at the first message we hadn't seen.
-      const boundary = participantsRef.current.find(
-        p => p.conversation_id === conversationId && p.user_id === myId)?.last_read_at ?? null;
-      const msgs = await fetchMessages(conversationId);
-      const anchor = boundary
-        ? (msgs.find(m => m.sender_id !== myId
-            && new Date(m.created_at).getTime() > new Date(boundary).getTime())?.id ?? null)
-        : null;
+      const myRow = participantsRef.current.find(
+        p => p.conversation_id === conversationId && p.user_id === myId);
+      // No participant row only happens for the announcement (readable without
+      // membership). Create one lazily so the read state persists — otherwise
+      // markConversationRead updates nothing and the unread badge never clears.
+      // Treat prior announcements as unread (epoch) for the divider on first open.
+      if (!myRow) {
+        try { await ensureAnnouncementMembership(conversationId, myId); } catch { /* non-fatal */ }
+      }
+      const boundary = myRow?.last_read_at ?? '1970-01-01T00:00:00.000Z';
+      const [page, evs, rxns, hidden] = await Promise.all([
+        fetchMessages(conversationId, { limit: 40 }),
+        fetchEvents(conversationId),
+        fetchReactions(conversationId),
+        fetchHidden(conversationId, myId),
+      ]);
+      const msgs = page.messages;
+      const anchor = msgs.find(m => m.sender_id !== myId
+          && new Date(m.created_at).getTime() > new Date(boundary).getTime())?.id ?? null;
       setMessages(msgs);
+      setHasMoreOlder(page.hasMore);
+      setEvents(evs);
+      setReactions(rxns);
+      setHiddenIds(new Set(hidden));
       setUnreadAnchorId(anchor);
       await markRead(conversationId);
     } catch (e) {
@@ -180,7 +283,27 @@ export default function GlobalChat() {
 
   useEffect(() => { openConversation(activeId); }, [activeId, openConversation]);
 
-  // ---- Realtime: new messages + being added to conversations ----
+  // ---- Windowed history: load an older page when the user scrolls to the top ----
+  const loadOlder = useCallback(async () => {
+    const cid = activeIdRef.current;
+    if (!cid) return;
+    const oldest = messages[0]?.created_at;
+    if (!oldest) return;
+    setLoadingOlder(true);
+    try {
+      const page = await fetchMessages(cid, { before: oldest, limit: 30 });
+      if (page.messages.length) {
+        setMessages(prev => {
+          const known = new Set(prev.map(m => m.id));
+          return [...page.messages.filter(m => !known.has(m.id)), ...prev];
+        });
+      }
+      setHasMoreOlder(page.hasMore);
+    } catch { /* non-fatal */ }
+    finally { setLoadingOlder(false); }
+  }, [messages]);
+
+  // ---- Realtime: new/updated messages, reactions, membership ----
   useEffect(() => {
     if (!myId) return;
     const channel = supabase.channel(`global-chat:${myId}`)
@@ -195,11 +318,39 @@ export default function GlobalChat() {
           refreshOverview();
         })
       .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'chat_messages' },
+        (payload) => {
+          const m = payload.new as ChatMessage;
+          if (m.conversation_id === activeIdRef.current) {
+            setMessages(prev => prev.map(x => x.id === m.id ? m : x));
+          }
+          refreshOverview();
+        })
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'chat_message_reactions' },
+        (payload) => {
+          const cid = (payload.new as any)?.conversation_id ?? null;
+          if (activeIdRef.current && (cid === null || cid === activeIdRef.current)) {
+            reloadReactions(activeIdRef.current);
+          }
+        })
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'chat_membership_log' },
+        (payload) => {
+          const row = payload.new as ChatEvent;
+          if (row.conversation_id === activeIdRef.current) reloadEvents(activeIdRef.current);
+        })
+      .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'chat_participants', filter: `user_id=eq.${myId}` },
+        () => { reloadConversations().then(refreshOverview); })
+      .on('postgres_changes',
+        // My own row changed (auto-promoted to admin, removed → archived, re-added)
+        // → refresh my view + unread/preview.
+        { event: 'UPDATE', schema: 'public', table: 'chat_participants', filter: `user_id=eq.${myId}` },
         () => { reloadConversations().then(refreshOverview); })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [myId, refreshOverview, reloadConversations, markRead]);
+  }, [myId, refreshOverview, reloadConversations, markRead, reloadReactions, reloadEvents]);
 
   // ---- Actions ----
   const selectConversation = (conversationId: string) => {
@@ -224,7 +375,7 @@ export default function GlobalChat() {
     }
   };
 
-  const handleSend = async (body: string) => {
+  const handleSend = async (body: string, mentions: string[]) => {
     if (!activeId || !myId) return;
     const reply = replyTo;
     setReplyTo(null);
@@ -234,12 +385,118 @@ export default function GlobalChat() {
         senderId: myId,
         body,
         replyToId: reply?.id ?? null,
+        mentions,
       });
       setMessages(prev => prev.some(x => x.id === saved.id) ? prev : [...prev, saved]);
       refreshOverview();
     } catch (e) {
       setErr((e as Error).message);
     }
+  };
+
+  // ---- Acknowledgement reactions ----
+  const handleReact = async (messageId: string, emoji: string) => {
+    if (!activeId || !myId) return;
+    const mineNow = reactions.find(r => r.message_id === messageId && r.user_id === myId)?.emoji ?? null;
+    try {
+      if (mineNow === emoji) {
+        setReactions(prev => prev.filter(r => !(r.message_id === messageId && r.user_id === myId)));
+        await clearReaction(messageId, myId);
+      } else {
+        setReactions(prev => [
+          ...prev.filter(r => !(r.message_id === messageId && r.user_id === myId)),
+          { message_id: messageId, conversation_id: activeId, user_id: myId, emoji, created_at: new Date().toISOString() },
+        ]);
+        await setReaction(messageId, activeId, myId, emoji);
+      }
+      reloadReactions(activeId);
+    } catch (e) {
+      setErr((e as Error).message);
+      reloadReactions(activeId);
+    }
+  };
+
+  // ---- Delete message ----
+  const doDeleteForMe = async () => {
+    const msg = deleteMsg;
+    if (!msg || !activeId || !myId) return;
+    try {
+      await hideForMe(msg.id, activeId, myId);
+      setHiddenIds(prev => { const next = new Set(prev); next.add(msg.id); return next; });
+    } catch (e) { setErr((e as Error).message); }
+    finally { setDeleteMsg(null); }
+  };
+  const doDeleteForEveryone = async () => {
+    const msg = deleteMsg;
+    if (!msg) return;
+    try {
+      await deleteForEveryone(msg.id);
+      setMessages(prev => prev.map(m => m.id === msg.id
+        ? { ...m, deleted_at: new Date().toISOString(), body: '', mentions: null } : m));
+      refreshOverview();
+    } catch (e) { setErr((e as Error).message); }
+    finally { setDeleteMsg(null); }
+  };
+
+  // ---- Group + announcement actions ----
+  const handleCreateGroup = async (title: string, memberIds: string[]) => {
+    try {
+      const convId = await createGroup(title, memberIds);
+      setGroupModal(null);
+      await reloadConversations();
+      await refreshOverview();
+      selectConversation(convId);
+    } catch (e) { setErr((e as Error).message); }
+  };
+
+  const groupOp = async (fn: () => Promise<void>) => {
+    try { await fn(); await reloadConversations(); await refreshOverview(); }
+    catch (e) { setErr((e as Error).message); }
+  };
+
+  const handleLeave = async () => {
+    if (!activeId || !myId) return;
+    try {
+      await leaveConversation(activeId);
+      setGroupModal(null);
+      clearActive();
+      await reloadConversations();
+      await refreshOverview();
+    } catch (e) { setErr((e as Error).message); }
+  };
+
+  const openAnnouncement = async () => {
+    try {
+      let convId: string | null = conversations.find(c => c.is_announcement)?.id ?? null;
+      if (!convId && isBob) convId = await getOrCreateAnnouncement();
+      if (!convId) { setErr('No announcement channel yet — ask the admin to start it.'); return; }
+      if (myId) await ensureAnnouncementMembership(convId, myId);
+      await reloadConversations();
+      await refreshOverview();
+      selectConversation(convId);
+    } catch (e) { setErr((e as Error).message); }
+  };
+
+  // ---- Bookmarks ----
+  const reloadBookmarks = useCallback(async () => {
+    if (!activeIdRef.current) return;
+    try { setBookmarks(await fetchBookmarks(activeIdRef.current)); } catch { /* non-fatal */ }
+  }, []);
+  const openBookmarks = async () => {
+    if (!activeId) return;
+    setShowBookmarks(true); setBookmarksLoading(true);
+    try { setBookmarks(await fetchBookmarks(activeId)); }
+    catch (e) { setErr((e as Error).message); }
+    finally { setBookmarksLoading(false); }
+  };
+  const bookmarkOp = async (fn: () => Promise<void>) => {
+    try { await fn(); await reloadBookmarks(); }
+    catch (e) { setErr((e as Error).message); }
+  };
+  const toggleBookmarkAccess = async (open: boolean) => {
+    if (!activeId) return;
+    try { await setBookmarkAccess(activeId, open); await reloadConversations(); }
+    catch (e) { setErr((e as Error).message); }
   };
 
   const handleForward = async (contact: ChatContact) => {
@@ -268,6 +525,9 @@ export default function GlobalChat() {
     return <div className="text-center py-5"><Spinner animation="border" /></div>;
   }
 
+  const isAnnouncementActive = !!activeView?.conversation.is_announcement;
+  const isGroupActive = !!activeView?.conversation.is_group && !isAnnouncementActive;
+
   return (
     <div className={`ac-chat-shell ${activeId ? 'has-active' : ''}`}>
       {err && <Alert variant="danger" className="m-2 mb-0" onClose={() => setErr(null)} dismissible>{err}</Alert>}
@@ -278,17 +538,33 @@ export default function GlobalChat() {
           myId={myId}
           onSelect={selectConversation}
           onStartChat={() => setShowNewChat(true)}
+          onOpenAnnouncement={openAnnouncement}
         />
         <ChatPanel
           view={activeView}
-          messages={messages}
+          messages={visibleMessages}
+          events={events}
           loading={messagesLoading}
+          hasMoreOlder={hasMoreOlder}
+          loadingOlder={loadingOlder}
+          onLoadOlder={loadOlder}
           myId={myId}
           directory={directory}
           unreadAnchorId={unreadAnchorId}
+          // The announcement roster is role-based (all internal staff), not the
+          // lazily-created participant rows — so @-mentions can target anyone.
+          members={isAnnouncementActive ? allStaff : (activeView?.members ?? [])}
+          announcementCount={allStaff.length}
+          canPost={!activeView?.archived && (!(activeView?.conversation.is_announcement) || isBob)}
+          reactionsByMsg={reactionsByMsg}
+          onReact={handleReact}
+          onOpenGroup={() => setGroupModal({ mode: 'manage' })}
+          onOpenSettings={() => setGroupModal({ mode: 'announcement' })}
+          onOpenBookmarks={openBookmarks}
           replyTo={replyTo}
           onReply={setReplyTo}
           onForward={(m) => setForwardMsg(m)}
+          onDelete={(m) => setDeleteMsg(m)}
           onSend={handleSend}
           onBack={clearActive}
         />
@@ -299,6 +575,7 @@ export default function GlobalChat() {
         contacts={contacts}
         loading={loading}
         onPick={startChatWith}
+        onNewGroup={() => { setShowNewChat(false); setGroupModal({ mode: 'create' }); }}
         onClose={() => setShowNewChat(false)}
       />
       <ForwardModal
@@ -307,6 +584,58 @@ export default function GlobalChat() {
         contacts={contacts}
         onForward={handleForward}
         onClose={() => setForwardMsg(null)}
+      />
+      {groupModal && (
+        <GroupModal
+          show
+          mode={groupModal.mode}
+          contacts={contacts}
+          allStaff={allStaff}
+          conversation={groupModal.mode === 'create' ? null : (activeView?.conversation ?? null)}
+          members={
+            groupModal.mode === 'manage'
+              ? participants
+                  .filter(p => p.conversation_id === activeId && !p.left_at)
+                  .map(p => ({ contact: directory.get(p.user_id), isAdmin: p.is_admin }))
+                  .filter((m): m is GroupMember => !!m.contact)
+              : []
+          }
+          creatorId={activeView?.conversation.created_by ?? null}
+          myId={myId}
+          canManage={activeView?.iAmAdmin ?? false}
+          isCreator={activeView?.isCreator ?? false}
+          onCreate={handleCreateGroup}
+          onRename={(t) => groupOp(() => renameConversation(activeId!, t))}
+          onAdd={(uid, showHistory) => groupOp(() => addMember(activeId!, uid, showHistory))}
+          onRemove={(uid) => groupOp(() => removeMember(activeId!, uid))}
+          onSetAdmin={(uid, a) => groupOp(() => setMemberAdmin(activeId!, uid, a))}
+          onLeave={handleLeave}
+          onClose={() => setGroupModal(null)}
+        />
+      )}
+      {showBookmarks && activeView && (
+        <BookmarksModal
+          show
+          title={activeView.title}
+          bookmarks={bookmarks}
+          canEdit={activeView.canEditBookmarks}
+          isGroup={isGroupActive}
+          isGroupAdmin={isGroupActive && activeView.iAmAdmin}
+          membersCanEdit={activeView.conversation.bookmarks_members_can_edit}
+          loading={bookmarksLoading}
+          onAdd={(t, u) => bookmarkOp(() => addBookmark(activeId!, t, u, myId).then(() => undefined))}
+          onUpdate={(id, t, u) => bookmarkOp(() => updateBookmark(id, t, u))}
+          onDelete={(id) => bookmarkOp(() => deleteBookmark(id))}
+          onToggleAccess={toggleBookmarkAccess}
+          onClose={() => setShowBookmarks(false)}
+        />
+      )}
+      <DeleteMessageModal
+        message={deleteMsg}
+        canDeleteForEveryone={!!deleteMsg && deleteMsg.sender_id === myId && !deleteMsg.deleted_at}
+        onForMe={doDeleteForMe}
+        onForEveryone={doDeleteForEveryone}
+        onClose={() => setDeleteMsg(null)}
       />
     </div>
   );
