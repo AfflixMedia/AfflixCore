@@ -3,17 +3,22 @@ import { useNavigate } from 'react-router-dom';
 import { Card, Button, Badge, Spinner, Nav } from 'react-bootstrap';
 import { useNotifications } from '../notifications/NotificationsContext';
 
-type TabKey = 'all' | 'unread';
+type TabKey = 'all' | 'unread' | 'chats';
+
+// Chat notifications come from the Global Chat trigger (normal + @mentions).
+const isChatNotif = (type: string) => type === 'chat' || type === 'chat_mention';
 
 export default function NotificationsPage() {
   const { notifications, unreadCount, loading, markRead, markAllRead, remove } = useNotifications();
   const nav = useNavigate();
   const [tab, setTab] = useState<TabKey>('unread');
 
+  const chatCount = useMemo(() => notifications.filter(n => isChatNotif(n.type)).length, [notifications]);
+
   const visible = useMemo(() => {
-    return tab === 'unread'
-      ? notifications.filter(n => !n.read_at)
-      : notifications;
+    if (tab === 'unread') return notifications.filter(n => !n.read_at);
+    if (tab === 'chats') return notifications.filter(n => isChatNotif(n.type));
+    return notifications;
   }, [tab, notifications]);
 
   const open = (id: string, link: string | null) => {
@@ -21,10 +26,11 @@ export default function NotificationsPage() {
     if (link) nav(link);
   };
 
-  // Theme per tab
+  // Theme per tab — orange (unread), blue (all), green (chats).
   const isUnread = tab === 'unread';
-  const accent = isUnread ? '#f97316' : '#2563eb';   // orange for unread, blue for all
-  const accentSoft = isUnread ? 'rgba(249,115,22,.06)' : 'rgba(37,99,235,.04)';
+  const accent = tab === 'unread' ? '#f97316' : tab === 'chats' ? '#16a34a' : '#2563eb';
+  const accentSoft = tab === 'unread' ? 'rgba(249,115,22,.06)'
+    : tab === 'chats' ? 'rgba(22,163,74,.06)' : 'rgba(37,99,235,.04)';
 
   return (
     <>
@@ -53,6 +59,13 @@ export default function NotificationsPage() {
               </Nav.Link>
             </Nav.Item>
             <Nav.Item>
+              <Nav.Link eventKey="chats" style={tab === 'chats' ? { color: '#16a34a', borderBottomColor: '#16a34a' } : undefined}>
+                <i className="bi bi-chat-dots me-1" />
+                Chats
+                <Badge bg="secondary" pill className="ms-2">{chatCount}</Badge>
+              </Nav.Link>
+            </Nav.Item>
+            <Nav.Item>
               <Nav.Link eventKey="all">
                 <i className="bi bi-list-ul me-1" />
                 All
@@ -67,7 +80,9 @@ export default function NotificationsPage() {
         ? <div className="text-center py-5"><Spinner animation="border" /></div>
         : visible.length === 0
           ? <Card body className="text-center text-muted">
-              {isUnread ? 'No unread notifications. You\'re all caught up.' : 'No notifications yet.'}
+              {tab === 'unread' ? 'No unread notifications. You\'re all caught up.'
+                : tab === 'chats' ? 'No chat notifications.'
+                : 'No notifications yet.'}
             </Card>
           : (
             <div className="d-flex flex-column gap-2">
