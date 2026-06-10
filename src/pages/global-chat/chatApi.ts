@@ -140,6 +140,13 @@ export async function ensureAnnouncementMembership(conversationId: string, userI
   );
 }
 
+/** Mark every conversation the caller can see as delivered-to-me (now).
+ *  Drives the sender's double-tick; call on load + on each incoming message. */
+export async function markDelivered(): Promise<void> {
+  const { error } = await supabase.rpc('chat_mark_delivered');
+  if (error) throw error;
+}
+
 /** Mark a conversation read up to now for the current user. */
 export async function markConversationRead(conversationId: string, userId: string): Promise<void> {
   const { error } = await supabase

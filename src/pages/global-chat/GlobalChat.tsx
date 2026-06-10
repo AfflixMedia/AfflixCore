@@ -16,7 +16,7 @@ import BookmarksModal from './BookmarksModal';
 import DeleteMessageModal from './DeleteMessageModal';
 import {
   listContacts, listConversations, listParticipants, fetchOverview,
-  fetchMessages, getOrCreateDm, sendMessage, markConversationRead,
+  fetchMessages, getOrCreateDm, sendMessage, markConversationRead, markDelivered,
   createGroup, addMember, removeMember, setMemberAdmin, renameConversation,
   getOrCreateAnnouncement, ensureAnnouncementMembership,
   fetchEvents, leaveConversation, deleteForEveryone, hideForMe, fetchHidden,
@@ -25,9 +25,9 @@ import {
 } from './chatApi';
 import type {
   ChatContact, Conversation, Participant, ChatMessage, ConversationOverview, ConversationView,
-  ChatEvent, ChatReaction, ChatBookmark,
+  ChatEvent, ChatReaction, ChatBookmark, Receipt,
 } from './types';
-import { contactName } from './types';
+import { contactName, messageReceipts, rollupReceipt } from './types';
 
 export default function GlobalChat() {
   const { user, profile } = useAuth();
@@ -92,7 +92,7 @@ export default function GlobalChat() {
       }
       return [...prev, {
         conversation_id: conversationId, user_id: myId, joined_at: ts, last_read_at: ts,
-        is_admin: false, left_at: null, history_from: null,
+        last_delivered_at: ts, is_admin: false, left_at: null, history_from: null,
       }];
     });
     setOverview(prev => {
@@ -138,6 +138,16 @@ export default function GlobalChat() {
         .map(p => directory.get(p.user_id))
         .filter((c): c is ChatContact => !!c);
       const archived = !!parts.find(p => p.user_id === myId)?.left_at;
+      // Tick state for my own last message (shown in the list preview). Skipped
+      // for the announcement — its roster is role-based, not row-based.
+      let lastReceipt: Receipt | null = null;
+      if (ov?.last_sender_id === myId && ov?.last_at && !conv.is_announcement) {
+        const partByUser = new Map(activeParts.map(p => [p.user_id, p]));
+        const recips = activeParts
+          .map(p => directory.get(p.user_id))
+          .filter((c): c is ChatContact => !!c && c.id !== myId);
+        lastReceipt = rollupReceipt(messageReceipts(ov.last_at, recips, id => partByUser.get(id)));
+      }
       const isCreator = !archived && conv.created_by === myId;
       const iAmAdmin = !archived
         && (isCreator || activeParts.some(p => p.user_id === myId && p.is_admin));
@@ -171,6 +181,7 @@ export default function GlobalChat() {
         lastBody: ov?.last_body ?? null,
         lastSenderId: ov?.last_sender_id ?? null,
         lastAt: ov?.last_at ?? conv.last_message_at,
+        lastReceipt,
         unread: ov?.unread ?? 0,
       } as ConversationView;
     });
@@ -182,6 +193,13 @@ export default function GlobalChat() {
     () => views.find(v => v.conversation.id === activeId) ?? null,
     [views, activeId],
   );
+
+  // Read/delivery state per member of the active conversation → drives ticks.
+  const activeParticipantsByUser = useMemo(() => {
+    const m = new Map<string, Participant>();
+    participants.forEach(p => { if (p.conversation_id === activeId) m.set(p.user_id, p); });
+    return m;
+  }, [participants, activeId]);
 
   // Messages I've hidden ("delete for me") are filtered out of my own view.
   const visibleMessages = useMemo(
@@ -226,6 +244,9 @@ export default function GlobalChat() {
       setConversations(convs);
       setParticipants(parts);
       setOverview(new Map(ov.map(o => [o.conversation_id, o])));
+      // Tell senders their messages reached me (double tick), then reflect my
+      // own newly-bumped rows (incl. a lazily-created announcement row) locally.
+      markDelivered().then(() => listParticipants().then(setParticipants)).catch(() => { /* non-fatal */ });
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -311,6 +332,8 @@ export default function GlobalChat() {
         { event: 'INSERT', schema: 'public', table: 'chat_messages' },
         (payload) => {
           const m = payload.new as ChatMessage;
+          // Confirm delivery back to the sender (double tick) for any chat I'm in.
+          if (m.sender_id !== myId) markDelivered().catch(() => { /* non-fatal */ });
           if (m.conversation_id === activeIdRef.current) {
             setMessages(prev => prev.some(x => x.id === m.id) ? prev : [...prev, m]);
             if (m.sender_id !== myId) markRead(m.conversation_id);
@@ -348,6 +371,21 @@ export default function GlobalChat() {
         // → refresh my view + unread/preview.
         { event: 'UPDATE', schema: 'public', table: 'chat_participants', filter: `user_id=eq.${myId}` },
         () => { reloadConversations().then(refreshOverview); })
+      .on('postgres_changes',
+        // Other members' read/delivery rows changed → patch locally so my ticks
+        // (and the list preview tick) update live. RLS only delivers rows in my
+        // own conversations. My own row is handled by the filtered handlers above.
+        { event: '*', schema: 'public', table: 'chat_participants' },
+        (payload) => {
+          const row = (payload.new ?? null) as Participant | null;
+          if (!row || !row.user_id || row.user_id === myId) return;
+          setParticipants(prev => {
+            const i = prev.findIndex(p =>
+              p.conversation_id === row.conversation_id && p.user_id === row.user_id);
+            if (i === -1) return [...prev, row];
+            const next = prev.slice(); next[i] = row; return next;
+          });
+        })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [myId, refreshOverview, reloadConversations, markRead, reloadReactions, reloadEvents]);
@@ -551,6 +589,7 @@ export default function GlobalChat() {
           myId={myId}
           directory={directory}
           unreadAnchorId={unreadAnchorId}
+          participantsByUser={activeParticipantsByUser}
           // The announcement roster is role-based (all internal staff), not the
           // lazily-created participant rows — so @-mentions can target anyone.
           members={isAnnouncementActive ? allStaff : (activeView?.members ?? [])}

@@ -2053,7 +2053,33 @@ input[type="number"] {
   background: rgba(0,0,0,.08); padding: 1px 5px; border-radius: 4px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em;
 }
-.ac-msg-meta { font-size: .66rem; color: var(--ac-text-muted); text-align: right; margin-top: 2px; }
+.ac-msg-meta {
+  font-size: .66rem; color: var(--ac-text-muted); text-align: right; margin-top: 2px;
+  display: flex; align-items: center; justify-content: flex-end; gap: 3px;
+}
+
+/* WhatsApp-style delivery/read ticks */
+.ac-ticks { display: inline-flex; align-items: center; line-height: 1; font-size: .82rem; color: var(--ac-text-muted); }
+.ac-ticks.read { color: #34b7f1; }            /* blue — read by all */
+.ac-ticks i { display: inline-block; }
+
+/* Message info modal */
+.ac-info-preview {
+  background: rgba(0,0,0,.04); border-radius: 8px; padding: 8px 10px; margin-bottom: 14px;
+}
+.ac-info-preview-body { font-size: .9rem; white-space: pre-wrap; word-break: break-word; }
+.ac-info-preview-meta { font-size: .72rem; color: var(--ac-text-muted); margin-top: 4px; }
+.ac-info-section { margin-bottom: 14px; }
+.ac-info-section:last-child { margin-bottom: 0; }
+.ac-info-section-head {
+  font-size: .74rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+  color: var(--ac-text-muted); margin-bottom: 6px; display: flex; align-items: center; gap: 6px;
+}
+.ac-info-section-head.read { color: #34b7f1; }
+.ac-info-section-head.pending { color: #adb5bd; }
+.ac-info-row { display: flex; align-items: center; gap: 8px; padding: 4px 2px; }
+.ac-info-name { font-size: .86rem; }
+.ac-info-when { font-size: .74rem; color: var(--ac-text-muted); white-space: nowrap; }
 .ac-msg-quote {
   border-left: 3px solid var(--ac-primary); background: rgba(0,0,0,.04);
   border-radius: 4px; padding: 3px 8px; margin-bottom: 4px;

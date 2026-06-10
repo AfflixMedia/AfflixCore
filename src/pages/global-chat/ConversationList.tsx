@@ -108,6 +108,11 @@ export default function ConversationList({ views, activeId, myId, onSelect, onSt
                     <span className="ac-chat-row-time ms-auto">{shortTime(v.lastAt)}</span>
                   </div>
                   <div className="d-flex align-items-center gap-2">
+                    {v.lastSenderId === myId && v.lastReceipt && (
+                      <span className={`ac-ticks ${v.lastReceipt}`}>
+                        <i className={`bi ${v.lastReceipt === 'sent' ? 'bi-check2' : 'bi-check2-all'}`} />
+                      </span>
+                    )}
                     <span className={`ac-chat-row-preview text-truncate ${v.unread > 0 ? 'unread' : ''}`}>
                       {v.lastBody ? `${previewPrefix}${toPlainText(v.lastBody)}` : <span className="fst-italic">No messages yet</span>}
                     </span>

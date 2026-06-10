@@ -3,7 +3,7 @@
 // announcement messages — emoji acknowledgements with a meaning legend and a
 // visible list of who reacted. Outgoing messages align right, incoming left.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ChatContact, ChatMessage, ChatReaction } from './types';
+import type { ChatContact, ChatMessage, ChatReaction, Receipt } from './types';
 import { messageTime, contactName, ACK_REACTIONS, ackMeaning } from './types';
 import { renderMessageHtml, toPlainText } from './messageFormat';
 
@@ -20,15 +20,28 @@ interface Props {
   reactions: ChatReaction[];           // reactions on this message
   myReaction: string | null;           // my current emoji on this message
   reactorName: (id: string) => string; // resolve a reactor's display name
+  receipt: Receipt | null;             // tick state for my own messages (else null)
   onReact: (emoji: string) => void;
   onReply: (m: ChatMessage) => void;
   onForward: (m: ChatMessage) => void;
   onDelete: (m: ChatMessage) => void;
+  onInfo: (m: ChatMessage) => void;
+}
+
+// Single tick (sent) vs double tick (delivered/read); blue when read.
+function Ticks({ receipt }: { receipt: Receipt }) {
+  const title = receipt === 'read' ? 'Read' : receipt === 'delivered' ? 'Delivered' : 'Sent';
+  return (
+    <span className={`ac-ticks ${receipt}`} title={title}>
+      <i className={`bi ${receipt === 'sent' ? 'bi-check2' : 'bi-check2-all'}`} />
+    </span>
+  );
 }
 
 export default function MessageBubble({
   message, mine, isGroup, sender, mentionNames, replyTo, replyToSender,
-  canReply, ackMode, reactions, myReaction, reactorName, onReact, onReply, onForward, onDelete,
+  canReply, ackMode, reactions, myReaction, reactorName, receipt,
+  onReact, onReply, onForward, onDelete, onInfo,
 }: Props) {
   const [showPicker, setShowPicker] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
@@ -88,7 +101,10 @@ export default function MessageBubble({
       <div className={`ac-msg-row ${mine ? 'mine' : ''}`}>
         <div className={`ac-msg-bubble ${mine ? 'mine' : ''} ac-msg-deleted`}>
           <span className="ac-msg-text"><i className="bi bi-slash-circle me-1" />This message was deleted</span>
-          <div className="ac-msg-meta">{messageTime(message.created_at)}</div>
+          <div className="ac-msg-meta">
+            {messageTime(message.created_at)}
+            {mine && receipt && <Ticks receipt={receipt} />}
+          </div>
           <div className="ac-msg-actions">
             <button type="button" title="Remove for me" onClick={() => onDelete(message)}>
               <i className="bi bi-eye-slash" />
@@ -122,7 +138,10 @@ export default function MessageBubble({
         )}
 
         <div className="ac-msg-text" dangerouslySetInnerHTML={{ __html: renderMessageHtml(message.body, mentionNames) }} />
-        <div className="ac-msg-meta">{messageTime(message.created_at)}</div>
+        <div className="ac-msg-meta">
+          {messageTime(message.created_at)}
+          {mine && receipt && <Ticks receipt={receipt} />}
+        </div>
 
         {/* Acknowledgement summary (who reacted with what). */}
         {summary.length > 0 && (
@@ -184,6 +203,11 @@ export default function MessageBubble({
           <button type="button" title="Forward" onClick={() => onForward(message)}>
             <i className="bi bi-forward-fill" />
           </button>
+          {mine && (
+            <button type="button" title="Message info" onClick={() => onInfo(message)}>
+              <i className="bi bi-info-circle" />
+            </button>
+          )}
           <button type="button" title="Delete" onClick={() => onDelete(message)}>
             <i className="bi bi-trash" />
           </button>

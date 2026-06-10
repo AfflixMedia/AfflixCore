@@ -7,8 +7,9 @@ import { Badge, Spinner } from 'react-bootstrap';
 import Avatar from '../../components/Avatar';
 import MessageBubble from './MessageBubble';
 import MessageComposer from './MessageComposer';
-import type { ChatContact, ChatMessage, ChatEvent, ChatReaction, ConversationView } from './types';
-import { dayLabel, roleLabel, roleBadge, contactName, eventText } from './types';
+import MessageInfoModal from './MessageInfoModal';
+import type { ChatContact, ChatMessage, ChatEvent, ChatReaction, ConversationView, Participant } from './types';
+import { dayLabel, roleLabel, roleBadge, contactName, eventText, messageReceipts, rollupReceipt } from './types';
 
 interface Props {
   view: ConversationView | null;
@@ -21,6 +22,7 @@ interface Props {
   myId: string;
   directory: Map<string, ChatContact>;
   unreadAnchorId: string | null;   // first unread message id at open time
+  participantsByUser: Map<string, Participant>;  // active conv: userId → read/delivery state
   members: ChatContact[];          // group/announcement members (for @mentions)
   announcementCount: number;       // total internal staff (announcement header)
   canPost: boolean;                // false → announcement read-only for non-admins
@@ -43,12 +45,13 @@ type Item =
 
 export default function ChatPanel({
   view, messages, events, loading, hasMoreOlder, loadingOlder, onLoadOlder,
-  myId, directory, unreadAnchorId, members, announcementCount,
+  myId, directory, unreadAnchorId, participantsByUser, members, announcementCount,
   canPost, reactionsByMsg, onReact, onOpenGroup, onOpenSettings, onOpenBookmarks,
   replyTo, onReply, onForward, onDelete, onSend, onBack,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const [infoMsg, setInfoMsg] = useState<ChatMessage | null>(null);
   const positionedConvRef = useRef<string | null>(null);
   const prevCountRef = useRef(0);
   // Pre-prepend scrollHeight, captured when an older page is requested so the
@@ -74,6 +77,14 @@ export default function ChatPanel({
   }, [messages, events]);
 
   const nameOf = (id: string | null) => contactName(id ? directory.get(id) ?? null : null);
+
+  // Recipients of my messages = everyone in the conversation except me. Their
+  // read/delivery rows drive the ticks; for the announcement `members` is the
+  // role-based staff list, so staff who never opened simply count as pending.
+  const recipients = useMemo(
+    () => members.filter(c => c.id !== myId), [members, myId]);
+  const receiptsFor = (m: ChatMessage) =>
+    messageReceipts(m.created_at, recipients, id => participantsByUser.get(id));
 
   const isNearBottom = () => {
     const el = scrollRef.current;
@@ -236,6 +247,8 @@ export default function ChatPanel({
               const replyTarget = m.reply_to_id ? (msgById.get(m.reply_to_id) ?? null) : null;
               const rxns = reactionsByMsg.get(m.id) ?? [];
               const mine = rxns.find(r => r.user_id === myId)?.emoji ?? null;
+              const isMine = m.sender_id === myId;
+              const receipt = isMine && !m.deleted_at ? rollupReceipt(receiptsFor(m)) : null;
               return (
                 <div key={m.id} data-mid={m.id}>
                   {showDay && <div className="ac-day-sep"><span>{dayLabel(it.at)}</span></div>}
@@ -255,10 +268,12 @@ export default function ChatPanel({
                     reactions={rxns}
                     myReaction={mine}
                     reactorName={nameOf}
+                    receipt={receipt}
                     onReact={(emoji) => onReact(m.id, emoji)}
                     onReply={onReply}
                     onForward={onForward}
                     onDelete={onDelete}
+                    onInfo={setInfoMsg}
                   />
                 </div>
               );
@@ -292,6 +307,13 @@ export default function ChatPanel({
         replyToSender={replyTo?.sender_id ? directory.get(replyTo.sender_id) ?? null : null}
         onCancelReply={() => onReply(null)}
         onSend={onSend}
+      />
+
+      <MessageInfoModal
+        message={infoMsg}
+        receipts={infoMsg ? receiptsFor(infoMsg) : []}
+        isGroup={isGroup || isAnnouncement}
+        onClose={() => setInfoMsg(null)}
       />
     </div>
   );

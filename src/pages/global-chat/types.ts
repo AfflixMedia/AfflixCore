@@ -24,6 +24,7 @@ export interface Participant {
   user_id: string;
   joined_at: string;
   last_read_at: string;
+  last_delivered_at: string | null; // null = not yet delivered to this member
   is_admin: boolean;
   left_at: string | null;       // null = active member; set = archived (left/removed)
   history_from: string | null;  // null = full history; set = visible from this time on
@@ -95,6 +96,7 @@ export interface ConversationView {
   lastBody: string | null;
   lastSenderId: string | null;
   lastAt: string | null;
+  lastReceipt: Receipt | null;     // tick state of my last message (null if not mine)
   unread: number;
 }
 
@@ -173,6 +175,67 @@ export function shortTime(iso: string | null): string {
 /** Clock time for a single message bubble. */
 export function messageTime(iso: string): string {
   return new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+
+/** Date + clock time for the message-info receipt rows. */
+export function receiptTime(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const now = new Date();
+  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  if (d.toDateString() === now.toDateString()) return `Today ${time}`;
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return `Yesterday ${time}`;
+  return `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${time}`;
+}
+
+// ---- Read receipts (WhatsApp-style ticks) -------------------------------
+// 'sent'      → stored on the server, not yet confirmed delivered (single tick)
+// 'delivered' → reached every recipient's device           (double grey tick)
+// 'read'      → opened by every recipient                   (double blue tick)
+export type Receipt = 'sent' | 'delivered' | 'read';
+
+/** One recipient's delivery/read state for a single message. */
+export interface MemberReceipt {
+  contact: ChatContact;
+  delivered: boolean;
+  read: boolean;
+  deliveredAt: string | null;
+  readAt: string | null;
+}
+
+const atLeast = (ts: string | null | undefined, t: number): boolean =>
+  !!ts && new Date(ts).getTime() >= t;
+
+/** Per-recipient delivery/read breakdown for a message (info modal). */
+export function messageReceipts(
+  messageAt: string,
+  recipients: ChatContact[],
+  partOf: (userId: string) => Participant | undefined,
+): MemberReceipt[] {
+  const t = new Date(messageAt).getTime();
+  return recipients.map(c => {
+    const p = partOf(c.id);
+    const read = atLeast(p?.last_read_at, t);
+    // Reading implies the device received it, even if last_delivered_at lags.
+    const delivered = read || atLeast(p?.last_delivered_at, t);
+    return {
+      contact: c,
+      delivered,
+      read,
+      deliveredAt: p?.last_delivered_at ?? null,
+      readAt: read ? (p?.last_read_at ?? null) : null,
+    };
+  });
+}
+
+/** Roll a per-recipient breakdown up to a single tick state. */
+export function rollupReceipt(rs: MemberReceipt[]): Receipt {
+  if (rs.length === 0) return 'sent';
+  if (rs.every(r => r.read)) return 'read';
+  if (rs.every(r => r.delivered)) return 'delivered';
+  return 'sent';
 }
 
 /** Day separator label (Today / Yesterday / date) for the message stream. */
