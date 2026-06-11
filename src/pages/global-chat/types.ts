@@ -127,15 +127,19 @@ export const contactName = (c: ChatContact | null | undefined): string =>
 
 // Fixed acknowledgement set for announcement messages. Each emoji carries a
 // defined meaning shown in the info legend / tooltips.
-export const ACK_REACTIONS: { emoji: string; label: string; meaning: string }[] = [
-  { emoji: '✅', label: 'Acknowledged', meaning: 'Seen and understood' },
-  { emoji: '👍', label: 'Will do',      meaning: 'Agree — I’ll take care of it' },
-  { emoji: '👀', label: 'Reviewing',    meaning: 'Looking into it now' },
-  { emoji: '🙋', label: 'Question',     meaning: 'I have a question / need clarification' },
-  { emoji: '❤️', label: 'Appreciated',  meaning: 'Thank you / appreciated' },
+// `unified` is the emoji-picker-react codepoint id, used to render the Apple-style glyph.
+export const ACK_REACTIONS: { emoji: string; unified: string; label: string; meaning: string }[] = [
+  { emoji: '✅', unified: '2705',     label: 'Acknowledged', meaning: 'Seen and understood' },
+  { emoji: '👍', unified: '1f44d',    label: 'Will do',      meaning: 'Agree — I’ll take care of it' },
+  { emoji: '👀', unified: '1f440',    label: 'Reviewing',    meaning: 'Looking into it now' },
+  { emoji: '🙋', unified: '1f64b',    label: 'Question',     meaning: 'I have a question / need clarification' },
+  { emoji: '❤️', unified: '2764-fe0f', label: 'Appreciated',  meaning: 'Thank you / appreciated' },
 ];
 export const ackMeaning = (emoji: string): string =>
   ACK_REACTIONS.find(r => r.emoji === emoji)?.label ?? '';
+/** emoji-picker-react `unified` codepoint for an ack emoji (for Apple-style rendering). */
+export const ackUnified = (emoji: string): string | undefined =>
+  ACK_REACTIONS.find(r => r.emoji === emoji)?.unified;
 
 /** Human-readable system line for a membership-log event. */
 export function eventText(

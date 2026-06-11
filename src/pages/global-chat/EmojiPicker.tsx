@@ -1,50 +1,20 @@
-// A tiny, dependency-free emoji picker. Curated common emojis grouped into a
-// few tabs — enough for chat without pulling in a heavy emoji library.
-import { useState } from 'react';
-
-const GROUPS: { key: string; icon: string; emojis: string[] }[] = [
-  {
-    key: 'smileys', icon: 'bi-emoji-smile',
-    emojis: ['😀','😃','😄','😁','😆','😅','😂','🤣','🙂','🙃','😉','😊','😇','🥰','😍','😘','😗','😋','😛','😜','🤪','🤨','🧐','🤓','😎','🥳','😏','😒','😞','😔','😟','😕','🙁','😣','😖','😫','😩','🥺','😢','😭','😤','😠','😡','🤯','😳','🥵','🥶','😱','😨','😰','😥','🤗','🤔','🤭','🤫','😴','😌','😬','🙄'],
-  },
-  {
-    key: 'gestures', icon: 'bi-hand-thumbs-up',
-    emojis: ['👍','👎','👌','✌️','🤞','🤟','🤘','👏','🙌','🤝','🙏','💪','👋','🤙','👆','👇','👈','👉','✋','🖐️','🤚','👊','✊','🫶','🫡','🫰','💯','✅','❌','⭐','🔥','✨','🎉','🎊','💡','⚡','💥','💫'],
-  },
-  {
-    key: 'hearts', icon: 'bi-heart',
-    emojis: ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝'],
-  },
-  {
-    key: 'objects', icon: 'bi-star',
-    emojis: ['📈','📉','📊','💰','💵','💸','🛒','📦','📅','📌','📎','✏️','📝','📁','📂','🔗','📞','📱','💻','⌨️','🖥️','🚀','🏆','🎯','⏰','⏳','🔔','📣','💬','👀','🤖','☕','🍕','🎁','🌟','☑️'],
-  },
-];
+// Apple-style emoji picker backed by `emoji-picker-react`. Keeps the same
+// `onPick(emoji)` contract so the composer wiring is unchanged.
+import Picker, { EmojiStyle, Theme, type EmojiClickData } from 'emoji-picker-react';
 
 export default function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
-  const [tab, setTab] = useState(0);
   return (
     <div className="ac-emoji-picker">
-      <div className="ac-emoji-tabs">
-        {GROUPS.map((g, i) => (
-          <button
-            key={g.key}
-            type="button"
-            className={`ac-emoji-tab ${i === tab ? 'active' : ''}`}
-            onClick={() => setTab(i)}
-            title={g.key}
-          >
-            <i className={`bi ${g.icon}`} />
-          </button>
-        ))}
-      </div>
-      <div className="ac-emoji-grid">
-        {GROUPS[tab].emojis.map((e, i) => (
-          <button key={`${e}-${i}`} type="button" className="ac-emoji-btn" onClick={() => onPick(e)}>
-            {e}
-          </button>
-        ))}
-      </div>
+      <Picker
+        onEmojiClick={(d: EmojiClickData) => onPick(d.emoji)}
+        emojiStyle={EmojiStyle.APPLE}
+        theme={Theme.LIGHT}
+        width={320}
+        height={400}
+        lazyLoadEmojis
+        previewConfig={{ showPreview: false }}
+        searchPlaceholder="Search emoji"
+      />
     </div>
   );
 }

@@ -3,9 +3,18 @@
 // announcement messages — emoji acknowledgements with a meaning legend and a
 // visible list of who reacted. Outgoing messages align right, incoming left.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Emoji, EmojiStyle } from 'emoji-picker-react';
 import type { ChatContact, ChatMessage, ChatReaction, Receipt } from './types';
-import { messageTime, contactName, ACK_REACTIONS, ackMeaning } from './types';
+import { messageTime, contactName, ACK_REACTIONS, ackMeaning, ackUnified } from './types';
 import { renderMessageHtml, toPlainText } from './messageFormat';
+
+// Apple-style ack glyph; falls back to the raw emoji char if not in the ack set.
+function AckEmoji({ emoji, size = 18 }: { emoji: string; size?: number }) {
+  const unified = ackUnified(emoji);
+  return unified
+    ? <Emoji unified={unified} emojiStyle={EmojiStyle.APPLE} size={size} lazyLoad />
+    : <span>{emoji}</span>;
+}
 
 interface Props {
   message: ChatMessage;
@@ -154,7 +163,7 @@ export default function MessageBubble({
                 title={`${ackMeaning(emoji) || 'Reacted'} — ${names.join(', ')}`}
                 onClick={() => ackMode && onReact(emoji)}
               >
-                <span>{emoji}</span><span className="ac-react-count">{names.length}</span>
+                <AckEmoji emoji={emoji} size={16} /><span className="ac-react-count">{names.length}</span>
               </button>
             ))}
           </div>
@@ -181,7 +190,7 @@ export default function MessageBubble({
                         className={myReaction === r.emoji ? 'active' : ''}
                         title={`${r.label} — ${r.meaning}`}
                         onClick={() => { onReact(r.emoji); setShowPicker(false); setShowInfo(false); }}
-                      >{r.emoji}</button>
+                      ><AckEmoji emoji={r.emoji} size={20} /></button>
                     ))}
                     <button type="button" className="ac-ack-info" title="What do these mean?"
                       onClick={() => setShowInfo(s => !s)}><i className="bi bi-info-circle" /></button>
@@ -190,7 +199,7 @@ export default function MessageBubble({
                     <div className="ac-ack-legend">
                       {ACK_REACTIONS.map(r => (
                         <div key={r.emoji} className="ac-ack-legend-row">
-                          <span className="ac-ack-legend-emoji">{r.emoji}</span>
+                          <span className="ac-ack-legend-emoji"><AckEmoji emoji={r.emoji} size={18} /></span>
                           <span><b>{r.label}</b> — {r.meaning}</span>
                         </div>
                       ))}
