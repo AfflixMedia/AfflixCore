@@ -53,6 +53,7 @@ export default function BrandDetail() {
   const { profile } = useAuth();
   const isBob = profile?.role === 'bob';
   const isApc = profile?.role === 'apc';
+  const isTeamLead = profile?.role === 'team_lead';
   const canManageGmvMax = !!profile?.can_manage_gmv_max;
 
   const [brand, setBrand] = useState<Brand | null>(null);
@@ -80,6 +81,8 @@ export default function BrandDetail() {
         supabase.from('brands').select('id,name,client,client_id,share_enabled,client_status').eq('id', id).maybeSingle(),
         isApc
           ? supabase.from('apc_brands').select('brand_id').eq('apc_id', profile?.id ?? '').eq('brand_id', id ?? '')
+          : isTeamLead
+          ? supabase.from('team_lead_brands').select('brand_id').eq('team_lead_id', profile?.id ?? '').eq('brand_id', id ?? '')
           : Promise.resolve({ data: [] }),
         // RLS already scopes this to brands the user can see (Bob sees all,
         // APC sees their assigned brands).
@@ -99,7 +102,7 @@ export default function BrandDetail() {
       })));
       setLoading(false);
     })();
-  }, [id, isApc, profile?.id]);
+  }, [id, isApc, isTeamLead, profile?.id]);
 
   // Brands that pass the active status filter, in alphabetical order. Drives both
   // the prev/next walk and the switcher list.
@@ -157,6 +160,12 @@ export default function BrandDetail() {
 
   const visibleTabs = useMemo(() => {
     if (isBob) return TABS;
+    // Team Lead: APC-level access to their brands, minus Paid Collab (separate
+    // operation) and the Bob-only financials (Billing / Payments).
+    if (isTeamLead) {
+      if (!assignedToMe) return [];
+      return TABS.filter(t => !['paid-collab', 'billing', 'payments'].includes(t.key));
+    }
     if (!isApc || !assignedToMe) return [];
     return TABS.filter(t => {
       if (t.key === 'gmv-max') return canManageGmvMax;
@@ -164,7 +173,7 @@ export default function BrandDetail() {
       if (t.key === 'payments') return false; // Bob-only payment-popup controls
       return true;
     });
-  }, [isBob, isApc, assignedToMe, canManageGmvMax]);
+  }, [isBob, isApc, isTeamLead, assignedToMe, canManageGmvMax]);
 
   const currentTab: TabKey = useMemo(() => {
     const fromUrl = visibleTabs.find(t => t.key === tabFromUrl);
@@ -196,11 +205,13 @@ export default function BrandDetail() {
   // temporarily-paused all count as active/editable.
   const brandActive = brand.client_status !== 'closed';
   // Compose per-tab "can edit" flags by AND-ing role-based perms with brand active.
+  // A Team Lead handles their assigned brands with APC-level edit rights.
+  const tlAssigned = isTeamLead && assignedToMe;
   const canEditResources = (isBob) && brandActive;
-  const canEditGmvMax    = (isBob || canManageGmvMax) && brandActive;
-  const canEditSamples   = (isBob || (isApc && assignedToMe)) && brandActive;
+  const canEditGmvMax    = (isBob || canManageGmvMax || tlAssigned) && brandActive;
+  const canEditSamples   = (isBob || (isApc && assignedToMe) || tlAssigned) && brandActive;
   const canEditPaidCollab = (isBob || (isApc && assignedToMe)) && brandActive;
-  const canEditProducts   = (isBob || (isApc && assignedToMe)) && brandActive;
+  const canEditProducts   = (isBob || (isApc && assignedToMe) || tlAssigned) && brandActive;
   // Reporting share toggles are Bob-only and require active brand.
   const canEditReporting = isBob && brandActive;
 

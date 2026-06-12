@@ -12,10 +12,11 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
   const isBob = profile?.role === 'bob';
   const reportingUnread = notifications.filter(n => !n.read_at && n.link?.startsWith('/reporting/')).length;
   const isApc = profile?.role === 'apc';
+  const isTeamLead = profile?.role === 'team_lead';
   const isPaidCollabClient = profile?.role === 'paid_collab_client';
   const isPaidCollabHandler = profile?.role === 'paid_collab_handler';
-  // Internal staff (admin / apc / handler) get the team Chats feature.
-  const isInternal = isBob || isApc || isPaidCollabHandler;
+  // Internal staff (admin / team lead / apc / handler) get the team Chats feature.
+  const isInternal = isBob || isTeamLead || isApc || isPaidCollabHandler;
   const chatUnread = notifications.filter(n => !n.read_at && n.type === 'chat').length;
 
   return (
@@ -54,6 +55,18 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
               <i className="bi bi-folder2" /> <span className="ac-nav-label">Resources</span>
             </NavLink>
           </>
+        ) : isTeamLead ? (
+          <>
+            <NavLink to="/brands" title="Brands">
+              <i className="bi bi-shop" /> <span className="ac-nav-label">Brands</span>
+            </NavLink>
+            <NavLink to="/apcs" title="APCs">
+              <i className="bi bi-people" /> <span className="ac-nav-label">APCs</span>
+            </NavLink>
+            <NavLink to="/resources" title="Resources">
+              <i className="bi bi-folder2" /> <span className="ac-nav-label">Resources</span>
+            </NavLink>
+          </>
         ) : (
           <>
             <NavLink to="/dashboard" title="Dashboard">
@@ -66,6 +79,9 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
                 </NavLink>
                 <NavLink to="/clients" title="Clients">
                   <i className="bi bi-building" /> <span className="ac-nav-label">Clients</span>
+                </NavLink>
+                <NavLink to="/team-leads" title="Team Leads">
+                  <i className="bi bi-diagram-3" /> <span className="ac-nav-label">Team Leads</span>
                 </NavLink>
                 <NavLink to="/apcs" title="APCs">
                   <i className="bi bi-people" /> <span className="ac-nav-label">APCs</span>

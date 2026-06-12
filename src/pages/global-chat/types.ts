@@ -105,13 +105,15 @@ export type ChatFilter = 'all' | 'unread' | 'groups' | 'archived';
 // Friendly role labels shown as a small badge next to a person's name.
 export const ROLE_LABEL: Record<string, string> = {
   bob: 'Boss',
+  team_lead: 'Team Lead',
   apc: 'APC',
-  paid_collab_handler: 'Team Lead',
+  paid_collab_handler: 'PCL',
 };
 
 // react-bootstrap Badge `bg` per role.
 export const ROLE_BADGE: Record<string, string> = {
   bob: 'danger',
+  team_lead: 'warning',
   apc: 'primary',
   paid_collab_handler: 'success',
 };

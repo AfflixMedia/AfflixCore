@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 
-export type AppRole = 'bob' | 'apc' | 'paid_collab_client' | 'paid_collab_handler' | 'pending' | string;
+export type AppRole = 'bob' | 'team_lead' | 'apc' | 'paid_collab_client' | 'paid_collab_handler' | 'pending' | string;
 
 export interface Profile {
   id: string;
@@ -11,6 +11,7 @@ export interface Profile {
   role: AppRole;
   can_edit_brands?: boolean;
   can_manage_gmv_max?: boolean;
+  team_lead_id?: string | null;
 }
 
 interface AuthCtx {

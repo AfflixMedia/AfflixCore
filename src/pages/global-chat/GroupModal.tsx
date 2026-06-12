@@ -69,7 +69,7 @@ export default function GroupModal(p: Props) {
         <Modal.Body>
           <p className="text-muted small mb-2">
             <i className="bi bi-info-circle me-1" />
-            Every internal staff member (Boss, APCs, Team Leads) automatically has access —
+            Every internal staff member (Boss, Team Leads, APCs, PCLs) automatically has access —
             new people are added the moment their profile is created. Only the Boss can post.
           </p>
           <Form.Label>Members with access <Badge bg="secondary" pill>{roster.length}</Badge></Form.Label>

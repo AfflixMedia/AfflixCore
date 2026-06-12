@@ -14,11 +14,13 @@ import {
   CanvasSchema, parseTemplateRow, buildMetricBagFromReportContent,
 } from '../lib/reportingCanvas';
 import { Comment, CommentSection } from '../components/SectionComments';
+import ReportReviewBar, { ReviewState, ReviewStatus } from '../components/ReportReviewBar';
 
 interface ReportRow {
   id: string; brand_id: string; week_start: string; week_end: string;
   week_number: number; status: string; content: WeeklyReportContent;
   template_id?: string | null;
+  review_status?: ReviewStatus; reviewed_at?: string | null; review_note?: string | null;
 }
 interface Brand { id: string; name: string; client: string; client_status: string | null; }
 
@@ -207,6 +209,15 @@ export default function WeeklyReportView() {
           )}
         </div>
       </div>
+
+      <ReportReviewBar
+        kind="weekly"
+        reportId={report.id}
+        brandId={report.brand_id}
+        review={{ status: report.review_status ?? 'none', reviewed_at: report.reviewed_at, review_note: report.review_note }}
+        onChanged={(next) => setReport(r => r ? { ...r, review_status: next.status, reviewed_at: next.reviewed_at, review_note: next.review_note } : r)}
+        disabled={!brandActive}
+      />
 
       {!brandActive && (
         <Alert variant="warning" className="d-flex align-items-center gap-2">

@@ -60,7 +60,15 @@ interface Report {
   week_number: number;
   status: string;
   created_at: string;
+  review_status?: string;
 }
+
+// Small internal-review pill shown on report cards.
+const REVIEW_PILL: Record<string, { bg: string; text?: string; icon: string; label: string }> = {
+  submitted: { bg: 'warning', text: 'dark', icon: 'bi-hourglass-split', label: 'Pending review' },
+  approved:  { bg: 'success', icon: 'bi-patch-check-fill', label: 'Reviewed' },
+  rejected:  { bg: 'danger',  icon: 'bi-arrow-counterclockwise', label: 'Changes requested' },
+};
 
 type StatusTab = 'all' | 'draft' | 'submitted' | 'unread';
 
@@ -410,6 +418,12 @@ export default function WeeklyReports() {
                     </div>
                   </div>
                   <div className="wr-card-top-right">
+                    {r.review_status && REVIEW_PILL[r.review_status] && (
+                      <Badge bg={REVIEW_PILL[r.review_status].bg} text={REVIEW_PILL[r.review_status].text as any}>
+                        <i className={`bi ${REVIEW_PILL[r.review_status].icon} me-1`} />
+                        {REVIEW_PILL[r.review_status].label}
+                      </Badge>
+                    )}
                     <span className={`wr-status wr-status-${sb.tone}`}>{sb.label}</span>
                     <i className="bi bi-chevron-right wr-card-arrow" />
                   </div>

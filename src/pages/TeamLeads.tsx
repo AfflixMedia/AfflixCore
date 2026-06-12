@@ -1,99 +1,102 @@
 import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { Button, Card, Modal, Form, Spinner, Alert } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
-import { useAuth } from '../auth/AuthContext';
 import Avatar from '../components/Avatar';
 
-interface APC {
+interface TeamLead {
   id: string;
   email: string;
   full_name: string | null;
   role: string;
   created_at: string;
-  can_edit_brands: boolean;
-  can_manage_gmv_max: boolean;
   brand_ids?: string[];
   brand_names?: string[];
+  apc_count?: number;
 }
 
 interface BrandLite { id: string; name: string; }
 
-export default function APCs() {
-  const { profile } = useAuth();
-  const isBob = profile?.role === 'bob';
-  const isTeamLead = profile?.role === 'team_lead';
-  const [apcs, setApcs] = useState<APC[]>([]);
+// Bob-only management of Team Leads: create accounts, assign Bob→TeamLead brands,
+// reset passwords, and delete. Team Leads then manage their own APCs and re-assign
+// a subset of these brands to them (see APCs page in the Team Lead view).
+export default function TeamLeads() {
+  const [leads, setLeads] = useState<TeamLead[]>([]);
   const [brands, setBrands] = useState<BrandLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
   const [show, setShow] = useState(false);
-  const [editApc, setEditApc] = useState<APC | null>(null);
-  const [form, setForm] = useState({ email: '', password: '', full_name: '', brand_ids: [] as string[], can_edit_brands: false, can_manage_gmv_max: false });
+  const [editLead, setEditLead] = useState<TeamLead | null>(null);
+  const [form, setForm] = useState({ email: '', password: '', full_name: '', brand_ids: [] as string[] });
   const [saving, setSaving] = useState(false);
 
-  const [pwApc, setPwApc] = useState<APC | null>(null);
+  const [pwLead, setPwLead] = useState<TeamLead | null>(null);
   const [newPw, setNewPw] = useState('');
   const [pwBusy, setPwBusy] = useState(false);
   const [pwErr, setPwErr] = useState<string | null>(null);
   const [pwOk, setPwOk] = useState(false);
 
-  const [delApc, setDelApc] = useState<APC | null>(null);
+  const [delLead, setDelLead] = useState<TeamLead | null>(null);
   const [delBusy, setDelBusy] = useState(false);
   const [delErr, setDelErr] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true); setErr(null);
-    const [{ data: apcRows, error: e1 }, { data: brandRows, error: e2 }, { data: assigns, error: e3 }] = await Promise.all([
-      supabase.from('profiles').select('id,email,full_name,role,created_at,can_edit_brands,can_manage_gmv_max').eq('role', 'apc').order('created_at', { ascending: false }),
+    const [{ data: leadRows, error: e1 }, { data: brandRows, error: e2 }, { data: assigns, error: e3 }, { data: apcRows, error: e4 }] = await Promise.all([
+      supabase.from('profiles').select('id,email,full_name,role,created_at').eq('role', 'team_lead').order('created_at', { ascending: false }),
       supabase.from('brands').select('id,name').order('name'),
-      supabase.from('apc_brands').select('apc_id,brand_id'),
+      supabase.from('team_lead_brands').select('team_lead_id,brand_id'),
+      supabase.from('profiles').select('id,team_lead_id').eq('role', 'apc'),
     ]);
-    if (e1 || e2 || e3) {
-      setErr((e1 ?? e2 ?? e3)!.message);
+    if (e1 || e2 || e3 || e4) {
+      setErr((e1 ?? e2 ?? e3 ?? e4)!.message);
       setLoading(false); return;
     }
-    const brandMap = new Map<string,string>((brandRows ?? []).map(b => [b.id, b.name]));
+    const brandMap = new Map<string, string>((brandRows ?? []).map(b => [b.id, b.name]));
     const assignMap = new Map<string, string[]>();
     (assigns ?? []).forEach(a => {
-      const arr = assignMap.get(a.apc_id) ?? [];
+      const arr = assignMap.get(a.team_lead_id) ?? [];
       arr.push(a.brand_id);
-      assignMap.set(a.apc_id, arr);
+      assignMap.set(a.team_lead_id, arr);
+    });
+    const apcCount = new Map<string, number>();
+    (apcRows ?? []).forEach(a => {
+      if (!a.team_lead_id) return;
+      apcCount.set(a.team_lead_id, (apcCount.get(a.team_lead_id) ?? 0) + 1);
     });
     setBrands(brandRows ?? []);
-    setApcs((apcRows ?? []).map(a => ({
-      ...a,
-      can_edit_brands: !!a.can_edit_brands,
-      can_manage_gmv_max: !!a.can_manage_gmv_max,
-      brand_ids: assignMap.get(a.id) ?? [],
-      brand_names: (assignMap.get(a.id) ?? []).map(id => brandMap.get(id) ?? '?'),
+    setLeads((leadRows ?? []).map(l => ({
+      ...l,
+      brand_ids: assignMap.get(l.id) ?? [],
+      brand_names: (assignMap.get(l.id) ?? []).map(id => brandMap.get(id) ?? '?'),
+      apc_count: apcCount.get(l.id) ?? 0,
     })));
     setLoading(false);
   };
 
   useEffect(() => { load(); }, []);
 
-  const filteredApcs = useMemo(() => {
-    if (!search.trim()) return apcs;
+  const filteredLeads = useMemo(() => {
+    if (!search.trim()) return leads;
     const q = search.trim().toLowerCase();
-    return apcs.filter(a =>
-      `${a.full_name ?? ''} ${a.email} ${(a.brand_names ?? []).join(' ')}`.toLowerCase().includes(q)
+    return leads.filter(l =>
+      `${l.full_name ?? ''} ${l.email} ${(l.brand_names ?? []).join(' ')}`.toLowerCase().includes(q)
     );
-  }, [apcs, search]);
+  }, [leads, search]);
 
-  const totalAssignments = apcs.reduce((s, a) => s + (a.brand_ids?.length ?? 0), 0);
+  const totalAssignments = leads.reduce((s, l) => s + (l.brand_ids?.length ?? 0), 0);
 
   const openAdd = () => {
-    setEditApc(null);
-    setForm({ email: '', password: '', full_name: '', brand_ids: [], can_edit_brands: false, can_manage_gmv_max: false });
+    setEditLead(null);
+    setForm({ email: '', password: '', full_name: '', brand_ids: [] });
     setErr(null);
     setShow(true);
   };
 
-  const openEdit = (a: APC) => {
-    setEditApc(a);
-    setForm({ email: a.email, password: '', full_name: a.full_name ?? '', brand_ids: a.brand_ids ?? [], can_edit_brands: a.can_edit_brands, can_manage_gmv_max: a.can_manage_gmv_max });
+  const openEdit = (l: TeamLead) => {
+    setEditLead(l);
+    setForm({ email: l.email, password: '', full_name: l.full_name ?? '', brand_ids: l.brand_ids ?? [] });
     setErr(null);
     setShow(true);
   };
@@ -109,31 +112,25 @@ export default function APCs() {
     e.preventDefault();
     setSaving(true); setErr(null);
     try {
-      if (editApc) {
+      if (editLead) {
         const { error: pErr } = await supabase.from('profiles')
-          .update({
-            full_name: form.full_name,
-            can_edit_brands: form.can_edit_brands,
-            can_manage_gmv_max: form.can_manage_gmv_max,
-          }).eq('id', editApc.id);
+          .update({ full_name: form.full_name }).eq('id', editLead.id);
         if (pErr) throw pErr;
-        const { error: dErr } = await supabase.from('apc_brands').delete().eq('apc_id', editApc.id);
+        const { error: dErr } = await supabase.from('team_lead_brands').delete().eq('team_lead_id', editLead.id);
         if (dErr) throw dErr;
         if (form.brand_ids.length > 0) {
-          const rows = form.brand_ids.map(bid => ({ apc_id: editApc.id, brand_id: bid }));
-          const { error: iErr } = await supabase.from('apc_brands').insert(rows);
+          const rows = form.brand_ids.map(bid => ({ team_lead_id: editLead.id, brand_id: bid }));
+          const { error: iErr } = await supabase.from('team_lead_brands').insert(rows);
           if (iErr) throw iErr;
         }
       } else {
         const { data: { session } } = await supabase.auth.getSession();
-        const { data, error } = await supabase.functions.invoke('create-apc', {
+        const { data, error } = await supabase.functions.invoke('create-team-lead', {
           body: {
             email: form.email,
             password: form.password,
             full_name: form.full_name,
             brand_ids: form.brand_ids,
-            can_edit_brands: form.can_edit_brands,
-            can_manage_gmv_max: form.can_manage_gmv_max,
           },
           headers: { Authorization: `Bearer ${session?.access_token}` },
         });
@@ -153,10 +150,10 @@ export default function APCs() {
     <>
       <div className="ac-page-header">
         <div className="d-flex align-items-center gap-3 flex-wrap">
-          <h2>APCs</h2>
+          <h2>Team Leads</h2>
           <span className="ac-stat-pill">
-            <span className="ac-stat-num">{apcs.length}</span>
-            <span className="ac-stat-label">account manager{apcs.length === 1 ? '' : 's'}</span>
+            <span className="ac-stat-num">{leads.length}</span>
+            <span className="ac-stat-label">team lead{leads.length === 1 ? '' : 's'}</span>
           </span>
           {totalAssignments > 0 && (
             <span className="ac-stat-pill">
@@ -166,11 +163,11 @@ export default function APCs() {
           )}
         </div>
         <Button onClick={openAdd}>
-          <i className="bi bi-person-plus me-1" /> Add APC
+          <i className="bi bi-person-plus me-1" /> Add Team Lead
         </Button>
       </div>
 
-      {apcs.length > 0 && (
+      {leads.length > 0 && (
         <div className="ac-search mb-3">
           <i className="bi bi-search" />
           <input
@@ -188,51 +185,44 @@ export default function APCs() {
 
       {loading ? (
         <div className="text-center py-4"><Spinner animation="border" /></div>
-      ) : err && apcs.length === 0 ? (
+      ) : err && leads.length === 0 ? (
         <Alert variant="danger">{err}</Alert>
-      ) : apcs.length === 0 ? (
+      ) : leads.length === 0 ? (
         <Card>
           <Card.Body>
             <div className="ac-empty">
-              <div className="ac-empty-icon"><i className="bi bi-people" /></div>
-              <h5>No APCs yet</h5>
-              <p>Add your first account manager. They'll be able to sign in and manage the brands you assign to them.</p>
+              <div className="ac-empty-icon"><i className="bi bi-diagram-3" /></div>
+              <h5>No Team Leads yet</h5>
+              <p>Add your first team lead. They'll manage their own APCs and the brands you assign to them.</p>
               <Button className="mt-3" onClick={openAdd}>
-                <i className="bi bi-person-plus me-1" /> Add APC
+                <i className="bi bi-person-plus me-1" /> Add Team Lead
               </Button>
             </div>
           </Card.Body>
         </Card>
-      ) : filteredApcs.length === 0 ? (
+      ) : filteredLeads.length === 0 ? (
         <Card body className="text-muted text-center py-4">
-          No APCs match "{search}".
+          No team leads match "{search}".
         </Card>
       ) : (
         <div className="ac-list">
-          {filteredApcs.map(a => {
-            const display = a.full_name || a.email;
+          {filteredLeads.map(l => {
+            const display = l.full_name || l.email;
             return (
-              <div className="ac-list-row" key={a.id}>
+              <div className="ac-list-row" key={l.id}>
                 <Avatar name={display} size="lg" />
                 <div className="ac-row-main">
-                  <div className="ac-row-name">{a.full_name || <span className="text-muted">No name</span>}</div>
+                  <div className="ac-row-name">{l.full_name || <span className="text-muted">No name</span>}</div>
                   <div className="ac-row-sub d-flex align-items-center flex-wrap gap-2">
-                    <span><i className="bi bi-envelope me-1" />{a.email}</span>
-                    {a.can_edit_brands && (
-                      <span className="ac-chip warning" title="Can edit brand details">
-                        <i className="bi bi-pencil-square" /> Brand editor
-                      </span>
-                    )}
-                    {a.can_manage_gmv_max && (
-                      <span className="ac-chip" title="Can manage GMV Max budgets">
-                        <i className="bi bi-graph-up" /> GMV Max
-                      </span>
-                    )}
+                    <span><i className="bi bi-envelope me-1" />{l.email}</span>
+                    <span className="ac-chip" title="APCs managed by this team lead">
+                      <i className="bi bi-people" /> {l.apc_count} APC{l.apc_count === 1 ? '' : 's'}
+                    </span>
                   </div>
                   <div className="mt-2 ac-chip-group">
-                    {(a.brand_names ?? []).length === 0 ? (
+                    {(l.brand_names ?? []).length === 0 ? (
                       <span className="text-muted small fst-italic">No brands assigned</span>
-                    ) : a.brand_names!.map(n => (
+                    ) : l.brand_names!.map(n => (
                       <span key={n} className="ac-chip neutral">
                         <i className="bi bi-shop" /> {n}
                       </span>
@@ -241,20 +231,17 @@ export default function APCs() {
                 </div>
                 <div className="ac-row-actions">
                   <button className="ac-icon-btn"
-                    onClick={() => { setPwApc(a); setNewPw(''); setPwErr(null); setPwOk(false); }}
+                    onClick={() => { setPwLead(l); setNewPw(''); setPwErr(null); setPwOk(false); }}
                     title="Reset password">
                     <i className="bi bi-key" />
                   </button>
-                  <button className="ac-icon-btn" onClick={() => openEdit(a)} title="Edit">
+                  <button className="ac-icon-btn" onClick={() => openEdit(l)} title="Edit">
                     <i className="bi bi-pencil" />
                   </button>
-                  {/* Only Bob can delete an APC; Team Leads add & edit only. */}
-                  {isBob && (
-                    <button className="ac-icon-btn danger"
-                      onClick={() => { setDelApc(a); setDelErr(null); }} title="Delete APC">
-                      <i className="bi bi-trash" />
-                    </button>
-                  )}
+                  <button className="ac-icon-btn danger"
+                    onClick={() => { setDelLead(l); setDelErr(null); }} title="Delete Team Lead">
+                    <i className="bi bi-trash" />
+                  </button>
                 </div>
               </div>
             );
@@ -265,7 +252,7 @@ export default function APCs() {
       <Modal show={show} onHide={() => setShow(false)} centered>
         <Form onSubmit={submit}>
           <Modal.Header closeButton>
-            <Modal.Title>{editApc ? 'Edit APC' : 'Add APC'}</Modal.Title>
+            <Modal.Title>{editLead ? 'Edit Team Lead' : 'Add Team Lead'}</Modal.Title>
           </Modal.Header>
           <Modal.Body>
             {err && <Alert variant="danger">{err}</Alert>}
@@ -275,60 +262,33 @@ export default function APCs() {
             </Form.Group>
             <Form.Group className="mb-3">
               <Form.Label>Email</Form.Label>
-              <Form.Control type="email" required disabled={!!editApc} value={form.email}
+              <Form.Control type="email" required disabled={!!editLead} value={form.email}
                 onChange={e => setForm({ ...form, email: e.target.value })} />
-              {editApc && <Form.Text className="text-muted">Email cannot be changed.</Form.Text>}
+              {editLead && <Form.Text className="text-muted">Email cannot be changed.</Form.Text>}
             </Form.Group>
-            {!editApc && (
+            {!editLead && (
               <Form.Group className="mb-3">
                 <Form.Label>Password</Form.Label>
                 <Form.Control type="text" required minLength={6} value={form.password}
                   onChange={e => setForm({ ...form, password: e.target.value })} />
-                <Form.Text className="text-muted">Share this with the APC.</Form.Text>
+                <Form.Text className="text-muted">Share this with the team lead.</Form.Text>
               </Form.Group>
             )}
-            <Form.Group className="mb-3">
-              <Form.Label className="fw-semibold mb-1">Permissions</Form.Label>
-              <div className="border rounded p-2">
-                <Form.Check
-                  type="switch"
-                  id="can-edit-brands"
-                  label={<><strong>Edit brand details</strong> <span className="text-muted small">— name, client, GMV, tier on assigned brands</span></>}
-                  checked={form.can_edit_brands}
-                  onChange={e => setForm({ ...form, can_edit_brands: e.target.checked })}
-                />
-                <Form.Check
-                  type="switch"
-                  className="mt-2"
-                  id="can-manage-gmv-max"
-                  label={<><strong>Manage GMV Max</strong> <span className="text-muted small">— monthly budgets and weekly entries on assigned brands</span></>}
-                  checked={form.can_manage_gmv_max}
-                  onChange={e => setForm({ ...form, can_manage_gmv_max: e.target.checked })}
-                />
-              </div>
-              <Form.Text className="text-muted">
-                Bob can always do everything; these toggles only widen what an APC can do.
-              </Form.Text>
-            </Form.Group>
 
             <Form.Group className="mb-2">
               <Form.Label>Assign brands</Form.Label>
-              {isTeamLead && (
-                <Form.Text className="text-muted d-block mb-1">
-                  Only the brands assigned to you by Bob are shown.
-                </Form.Text>
-              )}
+              <Form.Text className="text-muted d-block mb-1">
+                The team lead can re-assign any subset of these to their own APCs.
+              </Form.Text>
               {brands.length === 0 ? (
-                <p className="text-muted small mb-0">
-                  {isTeamLead ? 'You have no brands assigned yet.' : 'No brands exist yet. Create some first.'}
-                </p>
+                <p className="text-muted small mb-0">No brands exist yet. Create some first.</p>
               ) : (
                 <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid #dee2e6', borderRadius: 6, padding: 10 }}>
                   {brands.map(b => (
                     <Form.Check
                       key={b.id}
                       type="checkbox"
-                      id={`b-${b.id}`}
+                      id={`tlb-${b.id}`}
                       label={b.name}
                       checked={form.brand_ids.includes(b.id)}
                       onChange={() => toggleBrand(b.id)}
@@ -340,19 +300,19 @@ export default function APCs() {
           </Modal.Body>
           <Modal.Footer>
             <Button variant="secondary" onClick={() => setShow(false)} disabled={saving}>Cancel</Button>
-            <Button type="submit" disabled={saving}>{saving ? 'Saving…' : (editApc ? 'Save' : 'Create APC')}</Button>
+            <Button type="submit" disabled={saving}>{saving ? 'Saving…' : (editLead ? 'Save' : 'Create Team Lead')}</Button>
           </Modal.Footer>
         </Form>
       </Modal>
 
-      <Modal show={!!pwApc} onHide={() => setPwApc(null)} centered>
+      <Modal show={!!pwLead} onHide={() => setPwLead(null)} centered>
         <Form onSubmit={async (e) => {
           e.preventDefault();
-          if (!pwApc) return;
+          if (!pwLead) return;
           setPwBusy(true); setPwErr(null); setPwOk(false);
           try {
-            const { data, error } = await supabase.functions.invoke('reset-apc-password', {
-              body: { user_id: pwApc.id, password: newPw },
+            const { data, error } = await supabase.functions.invoke('reset-team-lead-password', {
+              body: { user_id: pwLead.id, password: newPw },
             });
             if (error) throw error;
             if ((data as any)?.error) throw new Error((data as any).error);
@@ -364,54 +324,57 @@ export default function APCs() {
           }
         }}>
           <Modal.Header closeButton>
-            <Modal.Title>Reset password — {pwApc?.full_name || pwApc?.email}</Modal.Title>
+            <Modal.Title>Reset password — {pwLead?.full_name || pwLead?.email}</Modal.Title>
           </Modal.Header>
           <Modal.Body>
             {pwErr && <Alert variant="danger">{pwErr}</Alert>}
-            {pwOk && <Alert variant="success">Password updated. Share it with the APC.</Alert>}
+            {pwOk && <Alert variant="success">Password updated. Share it with the team lead.</Alert>}
             <Form.Group>
               <Form.Label>New password (min 6 chars)</Form.Label>
               <Form.Control type="text" required minLength={6}
                 value={newPw} onChange={e => setNewPw(e.target.value)}
                 placeholder="e.g. afflix-2026" autoFocus />
-              <Form.Text className="text-muted">The APC can use this to sign in immediately. Copy it and send it to them manually.</Form.Text>
+              <Form.Text className="text-muted">The team lead can use this to sign in immediately.</Form.Text>
             </Form.Group>
           </Modal.Body>
           <Modal.Footer>
-            <Button variant="secondary" onClick={() => setPwApc(null)}>Close</Button>
+            <Button variant="secondary" onClick={() => setPwLead(null)}>Close</Button>
             <Button type="submit" disabled={pwBusy || newPw.length < 6}>{pwBusy ? 'Updating…' : 'Reset password'}</Button>
           </Modal.Footer>
         </Form>
       </Modal>
 
-      <Modal show={!!delApc} onHide={() => !delBusy && setDelApc(null)} centered>
+      <Modal show={!!delLead} onHide={() => !delBusy && setDelLead(null)} centered>
         <Modal.Header closeButton>
-          <Modal.Title>Delete APC?</Modal.Title>
+          <Modal.Title>Delete Team Lead?</Modal.Title>
         </Modal.Header>
         <Modal.Body>
           {delErr && <Alert variant="danger">{delErr}</Alert>}
-          <p className="mb-2">This will permanently remove <strong>{delApc?.full_name || delApc?.email}</strong> and revoke their access. Their brand assignments will be cleared.</p>
-          <p className="text-muted small mb-0">Reports they created will remain. This cannot be undone.</p>
+          <p className="mb-2">This will permanently remove <strong>{delLead?.full_name || delLead?.email}</strong> and revoke their access.</p>
+          <p className="text-muted small mb-0">
+            Their APCs are kept but detached (they fall back to no team lead); APC brand
+            assignments and reports remain. This cannot be undone.
+          </p>
         </Modal.Body>
         <Modal.Footer>
-          <Button variant="secondary" onClick={() => setDelApc(null)} disabled={delBusy}>Cancel</Button>
+          <Button variant="secondary" onClick={() => setDelLead(null)} disabled={delBusy}>Cancel</Button>
           <Button variant="danger" disabled={delBusy} onClick={async () => {
-            if (!delApc) return;
+            if (!delLead) return;
             setDelBusy(true); setDelErr(null);
             try {
-              const { data, error } = await supabase.functions.invoke('delete-apc', {
-                body: { user_id: delApc.id },
+              const { data, error } = await supabase.functions.invoke('delete-team-lead', {
+                body: { user_id: delLead.id },
               });
               if (error) throw error;
               if ((data as any)?.error) throw new Error((data as any).error);
-              setDelApc(null);
+              setDelLead(null);
               await load();
             } catch (e: any) {
-              setDelErr(e?.message ?? 'Failed to delete APC');
+              setDelErr(e?.message ?? 'Failed to delete team lead');
             } finally {
               setDelBusy(false);
             }
-          }}>{delBusy ? 'Deleting…' : 'Delete APC'}</Button>
+          }}>{delBusy ? 'Deleting…' : 'Delete Team Lead'}</Button>
         </Modal.Footer>
       </Modal>
     </>

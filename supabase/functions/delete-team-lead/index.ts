@@ -1,7 +1,10 @@
-// Supabase Edge Function: reset-apc-password
-// Bob calls this to set a new password for any APC user.
-// Deploy in dashboard: Edge Functions → Create → name "reset-apc-password"
-// Verify JWT: can stay ON (we verify the caller is Bob anyway).
+// Supabase Edge Function: delete-team-lead
+// Bob calls this to permanently remove a Team Lead account.
+// Deploy: supabase functions deploy delete-team-lead
+//
+// On delete: the profiles FK (team_lead_id → profiles on delete set null) detaches
+// any APCs the lead owned (they fall back to "no team lead"); team_lead_brands rows
+// cascade away. APC accounts and their brand assignments are NOT touched.
 
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
@@ -19,7 +22,6 @@ serve(async (req) => {
     const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const anonKey     = Deno.env.get('SUPABASE_ANON_KEY')!;
 
-    // 1. Verify caller is Bob
     const authHeader = req.headers.get('Authorization') ?? '';
     const callerClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
@@ -30,28 +32,18 @@ serve(async (req) => {
     const admin = createClient(supabaseUrl, serviceKey);
     const { data: callerProfile } = await admin.from('profiles')
       .select('role').eq('id', userRes.user.id).single();
-    const callerRole = callerProfile?.role;
-    if (callerRole !== 'bob' && callerRole !== 'team_lead') {
-      return json({ error: 'Forbidden — only Bob or a Team Lead can reset APC passwords' }, 403);
-    }
+    if (callerProfile?.role !== 'bob') return json({ error: 'Forbidden — only Bob can delete Team Leads' }, 403);
 
-    // 2. Parse + validate
-    const { user_id, password } = await req.json();
-    if (!user_id || !password) return json({ error: 'user_id and password required' }, 400);
-    if (String(password).length < 6) return json({ error: 'Password must be at least 6 characters' }, 400);
+    const { user_id } = await req.json();
+    if (!user_id) return json({ error: 'user_id required' }, 400);
+    if (user_id === userRes.user.id) return json({ error: 'You cannot delete your own account' }, 400);
 
-    // 3. Confirm target is an APC (defense in depth — can't reset another Bob/Team Lead).
-    //    A Team Lead may only reset APCs they own.
     const { data: targetProfile } = await admin.from('profiles')
-      .select('role, email, team_lead_id').eq('id', user_id).single();
+      .select('role, email').eq('id', user_id).single();
     if (!targetProfile) return json({ error: 'Target user not found' }, 404);
-    if (targetProfile.role !== 'apc') return json({ error: 'Can only reset APC passwords via this endpoint' }, 403);
-    if (callerRole === 'team_lead' && targetProfile.team_lead_id !== userRes.user.id) {
-      return json({ error: 'You can only reset passwords for your own APCs.' }, 403);
-    }
+    if (targetProfile.role !== 'team_lead') return json({ error: 'Can only delete Team Lead accounts via this endpoint' }, 403);
 
-    // 4. Update
-    const { error } = await admin.auth.admin.updateUserById(user_id, { password });
+    const { error } = await admin.auth.admin.deleteUser(user_id);
     if (error) return json({ error: error.message }, 400);
 
     return json({ ok: true, email: targetProfile.email });
