@@ -90,6 +90,35 @@ serve(async (req) => {
       if (asgErr) return json({ error: asgErr.message }, 400);
     }
 
+    // 6. Welcome notification — which Team Lead (if any) + which brands.
+    try {
+      const notes: Array<Record<string, unknown>> = [];
+      if (isTeamLead) {
+        const { data: lead } = await admin.from('profiles')
+          .select('full_name, email').eq('id', userRes.user.id).single();
+        const leadName = lead?.full_name || lead?.email || 'your Team Lead';
+        notes.push({
+          user_id: newUserId, type: 'team_assignment',
+          title: 'Welcome to the team',
+          body: `You report to ${leadName}.`,
+          link: '/brands',
+          payload: { team_lead_id: userRes.user.id, kind: 'apc_assigned' },
+        });
+      }
+      if (brand_ids.length > 0) {
+        const { data: bs } = await admin.from('brands').select('name').in('id', brand_ids);
+        const names = (bs ?? []).map((b: { name: string }) => b.name).join(', ');
+        notes.push({
+          user_id: newUserId, type: 'brand_assignment',
+          title: `Brand${brand_ids.length > 1 ? 's' : ''} assigned to you`,
+          body: names || 'A brand',
+          link: '/brands',
+          payload: { brand_ids, kind: 'brand_assigned' },
+        });
+      }
+      if (notes.length > 0) await admin.from('notifications').insert(notes);
+    } catch (_) { /* notifications are best-effort */ }
+
     return json({ id: newUserId, email });
   } catch (e) {
     return json({ error: (e as Error).message }, 500);

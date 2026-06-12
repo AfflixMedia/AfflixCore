@@ -18,6 +18,9 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
   // Internal staff (admin / team lead / apc / handler) get the team Chats feature.
   const isInternal = isBob || isTeamLead || isApc || isPaidCollabHandler;
   const chatUnread = notifications.filter(n => !n.read_at && n.type === 'chat').length;
+  const taskUnread = notifications.filter(n => !n.read_at && n.type === 'task').length;
+  // Tasks are used by Team Leads (assign), APCs (do), and Bob (oversight).
+  const showTasks = isBob || isTeamLead || isApc;
 
   return (
     <aside className="ac-sidebar">
@@ -146,6 +149,12 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
             )}
           </>
         ))}
+        {showTasks && (
+          <NavLink to="/tasks" title="Tasks">
+            <i className="bi bi-check2-square" /> <span className="ac-nav-label">Tasks</span>
+            {taskUnread > 0 && <Badge bg="danger" pill className="ms-2">{taskUnread}</Badge>}
+          </NavLink>
+        )}
         {isInternal && (
           <NavLink to="/chats" title="Chats">
             <i className="bi bi-chat-dots" /> <span className="ac-nav-label">Chats</span>

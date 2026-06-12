@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, FormEvent } from 'react';
-import { Button, Card, Modal, Form, Spinner, Alert } from 'react-bootstrap';
+import { Button, Card, Modal, Form, Spinner, Alert, Row, Col } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import Avatar from '../components/Avatar';
 
@@ -15,6 +15,7 @@ interface TeamLead {
 }
 
 interface BrandLite { id: string; name: string; }
+interface ApcLite { id: string; email: string; full_name: string | null; team_lead_id: string | null; }
 
 // Bob-only management of Team Leads: create accounts, assign Bob→TeamLead brands,
 // reset passwords, and delete. Team Leads then manage their own APCs and re-assign
@@ -22,13 +23,14 @@ interface BrandLite { id: string; name: string; }
 export default function TeamLeads() {
   const [leads, setLeads] = useState<TeamLead[]>([]);
   const [brands, setBrands] = useState<BrandLite[]>([]);
+  const [allApcs, setAllApcs] = useState<ApcLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
   const [show, setShow] = useState(false);
   const [editLead, setEditLead] = useState<TeamLead | null>(null);
-  const [form, setForm] = useState({ email: '', password: '', full_name: '', brand_ids: [] as string[] });
+  const [form, setForm] = useState({ email: '', password: '', full_name: '', brand_ids: [] as string[], apc_ids: [] as string[] });
   const [saving, setSaving] = useState(false);
 
   const [pwLead, setPwLead] = useState<TeamLead | null>(null);
@@ -47,7 +49,7 @@ export default function TeamLeads() {
       supabase.from('profiles').select('id,email,full_name,role,created_at').eq('role', 'team_lead').order('created_at', { ascending: false }),
       supabase.from('brands').select('id,name').order('name'),
       supabase.from('team_lead_brands').select('team_lead_id,brand_id'),
-      supabase.from('profiles').select('id,team_lead_id').eq('role', 'apc'),
+      supabase.from('profiles').select('id,email,full_name,team_lead_id').eq('role', 'apc').order('full_name'),
     ]);
     if (e1 || e2 || e3 || e4) {
       setErr((e1 ?? e2 ?? e3 ?? e4)!.message);
@@ -66,6 +68,7 @@ export default function TeamLeads() {
       apcCount.set(a.team_lead_id, (apcCount.get(a.team_lead_id) ?? 0) + 1);
     });
     setBrands(brandRows ?? []);
+    setAllApcs((apcRows ?? []) as ApcLite[]);
     setLeads((leadRows ?? []).map(l => ({
       ...l,
       brand_ids: assignMap.get(l.id) ?? [],
@@ -89,14 +92,18 @@ export default function TeamLeads() {
 
   const openAdd = () => {
     setEditLead(null);
-    setForm({ email: '', password: '', full_name: '', brand_ids: [] });
+    setForm({ email: '', password: '', full_name: '', brand_ids: [], apc_ids: [] });
     setErr(null);
     setShow(true);
   };
 
   const openEdit = (l: TeamLead) => {
     setEditLead(l);
-    setForm({ email: l.email, password: '', full_name: l.full_name ?? '', brand_ids: l.brand_ids ?? [] });
+    setForm({
+      email: l.email, password: '', full_name: l.full_name ?? '',
+      brand_ids: l.brand_ids ?? [],
+      apc_ids: allApcs.filter(a => a.team_lead_id === l.id).map(a => a.id),
+    });
     setErr(null);
     setShow(true);
   };
@@ -108,10 +115,18 @@ export default function TeamLeads() {
     }));
   };
 
+  const toggleApc = (id: string) => {
+    setForm(f => ({
+      ...f,
+      apc_ids: f.apc_ids.includes(id) ? f.apc_ids.filter(a => a !== id) : [...f.apc_ids, id],
+    }));
+  };
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setSaving(true); setErr(null);
     try {
+      let leadId: string;
       if (editLead) {
         const { error: pErr } = await supabase.from('profiles')
           .update({ full_name: form.full_name }).eq('id', editLead.id);
@@ -123,6 +138,7 @@ export default function TeamLeads() {
           const { error: iErr } = await supabase.from('team_lead_brands').insert(rows);
           if (iErr) throw iErr;
         }
+        leadId = editLead.id;
       } else {
         const { data: { session } } = await supabase.auth.getSession();
         const { data, error } = await supabase.functions.invoke('create-team-lead', {
@@ -136,7 +152,11 @@ export default function TeamLeads() {
         });
         if (error) throw error;
         if ((data as any)?.error) throw new Error((data as any).error);
+        leadId = (data as any).id as string;
       }
+      // Set which APCs report to this Team Lead (notifies newly-added APCs).
+      const { error: aErr } = await supabase.rpc('set_team_lead_apcs', { p_lead: leadId, p_apc_ids: form.apc_ids });
+      if (aErr) throw aErr;
       setShow(false);
       await load();
     } catch (e: any) {
@@ -249,7 +269,7 @@ export default function TeamLeads() {
         </div>
       )}
 
-      <Modal show={show} onHide={() => setShow(false)} centered>
+      <Modal show={show} onHide={() => setShow(false)} size="lg" centered>
         <Form onSubmit={submit}>
           <Modal.Header closeButton>
             <Modal.Title>{editLead ? 'Edit Team Lead' : 'Add Team Lead'}</Modal.Title>
@@ -275,28 +295,64 @@ export default function TeamLeads() {
               </Form.Group>
             )}
 
-            <Form.Group className="mb-2">
-              <Form.Label>Assign brands</Form.Label>
-              <Form.Text className="text-muted d-block mb-1">
-                The team lead can re-assign any subset of these to their own APCs.
-              </Form.Text>
-              {brands.length === 0 ? (
-                <p className="text-muted small mb-0">No brands exist yet. Create some first.</p>
-              ) : (
-                <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid #dee2e6', borderRadius: 6, padding: 10 }}>
-                  {brands.map(b => (
-                    <Form.Check
-                      key={b.id}
-                      type="checkbox"
-                      id={`tlb-${b.id}`}
-                      label={b.name}
-                      checked={form.brand_ids.includes(b.id)}
-                      onChange={() => toggleBrand(b.id)}
-                    />
-                  ))}
-                </div>
-              )}
-            </Form.Group>
+            <Row>
+              <Col md={6}>
+                <Form.Group className="mb-2">
+                  <Form.Label>Assign brands</Form.Label>
+                  <Form.Text className="text-muted d-block mb-1">
+                    The team lead can re-assign any subset of these to their own APCs.
+                  </Form.Text>
+                  {brands.length === 0 ? (
+                    <p className="text-muted small mb-0">No brands exist yet. Create some first.</p>
+                  ) : (
+                    <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid #dee2e6', borderRadius: 6, padding: 10 }}>
+                      {brands.map(b => (
+                        <Form.Check
+                          key={b.id}
+                          type="checkbox"
+                          id={`tlb-${b.id}`}
+                          label={b.name}
+                          checked={form.brand_ids.includes(b.id)}
+                          onChange={() => toggleBrand(b.id)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </Form.Group>
+              </Col>
+              <Col md={6}>
+                <Form.Group className="mb-2">
+                  <Form.Label>APCs in this team</Form.Label>
+                  <Form.Text className="text-muted d-block mb-1">
+                    Choose which APCs report to this team lead.
+                  </Form.Text>
+                  {allApcs.length === 0 ? (
+                    <p className="text-muted small mb-0">No APCs exist yet.</p>
+                  ) : (
+                    <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid #dee2e6', borderRadius: 6, padding: 10 }}>
+                      {allApcs.map(a => {
+                        const otherLead = a.team_lead_id && a.team_lead_id !== editLead?.id;
+                        return (
+                          <Form.Check
+                            key={a.id}
+                            type="checkbox"
+                            id={`tla-${a.id}`}
+                            checked={form.apc_ids.includes(a.id)}
+                            onChange={() => toggleApc(a.id)}
+                            label={
+                              <span>
+                                {a.full_name || a.email}
+                                {otherLead && <span className="text-warning small ms-1" title="Currently on another team">· on another team</span>}
+                              </span>
+                            }
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
+                </Form.Group>
+              </Col>
+            </Row>
           </Modal.Body>
           <Modal.Footer>
             <Button variant="secondary" onClick={() => setShow(false)} disabled={saving}>Cancel</Button>

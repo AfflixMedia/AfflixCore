@@ -121,13 +121,11 @@ export default function APCs() {
             can_manage_gmv_max: form.can_manage_gmv_max,
           }).eq('id', editApc.id);
         if (pErr) throw pErr;
-        const { error: dErr } = await supabase.from('apc_brands').delete().eq('apc_id', editApc.id);
-        if (dErr) throw dErr;
-        if (form.brand_ids.length > 0) {
-          const rows = form.brand_ids.map(bid => ({ apc_id: editApc.id, brand_id: bid }));
-          const { error: iErr } = await supabase.from('apc_brands').insert(rows);
-          if (iErr) throw iErr;
-        }
+        // Replace brand assignments + notify the APC of any newly-added brands.
+        const { error: bErr } = await supabase.rpc('set_apc_brands', {
+          p_apc: editApc.id, p_brand_ids: form.brand_ids,
+        });
+        if (bErr) throw bErr;
       } else {
         const { data: { session } } = await supabase.auth.getSession();
         const { data, error } = await supabase.functions.invoke('create-apc', {
