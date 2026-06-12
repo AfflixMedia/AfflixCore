@@ -34,6 +34,18 @@ const TABS: { key: TabKey; label: string; icon: string }[] = [
   { key: 'billing',     label: 'Billing',        icon: 'bi-cash-coin' },
 ];
 
+// Status filter for the prev/next walk + brand switcher. Mirrors the Brands list
+// vocabulary. Defaults to "In Progress" so navigation walks active brands only.
+type ClientStatus = 'onboarding' | 'in_progress' | 'paused' | 'closed';
+const STATUS_FILTERS: { key: 'all' | ClientStatus; label: string; icon: string }[] = [
+  { key: 'all',         label: 'All brands',         icon: 'bi-asterisk' },
+  { key: 'onboarding',  label: 'Onboarding',         icon: 'bi-rocket-takeoff-fill' },
+  { key: 'in_progress', label: 'In Progress',        icon: 'bi-check-circle-fill' },
+  { key: 'paused',      label: 'Temporarily Paused', icon: 'bi-pause-circle-fill' },
+  { key: 'closed',      label: 'Closed',             icon: 'bi-archive-fill' },
+];
+const statusLabel = (k: 'all' | ClientStatus) => STATUS_FILTERS.find(f => f.key === k)?.label ?? k;
+
 export default function BrandDetail() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
@@ -47,12 +59,17 @@ export default function BrandDetail() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [assignedToMe, setAssignedToMe] = useState(false);
-  // Sibling list (id + name) so we can offer prev / next nav and a switcher dropdown.
-  const [siblings, setSiblings] = useState<{ id: string; name: string }[]>([]);
+  // Sibling list (id + name + status) so we can offer prev / next nav and a switcher dropdown.
+  const [siblings, setSiblings] = useState<{ id: string; name: string; status: ClientStatus }[]>([]);
   // Brand-switcher dropdown state.
   const [brandPickerOpen, setBrandPickerOpen] = useState(false);
   const [brandSearch, setBrandSearch] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
+  // Status filter driving the prev/next walk + switcher list. Defaults to the
+  // opened brand's own category (synced on load below) so prev/next walks brands
+  // of the same status; the funnel lets you override.
+  const [navStatus, setNavStatus] = useState<'all' | ClientStatus>('in_progress');
+  const [filterOpen, setFilterOpen] = useState(false);
 
   const tabFromUrl = (params.get('tab') as TabKey) || 'resources';
 
@@ -66,37 +83,64 @@ export default function BrandDetail() {
           : Promise.resolve({ data: [] }),
         // RLS already scopes this to brands the user can see (Bob sees all,
         // APC sees their assigned brands).
-        supabase.from('brands').select('id,name').order('name'),
+        supabase.from('brands').select('id,name,client_status').order('name'),
       ]);
       if (bErr) { setErr(bErr.message); setLoading(false); return; }
       if (!b) { setErr('Brand not found.'); setLoading(false); return; }
       setBrand(b as Brand);
+      // Default the nav filter to this brand's category so prev/next walks its
+      // peers — but keep a manual "All" or already-matching choice (e.g. while
+      // walking within a category) instead of fighting the user.
+      const st = ((b as Brand).client_status ?? 'in_progress') as ClientStatus;
+      setNavStatus(prev => (prev === 'all' || prev === st) ? prev : st);
       setAssignedToMe(((assigns as any[])?.length ?? 0) > 0);
-      setSiblings(((siblings as any[]) ?? []).map(x => ({ id: x.id, name: x.name })));
+      setSiblings(((siblings as any[]) ?? []).map(x => ({
+        id: x.id, name: x.name, status: (x.client_status ?? 'in_progress') as ClientStatus,
+      })));
       setLoading(false);
     })();
   }, [id, isApc, profile?.id]);
 
-  // Compute prev / next neighbour in the alphabetical list.
-  const { prevId, nextId, currentIdx, totalSiblings } = useMemo(() => {
-    if (!id || siblings.length === 0) {
-      return { prevId: null as string | null, nextId: null as string | null, currentIdx: -1, totalSiblings: 0 };
-    }
-    const idx = siblings.findIndex(s => s.id === id);
-    return {
-      prevId: idx > 0 ? siblings[idx - 1].id : null,
-      nextId: idx >= 0 && idx < siblings.length - 1 ? siblings[idx + 1].id : null,
-      currentIdx: idx,
-      totalSiblings: siblings.length,
-    };
-  }, [id, siblings]);
+  // Brands that pass the active status filter, in alphabetical order. Drives both
+  // the prev/next walk and the switcher list.
+  const navList = useMemo(
+    () => navStatus === 'all' ? siblings : siblings.filter(s => s.status === navStatus),
+    [siblings, navStatus],
+  );
 
-  // Brands matching the dropdown search box.
+  // Compute prev / next neighbour within the filtered list. If the current brand
+  // is outside the active filter, anchor by name so prev/next still jump into it.
+  const { prevId, nextId, currentIdx, totalSiblings } = useMemo(() => {
+    const total = navList.length;
+    if (!id || total === 0) {
+      return { prevId: null as string | null, nextId: null as string | null, currentIdx: -1, totalSiblings: total };
+    }
+    const idx = navList.findIndex(s => s.id === id);
+    if (idx >= 0) {
+      return {
+        prevId: idx > 0 ? navList[idx - 1].id : null,
+        nextId: idx < total - 1 ? navList[idx + 1].id : null,
+        currentIdx: idx,
+        totalSiblings: total,
+      };
+    }
+    const curName = brand?.name ?? '';
+    const after = navList.findIndex(s => s.name.localeCompare(curName) > 0);
+    const insertAt = after === -1 ? total : after;
+    return {
+      prevId: insertAt > 0 ? navList[insertAt - 1].id : null,
+      nextId: insertAt < total ? navList[insertAt].id : null,
+      currentIdx: -1,
+      totalSiblings: total,
+    };
+  }, [id, navList, brand?.name]);
+
+  // Brands matching the dropdown search box (within the active status filter).
   const filteredSiblings = useMemo(() => {
     const q = brandSearch.trim().toLowerCase();
-    if (!q) return siblings;
-    return siblings.filter(s => s.name.toLowerCase().includes(q));
-  }, [siblings, brandSearch]);
+    if (!q) return navList;
+    return navList.filter(s => s.name.toLowerCase().includes(q));
+  }, [navList, brandSearch]);
 
   // When the switcher opens, clear the query and focus the search box.
   useEffect(() => {
@@ -182,9 +226,36 @@ export default function BrandDetail() {
         </div>
 
         {/* Brand switcher + prev / next navigation — keeps the current tab so
-            you can walk through brands without losing context. */}
-        {totalSiblings > 1 && (
+            you can walk through brands without losing context. The funnel filters
+            the walk + switcher by status (defaults to In Progress). */}
+        {siblings.length > 1 && (
           <div className="d-flex align-items-center gap-2 flex-wrap">
+            <Dropdown show={filterOpen} onToggle={(next) => setFilterOpen(next)} autoClose>
+              <Dropdown.Toggle
+                size="sm"
+                variant={navStatus === 'all' ? 'outline-secondary' : 'outline-primary'}
+                id="brand-nav-filter"
+                className="ac-brand-filter-toggle"
+                title={`Filter brands: ${statusLabel(navStatus)}`}
+              >
+                <i className="bi bi-funnel" />
+              </Dropdown.Toggle>
+              <Dropdown.Menu align="end" style={{ minWidth: 220 }}>
+                <Dropdown.Header>Show brands in next / prev</Dropdown.Header>
+                {STATUS_FILTERS.map(f => (
+                  <Dropdown.Item
+                    key={f.key}
+                    active={navStatus === f.key}
+                    onClick={() => setNavStatus(f.key)}
+                    className="d-flex align-items-center"
+                  >
+                    <i className={`bi ${f.icon} me-2`} />
+                    <span className="flex-grow-1">{f.label}</span>
+                    {navStatus === f.key && <i className="bi bi-check2 ms-2" />}
+                  </Dropdown.Item>
+                ))}
+              </Dropdown.Menu>
+            </Dropdown>
             <Dropdown
               show={brandPickerOpen}
               onToggle={(next) => setBrandPickerOpen(next)}
@@ -211,8 +282,22 @@ export default function BrandDetail() {
                     onKeyDown={e => e.stopPropagation()}
                   />
                 </div>
+                {navStatus !== 'all' && (
+                  <div className="d-flex align-items-center justify-content-between px-3 pb-1">
+                    <span className="text-muted small">
+                      <i className="bi bi-funnel me-1" />{statusLabel(navStatus)}
+                    </span>
+                    <Button variant="link" size="sm" className="p-0 small" onClick={() => setNavStatus('all')}>
+                      Show all
+                    </Button>
+                  </div>
+                )}
                 {filteredSiblings.length === 0 ? (
-                  <div className="text-muted small px-3 py-2">No brands match.</div>
+                  <div className="text-muted small px-3 py-2">
+                    {brandSearch.trim()
+                      ? 'No brands match.'
+                      : `No ${statusLabel(navStatus).toLowerCase()} brands.`}
+                  </div>
                 ) : (
                   filteredSiblings.map(s => (
                     <Dropdown.Item
@@ -234,8 +319,12 @@ export default function BrandDetail() {
               title="Previous brand">
               <i className="bi bi-chevron-left" /> Prev
             </Button>
-            <span className="text-muted small" style={{ minWidth: 60, textAlign: 'center' }}>
-              {currentIdx + 1} / {totalSiblings}
+            <span
+              className="text-muted small"
+              style={{ minWidth: 60, textAlign: 'center' }}
+              title={currentIdx < 0 ? 'Current brand is outside the active filter' : undefined}
+            >
+              {currentIdx >= 0 ? currentIdx + 1 : '–'} / {totalSiblings}
             </span>
             <Button
               size="sm" variant="outline-secondary"

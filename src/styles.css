@@ -235,6 +235,10 @@ a:hover { color: var(--ac-primary-2); }
 }
 .ac-content { padding: 28px; flex: 1; }
 
+/* Compact icon-only brand-nav status filter toggle (no dropdown caret). */
+.ac-brand-filter-toggle::after { display: none; }
+.ac-brand-filter-toggle { padding-left: 8px; padding-right: 8px; }
+
 .ac-auth-wrap {
   min-height: 100vh; display: flex; align-items: center; justify-content: center;
   background: linear-gradient(135deg, #141620 0%, #232638 100%);
