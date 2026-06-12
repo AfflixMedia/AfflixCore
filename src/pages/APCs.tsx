@@ -43,6 +43,10 @@ export default function APCs() {
   const [delBusy, setDelBusy] = useState(false);
   const [delErr, setDelErr] = useState<string | null>(null);
 
+  const [promoApc, setPromoApc] = useState<APC | null>(null);
+  const [promoBusy, setPromoBusy] = useState(false);
+  const [promoErr, setPromoErr] = useState<string | null>(null);
+
   const load = async () => {
     setLoading(true); setErr(null);
     const [{ data: apcRows, error: e1 }, { data: brandRows, error: e2 }, { data: assigns, error: e3 }] = await Promise.all([
@@ -248,7 +252,13 @@ export default function APCs() {
                   <button className="ac-icon-btn" onClick={() => openEdit(a)} title="Edit">
                     <i className="bi bi-pencil" />
                   </button>
-                  {/* Only Bob can delete an APC; Team Leads add & edit only. */}
+                  {/* Only Bob can promote an APC to Team Lead or delete them. */}
+                  {isBob && (
+                    <button className="ac-icon-btn"
+                      onClick={() => { setPromoApc(a); setPromoErr(null); }} title="Promote to Team Lead">
+                      <i className="bi bi-arrow-up-circle" />
+                    </button>
+                  )}
                   {isBob && (
                     <button className="ac-icon-btn danger"
                       onClick={() => { setDelApc(a); setDelErr(null); }} title="Delete APC">
@@ -412,6 +422,45 @@ export default function APCs() {
               setDelBusy(false);
             }
           }}>{delBusy ? 'Deleting…' : 'Delete APC'}</Button>
+        </Modal.Footer>
+      </Modal>
+
+      <Modal show={!!promoApc} onHide={() => !promoBusy && setPromoApc(null)} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>Promote to Team Lead?</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {promoErr && <Alert variant="danger">{promoErr}</Alert>}
+          <p className="mb-2">
+            Promote <strong>{promoApc?.full_name || promoApc?.email}</strong> from APC to <strong>Team Lead</strong>.
+          </p>
+          <ul className="small text-muted mb-2">
+            <li>They keep their current brands — moved over as their Team Lead brand set.</li>
+            <li>They can now add &amp; manage their own APCs and assign these brands to them.</li>
+            <li><strong>Their reports, comments and all other data are kept untouched.</strong></li>
+          </ul>
+          <p className="text-muted small mb-0">
+            {(promoApc?.brand_names?.length ?? 0) > 0
+              ? `Carries over ${promoApc!.brand_names!.length} brand assignment${promoApc!.brand_names!.length === 1 ? '' : 's'}.`
+              : 'This APC has no brands assigned yet.'}
+          </p>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setPromoApc(null)} disabled={promoBusy}>Cancel</Button>
+          <Button variant="primary" disabled={promoBusy} onClick={async () => {
+            if (!promoApc) return;
+            setPromoBusy(true); setPromoErr(null);
+            try {
+              const { error } = await supabase.rpc('promote_apc_to_team_lead', { p_apc: promoApc.id });
+              if (error) throw error;
+              setPromoApc(null);
+              await load();
+            } catch (e: any) {
+              setPromoErr(e?.message ?? 'Failed to promote');
+            } finally {
+              setPromoBusy(false);
+            }
+          }}>{promoBusy ? 'Promoting…' : 'Promote to Team Lead'}</Button>
         </Modal.Footer>
       </Modal>
     </>
