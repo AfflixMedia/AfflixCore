@@ -88,6 +88,14 @@ export default function APCs() {
 
   const totalAssignments = apcs.reduce((s, a) => s + (a.brand_ids?.length ?? 0), 0);
 
+  // One brand → one APC: map each assigned brand to its owning APC so the picker
+  // can disable brands already held by a different APC.
+  const brandOwner = useMemo(() => {
+    const m = new Map<string, { id: string; name: string }>();
+    apcs.forEach(a => (a.brand_ids ?? []).forEach(bid => m.set(bid, { id: a.id, name: a.full_name || a.email })));
+    return m;
+  }, [apcs]);
+
   const openAdd = () => {
     setEditApc(null);
     setForm({ email: '', password: '', full_name: '', brand_ids: [], can_edit_brands: false, can_manage_gmv_max: false });
@@ -332,16 +340,26 @@ export default function APCs() {
                 </p>
               ) : (
                 <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid #dee2e6', borderRadius: 6, padding: 10 }}>
-                  {brands.map(b => (
-                    <Form.Check
-                      key={b.id}
-                      type="checkbox"
-                      id={`b-${b.id}`}
-                      label={b.name}
-                      checked={form.brand_ids.includes(b.id)}
-                      onChange={() => toggleBrand(b.id)}
-                    />
-                  ))}
+                  {brands.map(b => {
+                    const owner = brandOwner.get(b.id);
+                    const takenByOther = owner && owner.id !== editApc?.id;
+                    return (
+                      <Form.Check
+                        key={b.id}
+                        type="checkbox"
+                        id={`b-${b.id}`}
+                        disabled={!!takenByOther}
+                        checked={form.brand_ids.includes(b.id)}
+                        onChange={() => toggleBrand(b.id)}
+                        label={
+                          <span>
+                            {b.name}
+                            {takenByOther && <span className="text-muted small ms-1">· with {owner!.name}</span>}
+                          </span>
+                        }
+                      />
+                    );
+                  })}
                 </div>
               )}
             </Form.Group>

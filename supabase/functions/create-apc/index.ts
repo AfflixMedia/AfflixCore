@@ -56,6 +56,15 @@ serve(async (req) => {
       }
     }
 
+    // One brand -> one APC: reject brands already held by another APC.
+    if (brand_ids.length > 0) {
+      const { data: taken } = await admin
+        .from('apc_brands').select('brand_id').in('brand_id', brand_ids);
+      if ((taken ?? []).length > 0) {
+        return json({ error: 'One or more of those brands is already assigned to another APC.' }, 409);
+      }
+    }
+
     // 3. Create the auth user (email auto-confirmed so APC can log in immediately)
     const { data: created, error: createErr } = await admin.auth.admin.createUser({
       email,

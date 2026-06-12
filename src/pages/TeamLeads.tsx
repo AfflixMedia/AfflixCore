@@ -90,6 +90,20 @@ export default function TeamLeads() {
 
   const totalAssignments = leads.reduce((s, l) => s + (l.brand_ids?.length ?? 0), 0);
 
+  // One brand → one Team Lead: map each assigned brand to its owning lead so the
+  // picker can disable brands already held by a different lead.
+  const brandOwner = useMemo(() => {
+    const m = new Map<string, { id: string; name: string }>();
+    leads.forEach(l => (l.brand_ids ?? []).forEach(bid => m.set(bid, { id: l.id, name: l.full_name || l.email })));
+    return m;
+  }, [leads]);
+
+  // APCs that will be moved off another lead's team if this is saved.
+  const movingApcs = useMemo(
+    () => allApcs.filter(a => form.apc_ids.includes(a.id) && a.team_lead_id && a.team_lead_id !== editLead?.id),
+    [allApcs, form.apc_ids, editLead],
+  );
+
   const openAdd = () => {
     setEditLead(null);
     setForm({ email: '', password: '', full_name: '', brand_ids: [], apc_ids: [] });
@@ -276,6 +290,14 @@ export default function TeamLeads() {
           </Modal.Header>
           <Modal.Body>
             {err && <Alert variant="danger">{err}</Alert>}
+            {movingApcs.length > 0 && (
+              <Alert variant="warning" className="py-2">
+                <i className="bi bi-exclamation-triangle me-1" />
+                <strong>{movingApcs.length} APC{movingApcs.length === 1 ? '' : 's'} will be moved</strong> off their
+                current team: {movingApcs.map(a => a.full_name || a.email).join(', ')}. They and their previous
+                Team Lead will be notified.
+              </Alert>
+            )}
             <Form.Group className="mb-3">
               <Form.Label>Full name</Form.Label>
               <Form.Control value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} />
@@ -306,16 +328,26 @@ export default function TeamLeads() {
                     <p className="text-muted small mb-0">No brands exist yet. Create some first.</p>
                   ) : (
                     <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid #dee2e6', borderRadius: 6, padding: 10 }}>
-                      {brands.map(b => (
-                        <Form.Check
-                          key={b.id}
-                          type="checkbox"
-                          id={`tlb-${b.id}`}
-                          label={b.name}
-                          checked={form.brand_ids.includes(b.id)}
-                          onChange={() => toggleBrand(b.id)}
-                        />
-                      ))}
+                      {brands.map(b => {
+                        const owner = brandOwner.get(b.id);
+                        const takenByOther = owner && owner.id !== editLead?.id;
+                        return (
+                          <Form.Check
+                            key={b.id}
+                            type="checkbox"
+                            id={`tlb-${b.id}`}
+                            disabled={!!takenByOther}
+                            checked={form.brand_ids.includes(b.id)}
+                            onChange={() => toggleBrand(b.id)}
+                            label={
+                              <span>
+                                {b.name}
+                                {takenByOther && <span className="text-muted small ms-1">· on {owner!.name}</span>}
+                              </span>
+                            }
+                          />
+                        );
+                      })}
                     </div>
                   )}
                 </Form.Group>
