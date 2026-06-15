@@ -43,6 +43,10 @@ export default function TeamLeads() {
   const [delBusy, setDelBusy] = useState(false);
   const [delErr, setDelErr] = useState<string | null>(null);
 
+  const [demoLead, setDemoLead] = useState<TeamLead | null>(null);
+  const [demoBusy, setDemoBusy] = useState(false);
+  const [demoErr, setDemoErr] = useState<string | null>(null);
+
   const load = async () => {
     setLoading(true); setErr(null);
     const [{ data: leadRows, error: e1 }, { data: brandRows, error: e2 }, { data: assigns, error: e3 }, { data: apcRows, error: e4 }] = await Promise.all([
@@ -272,6 +276,10 @@ export default function TeamLeads() {
                   <button className="ac-icon-btn" onClick={() => openEdit(l)} title="Edit">
                     <i className="bi bi-pencil" />
                   </button>
+                  <button className="ac-icon-btn"
+                    onClick={() => { setDemoLead(l); setDemoErr(null); }} title="Demote to APC">
+                    <i className="bi bi-arrow-down-circle" />
+                  </button>
                   <button className="ac-icon-btn danger"
                     onClick={() => { setDelLead(l); setDelErr(null); }} title="Delete Team Lead">
                     <i className="bi bi-trash" />
@@ -463,6 +471,45 @@ export default function TeamLeads() {
               setDelBusy(false);
             }
           }}>{delBusy ? 'Deleting…' : 'Delete Team Lead'}</Button>
+        </Modal.Footer>
+      </Modal>
+
+      <Modal show={!!demoLead} onHide={() => !demoBusy && setDemoLead(null)} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>Demote to APC?</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {demoErr && <Alert variant="danger">{demoErr}</Alert>}
+          <p className="mb-2">
+            Demote <strong>{demoLead?.full_name || demoLead?.email}</strong> from Team Lead back to <strong>APC</strong>.
+          </p>
+          <ul className="small text-muted mb-2">
+            <li>
+              {(demoLead?.apc_count ?? 0) > 0
+                ? `Their ${demoLead!.apc_count} APC${demoLead!.apc_count === 1 ? '' : 's'} are detached and fall back to no team — kept, along with their brands.`
+                : 'They have no APCs under them.'}
+            </li>
+            <li>They keep the brands they personally hold; brands they delegated to APCs stay with those APCs.</li>
+            <li><strong>Their reports, comments and all other data are kept untouched.</strong></li>
+          </ul>
+          <p className="text-muted small mb-0">This is the exact reverse of the promote action.</p>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setDemoLead(null)} disabled={demoBusy}>Cancel</Button>
+          <Button variant="warning" disabled={demoBusy} onClick={async () => {
+            if (!demoLead) return;
+            setDemoBusy(true); setDemoErr(null);
+            try {
+              const { error } = await supabase.rpc('demote_team_lead_to_apc', { p_lead: demoLead.id });
+              if (error) throw error;
+              setDemoLead(null);
+              await load();
+            } catch (e: any) {
+              setDemoErr(e?.message ?? 'Failed to demote');
+            } finally {
+              setDemoBusy(false);
+            }
+          }}>{demoBusy ? 'Demoting…' : 'Demote to APC'}</Button>
         </Modal.Footer>
       </Modal>
     </>

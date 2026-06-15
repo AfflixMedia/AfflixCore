@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button, Card, Modal, Form, Spinner, Alert, Row, Col, InputGroup } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
@@ -17,6 +17,8 @@ interface Brand {
   created_at: string;
 }
 interface ClientLite { id: string; name: string; }
+interface LeadLite { id: string; email: string; full_name: string | null; }
+interface ApcLite { id: string; email: string; full_name: string | null; team_lead_id: string | null; }
 
 type ClientStatus = 'onboarding' | 'in_progress' | 'paused' | 'closed';
 
@@ -76,6 +78,14 @@ export default function Brands() {
 
   const [brands, setBrands] = useState<Brand[]>([]);
   const [clients, setClients] = useState<ClientLite[]>([]);
+  // Bob-only: Team Leads + APCs (and who currently owns each brand) so Bob can
+  // assign the brand to a team while creating/editing it.
+  const [leads, setLeads] = useState<LeadLite[]>([]);
+  const [apcs, setApcs] = useState<ApcLite[]>([]);
+  const [brandLeadOwner, setBrandLeadOwner] = useState<Record<string, string>>({});
+  const [brandApcOwner, setBrandApcOwner] = useState<Record<string, string>>({});
+  const [assignLeadId, setAssignLeadId] = useState('');
+  const [assignApcId, setAssignApcId] = useState('');
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -115,6 +125,22 @@ export default function Brands() {
       const map: Record<string, number> = {};
       (billing ?? []).forEach((r: any) => { map[r.brand_id] = Number(r.monthly_fee ?? 0); });
       setFeeByBrand(map);
+
+      // Team Leads + APCs + current brand ownership for the assignment sidebar.
+      const [leadRes, apcRes, tlbRes, abRes] = await Promise.all([
+        supabase.from('profiles').select('id,email,full_name').eq('role', 'team_lead').order('full_name'),
+        supabase.from('profiles').select('id,email,full_name,team_lead_id').eq('role', 'apc').order('full_name'),
+        supabase.from('team_lead_brands').select('team_lead_id,brand_id'),
+        supabase.from('apc_brands').select('apc_id,brand_id'),
+      ]);
+      setLeads((leadRes.data as LeadLite[]) ?? []);
+      setApcs((apcRes.data as ApcLite[]) ?? []);
+      const leadOwn: Record<string, string> = {};
+      (tlbRes.data ?? []).forEach((r: any) => { leadOwn[r.brand_id] = r.team_lead_id; });
+      setBrandLeadOwner(leadOwn);
+      const apcOwn: Record<string, string> = {};
+      (abRes.data ?? []).forEach((r: any) => { apcOwn[r.brand_id] = r.apc_id; });
+      setBrandApcOwner(apcOwn);
     }
     setLoading(false);
   };
@@ -141,9 +167,36 @@ export default function Brands() {
     return c;
   }, [brands]);
 
+  // Bob sees the assignment sidebar on both create and edit.
+  const showAssign = isBob;
+  // Map: team lead id → display name (for the "all APCs" list sub-labels).
+  const leadName = useMemo(() => {
+    const m: Record<string, string> = {};
+    leads.forEach(l => { m[l.id] = l.full_name || l.email; });
+    return m;
+  }, [leads]);
+  // APCs on the currently-selected lead's team (control 2).
+  const teamApcs = useMemo(
+    () => (assignLeadId ? apcs.filter(a => a.team_lead_id === assignLeadId) : []),
+    [apcs, assignLeadId],
+  );
+
+  // Control 1 — pick a Team Lead. Changing the lead clears the APC (team changed).
+  const pickLead = (id: string) => { setAssignLeadId(id); setAssignApcId(''); };
+  // Control 2 — pick an APC within the selected lead's team (keep the lead).
+  const pickTeamApc = (id: string) => setAssignApcId(id);
+  // Control 3 — pick any APC; auto-derive its Team Lead (or clear if teamless).
+  const pickAnyApc = (id: string) => {
+    if (!id) { setAssignApcId(''); return; }
+    setAssignApcId(id);
+    setAssignLeadId(apcs.find(a => a.id === id)?.team_lead_id ?? '');
+  };
+  const clearAssign = () => { setAssignLeadId(''); setAssignApcId(''); };
+
   const openAdd = () => {
     setEditId(null);
     setForm({ ...empty });
+    clearAssign();
     setShow(true);
   };
 
@@ -159,6 +212,9 @@ export default function Brands() {
       monthly_fee: isBob ? Number(feeByBrand[b.id] ?? 0) : 0,
       paid_current_month: false,
     });
+    // Pre-fill the assignment from the brand's current owner.
+    setAssignApcId(brandApcOwner[b.id] ?? '');
+    setAssignLeadId(brandLeadOwner[b.id] ?? '');
     setShow(true);
   };
 
@@ -208,6 +264,22 @@ export default function Brands() {
         .upsert({ brand_id: brandId, monthly_fee: fee }, { onConflict: 'brand_id' });
       if (feeErr) {
         setErr(`Brand saved, but the monthly fee could not be stored: ${feeErr.message}`);
+        setSaving(false);
+        load();
+        return;
+      }
+    }
+    // Bob only: set the brand's Team Lead / APC owner (create + edit). The RPC
+    // reconciles one-brand→one-lead and one-brand→one-APC, cascades an APC's own
+    // team lead, and notifies anyone newly given the brand.
+    if (isBob && brandId) {
+      const { error: aErr } = await supabase.rpc('set_brand_assignment', {
+        p_brand: brandId,
+        p_lead: assignLeadId || null,
+        p_apc: assignApcId || null,
+      });
+      if (aErr) {
+        setErr(`Brand saved, but the assignment could not be applied: ${aErr.message}`);
         setSaving(false);
         load();
         return;
@@ -417,13 +489,15 @@ export default function Brands() {
         </Row>
       )}
 
-      <Modal show={show} onHide={() => setShow(false)} centered size="lg">
+      <Modal show={show} onHide={() => setShow(false)} centered size={showAssign ? 'xl' : 'lg'}>
         <Form onSubmit={submit}>
           <Modal.Header closeButton>
             <Modal.Title>{editId ? 'Edit Brand' : 'Add Brand'}</Modal.Title>
           </Modal.Header>
           <Modal.Body>
             {err && <Alert variant="danger">{err}</Alert>}
+            <Row className="g-4">
+            <Col lg={showAssign ? 7 : 12}>
             <div className="row g-3">
               <Form.Group className="col-md-7">
                 <Form.Label>Store name</Form.Label>
@@ -538,6 +612,83 @@ export default function Brands() {
                 />
               </Form.Group>
             </div>
+            </Col>
+            {showAssign && (
+              <Col lg={5} className="ac-assign-side">
+                <div className="d-flex align-items-center justify-content-between mb-1">
+                  <h6 className="mb-0">
+                    <i className="bi bi-diagram-3 me-1" />Assign brand
+                    <span className="text-muted fw-normal small ms-1">(optional)</span>
+                  </h6>
+                  {(assignLeadId || assignApcId) && (
+                    <button type="button" className="btn btn-link btn-sm p-0 text-muted" onClick={clearAssign}>
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <p className="text-muted small mb-3">
+                  Hand this brand to a Team Lead, one of their APCs, or any APC directly.
+                </p>
+
+                {/* Control 1 — Team Lead */}
+                <Form.Group className="mb-3">
+                  <Form.Label className="small fw-semibold mb-1">Team Lead</Form.Label>
+                  <SearchableDropdown
+                    items={leads.map(l => ({ id: l.id, label: l.full_name || l.email, sub: l.email }))}
+                    value={assignLeadId}
+                    onChange={pickLead}
+                    placeholder="Select a Team Lead…"
+                    noneLabel="No Team Lead"
+                    emptyText="No team leads yet."
+                  />
+                </Form.Group>
+
+                {/* Control 2 — an APC within the selected lead's team */}
+                <Form.Group className="mb-3">
+                  <Form.Label className="small fw-semibold mb-1">APC in this team</Form.Label>
+                  <SearchableDropdown
+                    items={teamApcs.map(a => ({ id: a.id, label: a.full_name || a.email, sub: a.email }))}
+                    value={teamApcs.some(a => a.id === assignApcId) ? assignApcId : ''}
+                    onChange={pickTeamApc}
+                    placeholder="Team Lead only"
+                    noneLabel="Team Lead only (no APC)"
+                    emptyText="This team lead has no APCs yet."
+                    disabled={!assignLeadId}
+                    disabledText="Pick a team lead first"
+                  />
+                </Form.Group>
+
+                <div className="d-flex align-items-center gap-2 text-muted small my-2">
+                  <span className="flex-grow-1 border-top" /> or <span className="flex-grow-1 border-top" />
+                </div>
+
+                {/* Control 3 — any APC directly (auto-cascades to their team lead) */}
+                <Form.Group className="mb-2">
+                  <Form.Label className="small fw-semibold mb-1">Assign directly to any APC</Form.Label>
+                  <SearchableDropdown
+                    items={apcs.map(a => ({
+                      id: a.id,
+                      label: a.full_name || a.email,
+                      sub: a.team_lead_id ? `team: ${leadName[a.team_lead_id] ?? '—'}` : 'no team',
+                    }))}
+                    value={assignApcId}
+                    onChange={pickAnyApc}
+                    placeholder="Select an APC…"
+                    noneLabel="No APC"
+                    emptyText="No APCs yet."
+                  />
+                  <Form.Text className="text-muted">
+                    If the APC is on a team, the brand is also given to their Team Lead.
+                  </Form.Text>
+                </Form.Group>
+
+                <AssignSummary
+                  leadLabel={assignLeadId ? (leadName[assignLeadId] ?? 'a Team Lead') : ''}
+                  apcLabel={assignApcId ? (apcs.find(a => a.id === assignApcId)?.full_name || apcs.find(a => a.id === assignApcId)?.email || 'an APC') : ''}
+                />
+              </Col>
+            )}
+            </Row>
           </Modal.Body>
           <Modal.Footer>
             <Button variant="secondary" onClick={() => setShow(false)} disabled={saving}>Cancel</Button>
@@ -555,5 +706,108 @@ function StatusBadge({ status }: { status: ClientStatus }) {
     <span className="ac-chip" style={{ background: m.bg, color: m.color, borderColor: 'transparent' }}>
       <i className={`bi ${m.icon}`} /> {STATUS_LABEL[status] ?? status}
     </span>
+  );
+}
+
+// Searchable single-select dropdown used in the brand-assignment sidebar: a toggle
+// button shows the current pick; opening it reveals a search field + the option list.
+// Closes on select or outside click.
+function SearchableDropdown({ items, value, onChange, placeholder, noneLabel, emptyText, disabled, disabledText }: {
+  items: { id: string; label: string; sub?: string }[];
+  value: string;
+  onChange: (id: string) => void;
+  placeholder: string;
+  noneLabel?: string;
+  emptyText?: string;
+  disabled?: boolean;
+  disabledText?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  const selected = items.find(i => i.id === value);
+  const term = q.trim().toLowerCase();
+  const filtered = term
+    ? items.filter(i => `${i.label} ${i.sub ?? ''}`.toLowerCase().includes(term))
+    : items;
+
+  const pick = (id: string) => { onChange(id); setOpen(false); setQ(''); };
+
+  return (
+    <div className="ac-dd" ref={ref}>
+      <button
+        type="button"
+        className="ac-dd-toggle"
+        disabled={disabled}
+        onClick={() => { setOpen(o => !o); setQ(''); }}
+      >
+        <span className={`ac-dd-label ${selected ? '' : 'text-muted'}`}>
+          {disabled ? (disabledText ?? placeholder) : (selected ? selected.label : placeholder)}
+        </span>
+        <i className={`bi bi-chevron-${open ? 'up' : 'down'}`} />
+      </button>
+      {open && !disabled && (
+        <div className="ac-dd-menu">
+          <div className="ac-search ac-search-sm m-1">
+            <i className="bi bi-search" />
+            <input autoFocus placeholder="Search…" value={q} onChange={e => setQ(e.target.value)} />
+            {q && (
+              <button type="button" className="btn btn-link p-0 text-muted" onClick={() => setQ('')}>
+                <i className="bi bi-x-lg" />
+              </button>
+            )}
+          </div>
+          <div className="ac-dd-list">
+            <button type="button" className={`ac-pick-row ${!value ? 'active' : ''}`} onClick={() => pick('')}>
+              <i className={`bi ${!value ? 'bi-check-circle-fill' : 'bi-circle'}`} />
+              <span className="text-muted">{noneLabel ?? placeholder}</span>
+            </button>
+            {items.length === 0 ? (
+              <div className="text-muted small p-2">{emptyText ?? 'None'}</div>
+            ) : filtered.length === 0 ? (
+              <div className="text-muted small p-2">No matches.</div>
+            ) : filtered.map(i => (
+              <button
+                type="button"
+                key={i.id}
+                className={`ac-pick-row ${value === i.id ? 'active' : ''}`}
+                onClick={() => pick(i.id)}
+              >
+                <i className={`bi ${value === i.id ? 'bi-check-circle-fill' : 'bi-circle'}`} />
+                <span>
+                  {i.label}
+                  {i.sub && <span className="text-muted small ms-1">· {i.sub}</span>}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Plain-language summary of what the current assignment selection will do.
+function AssignSummary({ leadLabel, apcLabel }: { leadLabel: string; apcLabel: string }) {
+  let text: string;
+  if (apcLabel && leadLabel) text = `Assigned to ${apcLabel} (and their Team Lead ${leadLabel}).`;
+  else if (apcLabel) text = `Assigned directly to ${apcLabel} (no team).`;
+  else if (leadLabel) text = `Assigned to Team Lead ${leadLabel}.`;
+  else text = 'Not assigned — you can set this later.';
+  return (
+    <div className={`small mt-3 p-2 rounded ${apcLabel || leadLabel ? 'bg-success-subtle text-success-emphasis' : 'bg-light text-muted'}`}>
+      <i className={`bi ${apcLabel || leadLabel ? 'bi-check2-circle' : 'bi-info-circle'} me-1`} />
+      {text}
+    </div>
   );
 }
