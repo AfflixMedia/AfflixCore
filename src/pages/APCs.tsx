@@ -23,6 +23,8 @@ export default function APCs() {
   const isBob = profile?.role === 'bob';
   const isTeamLead = profile?.role === 'team_lead';
   const [apcs, setApcs] = useState<APC[]>([]);
+  const [availableApcs, setAvailableApcs] = useState<{ id: string; email: string; full_name: string | null }[]>([]);
+  const [claimBusy, setClaimBusy] = useState<string | null>(null);
   const [brands, setBrands] = useState<BrandLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -49,14 +51,28 @@ export default function APCs() {
 
   const load = async () => {
     setLoading(true); setErr(null);
+    // A Team Lead can now also read unassigned APCs (to claim them), so scope the
+    // "my team" list explicitly to their own APCs; Bob sees everyone.
+    let apcQuery = supabase.from('profiles')
+      .select('id,email,full_name,role,created_at,can_edit_brands,can_manage_gmv_max')
+      .eq('role', 'apc').order('created_at', { ascending: false });
+    if (isTeamLead && profile?.id) apcQuery = apcQuery.eq('team_lead_id', profile.id);
     const [{ data: apcRows, error: e1 }, { data: brandRows, error: e2 }, { data: assigns, error: e3 }] = await Promise.all([
-      supabase.from('profiles').select('id,email,full_name,role,created_at,can_edit_brands,can_manage_gmv_max').eq('role', 'apc').order('created_at', { ascending: false }),
+      apcQuery,
       supabase.from('brands').select('id,name').order('name'),
       supabase.from('apc_brands').select('apc_id,brand_id'),
     ]);
     if (e1 || e2 || e3) {
       setErr((e1 ?? e2 ?? e3)!.message);
       setLoading(false); return;
+    }
+    // Team Leads: list of APCs not on any team, offered as "add to my team".
+    if (isTeamLead) {
+      const { data: avail } = await supabase.from('profiles')
+        .select('id,email,full_name').eq('role', 'apc').is('team_lead_id', null).order('full_name');
+      setAvailableApcs(avail ?? []);
+    } else {
+      setAvailableApcs([]);
     }
     const brandMap = new Map<string,string>((brandRows ?? []).map(b => [b.id, b.name]));
     const assignMap = new Map<string, string[]>();
@@ -275,6 +291,38 @@ export default function APCs() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Team Lead: APCs not on any team yet — claim them into your team. */}
+      {isTeamLead && availableApcs.length > 0 && (
+        <div className="mt-4">
+          <h6 className="text-muted mb-2">
+            <i className="bi bi-people me-1" />Available APCs (no team)
+          </h6>
+          <div className="ac-list">
+            {availableApcs.map(a => (
+              <div className="ac-list-row" key={a.id}>
+                <Avatar name={a.full_name || a.email} size="lg" />
+                <div className="ac-row-main">
+                  <div className="ac-row-name">{a.full_name || <span className="text-muted">No name</span>}</div>
+                  <div className="ac-row-sub"><i className="bi bi-envelope me-1" />{a.email}</div>
+                </div>
+                <div className="ac-row-actions">
+                  <Button size="sm" variant="outline-primary" disabled={claimBusy === a.id}
+                    onClick={async () => {
+                      setClaimBusy(a.id);
+                      const { error } = await supabase.rpc('claim_apc', { p_apc: a.id });
+                      setClaimBusy(null);
+                      if (error) { alert(error.message); return; }
+                      await load();
+                    }}>
+                    <i className="bi bi-plus-lg me-1" />{claimBusy === a.id ? 'Adding…' : 'Add to my team'}
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

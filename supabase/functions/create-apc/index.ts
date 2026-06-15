@@ -44,6 +44,8 @@ serve(async (req) => {
     if (!email || !password || !Array.isArray(brand_ids)) {
       return json({ error: 'email, password, brand_ids required' }, 400);
     }
+    if (String(password).length < 6) return json({ error: 'Password must be at least 6 characters' }, 400);
+    if (String(password).length > 72) return json({ error: 'Password must be 72 characters or fewer' }, 400);
 
     // A Team Lead may only assign brands that Bob granted them (team_lead_brands).
     if (isTeamLead && brand_ids.length > 0) {
@@ -73,7 +75,11 @@ serve(async (req) => {
       user_metadata: { full_name: full_name ?? '' },
     });
     if (createErr || !created.user) {
-      return json({ error: createErr?.message ?? 'Could not create user' }, 400);
+      const msg = createErr?.message ?? 'Could not create user';
+      if (/already|registered|exists/i.test(msg)) {
+        return json({ error: 'A user with this email already exists.' }, 409);
+      }
+      return json({ error: msg }, 400);
     }
     const newUserId = created.user.id;
 
