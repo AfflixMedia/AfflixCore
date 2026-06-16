@@ -2163,7 +2163,7 @@ input[type="number"] {
 .ac-reply-preview-name { font-size: .76rem; font-weight: 700; color: var(--ac-primary); }
 .ac-reply-preview-body { font-size: .8rem; color: var(--ac-text-muted); }
 .ac-reply-cancel { border: none; background: transparent; color: var(--ac-text-muted); }
-.ac-composer-row { display: flex; align-items: flex-end; gap: 8px; }
+.ac-composer-row {position:relative; display: flex; align-items: flex-end; gap: 8px; }
 .ac-composer-icon, .ac-composer-send {
   border: none; background: transparent; color: var(--ac-text-muted); font-size: 1.3rem;
   width: 40px; height: 40px; border-radius: 50%; cursor: pointer; flex: none;
