@@ -7,58 +7,18 @@ import {
   programDisplayName,
 } from '../../lib/paidCollabSchema';
 
-interface Brand { id: string; name: string; client: string; }
+import { useClientPaidCollabData, Brand } from './useClientPaidCollabData';
 
 type UrlFilter = 'all' | 'with_url' | 'no_url';
 
 export default function PaidCollabVideos() {
   const nav = useNavigate();
-  const [brands, setBrands] = useState<Brand[]>([]);
-  const [programs, setPrograms] = useState<PaidProgram[]>([]);
-  const [creators, setCreators] = useState<PaidCreator[]>([]);
-  const [videos, setVideos] = useState<PaidVideo[]>([]);
-  const [products, setProducts] = useState<BrandProduct[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
+  const { brands, programs, creators, videos, loading, err } = useClientPaidCollabData();
 
   const [search, setSearch] = useState('');
   const [brandFilter, setBrandFilter] = useState('');
   const [programFilter, setProgramFilter] = useState('');
   const [urlFilter, setUrlFilter] = useState<UrlFilter>('all');
-
-  useEffect(() => {
-    (async () => {
-      setLoading(true); setErr(null);
-      const { data: bRows, error: bErr } = await supabase
-        .from('brands').select('id,name,client').order('name');
-      if (bErr) { setErr(bErr.message); setLoading(false); return; }
-      setBrands((bRows as Brand[]) ?? []);
-
-      const { data: pRows, error: pErr } = await supabase
-        .from('paid_creator_programs').select('*');
-      if (pErr) { setErr(pErr.message); setLoading(false); return; }
-      setPrograms((pRows as PaidProgram[]) ?? []);
-
-      const { data: cRows, error: cErr } = await supabase
-        .from('paid_creators').select('id,program_id,name,handle,agreed_videos,status');
-      if (cErr) { setErr(cErr.message); setLoading(false); return; }
-      const cs = (cRows as PaidCreator[]) ?? [];
-      setCreators(cs);
-
-      const { data: prodRows, error: prodErr } = await supabase
-        .from('brand_products').select('*');
-      if (prodErr) { setErr(prodErr.message); setLoading(false); return; }
-      setProducts((prodRows as BrandProduct[]) ?? []);
-
-      if (cs.length === 0) { setVideos([]); setLoading(false); return; }
-      const { data: vRows, error: vErr } = await supabase
-        .from('paid_creator_videos').select('*').in('creator_id', cs.map(c => c.id))
-        .order('created_at', { ascending: false });
-      if (vErr) { setErr(vErr.message); setLoading(false); return; }
-      setVideos((vRows as PaidVideo[]) ?? []);
-      setLoading(false);
-    })();
-  }, []);
 
   const brandById = useMemo(() => {
     const m = new Map<string, Brand>();
@@ -75,11 +35,7 @@ export default function PaidCollabVideos() {
     for (const c of creators) m.set(c.id, c);
     return m;
   }, [creators]);
-  const productById = useMemo(() => {
-    const m = new Map<string, BrandProduct>();
-    for (const p of products) m.set(p.id, p);
-    return m;
-  }, [products]);
+  // Removed productById since products is no longer fetched
 
   const programOptions = useMemo(() => {
     if (!brandFilter) return programs;
@@ -93,19 +49,20 @@ export default function PaidCollabVideos() {
       if (!cr) return false;
       const prog = programById.get(cr.program_id);
       if (!prog) return false;
+      const b = brandById.get(prog.brand_id);
       if (brandFilter && prog.brand_id !== brandFilter) return false;
       if (programFilter && prog.id !== programFilter) return false;
       if (urlFilter === 'with_url' && !v.tiktok_url) return false;
       if (urlFilter === 'no_url' && v.tiktok_url) return false;
-      if (q) {
-        const b = brandById.get(prog.brand_id);
-        const prod = v.product_id ? productById.get(v.product_id) : null;
-        const hay = `${v.tiktok_url ?? ''} ${v.notes ?? ''} ${cr.name} ${cr.handle ?? ''} ${b?.name ?? ''} ${programDisplayName(prog)} ${prod?.name ?? ''}`.toLowerCase();
+      if (search) {
+        const q = search.toLowerCase();
+        const bName = b?.name || '';
+        const hay = `${v.tiktok_url ?? ''} ${v.notes ?? ''} ${cr.name} ${cr.handle ?? ''} ${bName} ${programDisplayName(prog)}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
-  }, [videos, creatorById, programById, brandById, productById, brandFilter, programFilter, urlFilter, search]);
+  }, [videos, creatorById, programById, brandById, brandFilter, programFilter, urlFilter, search]);
 
   if (loading) return <div className="text-center py-5"><Spinner animation="border" /></div>;
   if (err) return <Alert variant="danger">{err}</Alert>;
@@ -202,7 +159,7 @@ export default function PaidCollabVideos() {
             const cr = creatorById.get(v.creator_id);
             const prog = cr ? programById.get(cr.program_id) : null;
             const b = prog ? brandById.get(prog.brand_id) : null;
-            const prod = v.product_id ? productById.get(v.product_id) : null;
+            const prod = null as any;
             return (
               <Card key={v.id} className="shadow-sm">
                 <Card.Body className="d-flex gap-3 align-items-start flex-wrap">

@@ -7,7 +7,7 @@ import {
 } from '../../lib/paidCollabSchema';
 import ProgramCard from '../../components/paidcollab/ProgramCard';
 
-interface Brand { id: string; name: string; client: string; client_status: string | null; }
+import { useClientPaidCollabData, Brand } from './useClientPaidCollabData';
 
 type StatusFilter =
   | 'all'
@@ -18,51 +18,11 @@ type StatusFilter =
 
 export default function PaidCollabPrograms() {
   const nav = useNavigate();
-  const [brands, setBrands] = useState<Brand[]>([]);
-  const [programs, setPrograms] = useState<PaidProgram[]>([]);
-  const [creators, setCreators] = useState<PaidCreator[]>([]);
-  const [videos, setVideos] = useState<PaidVideo[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
+  const { brands, programs, creators, videos, loading, err } = useClientPaidCollabData();
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [brandFilter, setBrandFilter] = useState<string>('');
-
-  useEffect(() => {
-    (async () => {
-      setLoading(true); setErr(null);
-      const { data: bRows, error: bErr } = await supabase
-        .from('brands').select('id,name,client,client_status').order('name');
-      if (bErr) { setErr(bErr.message); setLoading(false); return; }
-      const bs = (bRows as Brand[]) ?? [];
-      setBrands(bs);
-
-      const { data: pRows, error: pErr } = await supabase
-        .from('paid_creator_programs').select('*')
-        .order('ended_at', { ascending: true, nullsFirst: true })
-        .order('launch_date', { ascending: false });
-      if (pErr) { setErr(pErr.message); setLoading(false); return; }
-      const progs = (pRows as PaidProgram[]) ?? [];
-      setPrograms(progs);
-      if (progs.length === 0) { setCreators([]); setVideos([]); setLoading(false); return; }
-
-      const progIds = progs.map(p => p.id);
-      const { data: cRows, error: cErr } = await supabase
-        .from('paid_creators').select('*').in('program_id', progIds);
-      if (cErr) { setErr(cErr.message); setLoading(false); return; }
-      const cs = (cRows as PaidCreator[]) ?? [];
-      setCreators(cs);
-      if (cs.length === 0) { setVideos([]); setLoading(false); return; }
-
-      const creatorIds = cs.map(c => c.id);
-      const { data: vRows, error: vErr } = await supabase
-        .from('paid_creator_videos').select('*').in('creator_id', creatorIds);
-      if (vErr) { setErr(vErr.message); setLoading(false); return; }
-      setVideos((vRows as PaidVideo[]) ?? []);
-      setLoading(false);
-    })();
-  }, []);
 
   const brandById = useMemo(() => {
     const m = new Map<string, Brand>();

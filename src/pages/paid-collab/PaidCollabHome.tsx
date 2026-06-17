@@ -1,6 +1,6 @@
 import { useAuth } from '../../auth/AuthContext';
 import PaidCollabDashboard from './PaidCollabDashboard';
-import PaidCollabHandlerWorkspace from './PaidCollabHandlerWorkspace';
+import HandlerCollabApp from '../handler-collab/HandlerCollabApp';
 
 /**
  * Routes the `/paid-collab` landing to the right view based on the user role.
@@ -9,6 +9,6 @@ import PaidCollabHandlerWorkspace from './PaidCollabHandlerWorkspace';
  */
 export default function PaidCollabHome() {
   const { profile } = useAuth();
-  if (profile?.role === 'paid_collab_handler') return <PaidCollabHandlerWorkspace />;
+  if (profile?.role === 'paid_collab_handler') return <HandlerCollabApp />;
   return <PaidCollabDashboard />;
 }

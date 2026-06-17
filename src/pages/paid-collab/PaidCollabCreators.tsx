@@ -12,18 +12,13 @@ import NumberInput from '../../components/NumberInput';
 
 const CREATOR_STATUS_VALUES: CreatorStatus[] = ['active', 'paused', 'done', 'dropped'];
 
-interface Brand { id: string; name: string; client: string; payment_popup_default?: 'auto' | 'force_hide' | 'force_show'; }
+import { useClientPaidCollabData, Brand } from './useClientPaidCollabData';
 
 type StatusFilter = 'all' | 'active' | 'paused' | 'done' | 'dropped';
 type PaymentFilter = 'all' | 'pending' | 'paid';
 
 export default function PaidCollabCreators() {
-  const [brands, setBrands] = useState<Brand[]>([]);
-  const [programs, setPrograms] = useState<PaidProgram[]>([]);
-  const [creators, setCreators] = useState<PaidCreator[]>([]);
-  const [videos, setVideos] = useState<PaidVideo[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
+  const { brands, programs, creators, videos, loading, err } = useClientPaidCollabData();
 
   const [search, setSearch] = useState('');
   const [brandFilter, setBrandFilter] = useState('');
@@ -33,34 +28,6 @@ export default function PaidCollabCreators() {
 
   // Creator popup — opens on creator card click instead of navigating away.
   const [openCreator, setOpenCreator] = useState<PaidCreator | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      setLoading(true); setErr(null);
-      const { data: bRows, error: bErr } = await supabase
-        .from('brands').select('id,name,client,payment_popup_default').order('name');
-      if (bErr) { setErr(bErr.message); setLoading(false); return; }
-      setBrands((bRows as Brand[]) ?? []);
-
-      const { data: pRows, error: pErr } = await supabase
-        .from('paid_creator_programs').select('*');
-      if (pErr) { setErr(pErr.message); setLoading(false); return; }
-      setPrograms((pRows as PaidProgram[]) ?? []);
-
-      const { data: cRows, error: cErr } = await supabase
-        .from('paid_creators').select('*');
-      if (cErr) { setErr(cErr.message); setLoading(false); return; }
-      const cs = (cRows as PaidCreator[]) ?? [];
-      setCreators(cs);
-
-      if (cs.length === 0) { setVideos([]); setLoading(false); return; }
-      const { data: vRows, error: vErr } = await supabase
-        .from('paid_creator_videos').select('id,creator_id,status').in('creator_id', cs.map(c => c.id));
-      if (vErr) { setErr(vErr.message); setLoading(false); return; }
-      setVideos((vRows as PaidVideo[]) ?? []);
-      setLoading(false);
-    })();
-  }, []);
 
   // Lookup maps
   const brandById = useMemo(() => {
@@ -332,13 +299,12 @@ export default function PaidCollabCreators() {
               brandCreators={brandCreatorsForOp}
               programLabelByCreatorId={programLabels}
               onClose={() => setOpenCreator(null)}
-              onVideoAdded={(v) => setVideos(prev => [...prev, v])}
+              onVideoAdded={(v) => { /* read only */ }}
               onCreatorDeleted={(id) => {
-                setCreators(prev => prev.filter(c => c.id !== id));
-                setVideos(prev => prev.filter(v => v.creator_id !== id));
+                // read only
               }}
               onCreatorUpdated={(c) => {
-                setCreators(prev => prev.map(x => x.id === c.id ? c : x));
+                // read only
                 setOpenCreator(c);
               }}
             />

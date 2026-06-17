@@ -41,7 +41,7 @@ export default function PaidCollabClients() {
     setLoading(true); setErr(null);
     const [{ data: cRows, error: e1 }, { data: brandRows, error: e2 }, { data: assigns, error: e3 }] = await Promise.all([
       supabase.from('profiles').select('id,email,full_name,role,created_at').eq('role', 'paid_collab_client').order('created_at', { ascending: false }),
-      supabase.from('brands').select('id,name').order('name'),
+      supabase.from('brands').select('id,name').contains('scope', ['paid_creator']).order('name'),
       supabase.from('paid_collab_client_brands').select('client_id,brand_id'),
     ]);
     if (e1 || e2 || e3) {
@@ -273,7 +273,7 @@ export default function PaidCollabClients() {
             <Form.Group className="mb-2">
               <Form.Label>Assign brands</Form.Label>
               {brands.length === 0 ? (
-                <p className="text-muted small mb-0">No brands exist yet. Create some first.</p>
+                <p className="text-muted small mb-0">No paid-collab-enabled brands yet. Turn on “Enable paid collab” for a brand on the Brands page.</p>
               ) : (
                 <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid #dee2e6', borderRadius: 6, padding: 10 }}>
                   {brands.map(b => (

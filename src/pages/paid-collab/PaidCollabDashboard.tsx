@@ -5,70 +5,20 @@ import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
   ResponsiveContainer, Legend, LabelList,
 } from 'recharts';
-import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../auth/AuthContext';
 import {
-  PaidProgram, PaidCreator, PaidVideo, PaidCreatorPerformance,
   programDisplayName, isCreatorPaymentPending, fmtMoney, fmtNumber,
+  PaidProgram, PaidCreator, PaidVideo, PaidCreatorPerformance
 } from '../../lib/paidCollabSchema';
+import { useClientPaidCollabData, Brand } from './useClientPaidCollabData';
 import Avatar from '../../components/Avatar';
 import ProgramProgress from '../../components/paidcollab/ProgramProgress';
-
-interface Brand {
-  id: string;
-  name: string;
-  client: string;
-  client_status: string | null;
-}
 
 export default function PaidCollabDashboard() {
   const { profile } = useAuth();
   const nav = useNavigate();
 
-  const [brands, setBrands] = useState<Brand[]>([]);
-  const [programs, setPrograms] = useState<PaidProgram[]>([]);
-  const [creators, setCreators] = useState<PaidCreator[]>([]);
-  const [videos, setVideos] = useState<PaidVideo[]>([]);
-  const [performance, setPerformance] = useState<PaidCreatorPerformance[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      setLoading(true); setErr(null);
-      const { data: bRows, error: bErr } = await supabase
-        .from('brands').select('id,name,client,client_status').order('name');
-      if (bErr) { setErr(bErr.message); setLoading(false); return; }
-      const bs = (bRows as Brand[]) ?? [];
-      setBrands(bs);
-      if (bs.length === 0) { setLoading(false); return; }
-
-      const { data: pRows, error: pErr } = await supabase
-        .from('paid_creator_programs').select('*');
-      if (pErr) { setErr(pErr.message); setLoading(false); return; }
-      const progs = (pRows as PaidProgram[]) ?? [];
-      setPrograms(progs);
-      if (progs.length === 0) { setCreators([]); setVideos([]); setLoading(false); return; }
-
-      const { data: cRows, error: cErr } = await supabase
-        .from('paid_creators').select('*').in('program_id', progs.map(p => p.id));
-      if (cErr) { setErr(cErr.message); setLoading(false); return; }
-      const cs = (cRows as PaidCreator[]) ?? [];
-      setCreators(cs);
-      if (cs.length === 0) { setVideos([]); setLoading(false); return; }
-
-      const [{ data: vRows, error: vErr }, { data: perfRows }] = await Promise.all([
-        supabase.from('paid_creator_videos').select('*').in('creator_id', cs.map(c => c.id))
-          .order('created_at', { ascending: false }),
-        supabase.from('paid_creator_performance').select('creator_id,period_type,gmv,items_sold')
-          .in('creator_id', cs.map(c => c.id)),
-      ]);
-      if (vErr) { setErr(vErr.message); setLoading(false); return; }
-      setVideos((vRows as PaidVideo[]) ?? []);
-      setPerformance((perfRows as PaidCreatorPerformance[]) ?? []);
-      setLoading(false);
-    })();
-  }, []);
+  const { brands, programs, creators, videos, performance, loading, err } = useClientPaidCollabData();
 
   const brandById = useMemo(() => {
     const m = new Map<string, Brand>();

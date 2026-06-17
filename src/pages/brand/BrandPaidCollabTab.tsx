@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState, FormEvent } from 'react';
-import { Card, Button, Spinner, Alert, Row, Col, Modal, Form, Badge } from 'react-bootstrap';
+import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Spinner, Alert } from 'react-bootstrap';
 import { supabase } from '../../lib/supabase';
+import type { HandlerBrandMonth, HandlerCreator } from '../handler-collab/store';
 import {
-  PaidProgram, PaidCreator, PaidVideo, summarizePrograms, todayISO,
-} from '../../lib/paidCollabSchema';
-import PaidCollabTracker from '../../components/paidcollab/PaidCollabTracker';
-import ProgramCard from '../../components/paidcollab/ProgramCard';
+  fmt$, monthKey, monthLabel, focusProductList, deliveredCount,
+  Kpi, CreatorRowRO, CreatorListHeadRO,
+} from '../paid-collab/handlerCollabReadonly';
 
 interface Props {
   brandId: string;
@@ -13,216 +13,124 @@ interface Props {
   canEdit: boolean;
 }
 
-export default function BrandPaidCollabTab({ brandId, brandName, canEdit }: Props) {
-  const [programs, setPrograms] = useState<PaidProgram[]>([]);
-  const [creators, setCreators] = useState<PaidCreator[]>([]);
-  const [videos, setVideos] = useState<PaidVideo[]>([]);
+/* ════════════════════════════════════════════════════════════
+   Paid Collab tab — read-only view of the handler workspace data for THIS brand,
+   styled like the handler Workspace drilldown (pc-* via handlerCollab.css). Keyed by
+   public.brands.id, so it works for Bob / APC / handler / client via RLS
+   (user_has_brand_access). Editing happens in the handler's own workspace.
+════════════════════════════════════════════════════════════ */
+export default function BrandPaidCollabTab({ brandId, brandName }: Props) {
+  const [months, setMonths] = useState<HandlerBrandMonth[]>([]);
+  const [creators, setCreators] = useState<HandlerCreator[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const [selectedProgramId, setSelectedProgramId] = useState<string | null>(null);
 
-  // New program modal
-  const [showNew, setShowNew] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newLaunch, setNewLaunch] = useState(todayISO());
-  const [newBusy, setNewBusy] = useState(false);
-  const [newErr, setNewErr] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true); setErr(null);
+      const [{ data: mRows, error: mErr }, { data: cRows, error: cErr }] = await Promise.all([
+        supabase.from('handler_collab_brand_months').select('*').eq('brand_id', brandId),
+        supabase.from('handler_collab_creators').select('*').eq('brand_id', brandId),
+      ]);
+      if (cancelled) return;
+      if (mErr || cErr) { setErr((mErr ?? cErr)!.message); setLoading(false); return; }
+      setMonths((mRows ?? []) as HandlerBrandMonth[]);
+      setCreators((cRows ?? []) as HandlerCreator[]);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [brandId]);
 
-  const [filter, setFilter] = useState<'all' | 'active' | 'ended'>('all');
+  const totals = useMemo(() => {
+    let budget = 0;
+    months.forEach(m => { budget += Number(m.budget) || 0; });
+    let allocated = 0, paid = 0, videos = 0, delivered = 0;
+    creators.forEach(c => {
+      allocated += Number(c.amount) || 0;
+      if (c.payment_status === 'paid') paid += Number(c.amount) || 0;
+      videos += Number(c.videos_count) || 0;
+      delivered += deliveredCount(c);
+    });
+    return { budget, allocated, paid, videos, delivered };
+  }, [months, creators]);
 
-  const load = async () => {
-    setLoading(true); setErr(null);
-    const { data: progRows, error: pErr } = await supabase
-      .from('paid_creator_programs').select('*').eq('brand_id', brandId)
-      .order('ended_at', { ascending: true, nullsFirst: true })
-      .order('launch_date', { ascending: false });
-    if (pErr) { setErr(pErr.message); setLoading(false); return; }
-    const progs = (progRows as PaidProgram[]) ?? [];
-    setPrograms(progs);
-    if (progs.length === 0) {
-      setCreators([]); setVideos([]); setLoading(false); return;
-    }
-    const progIds = progs.map(p => p.id);
-    const { data: cRows, error: cErr } = await supabase
-      .from('paid_creators').select('*').in('program_id', progIds);
-    if (cErr) { setErr(cErr.message); setLoading(false); return; }
-    const cs = (cRows as PaidCreator[]) ?? [];
-    setCreators(cs);
-    if (cs.length === 0) { setVideos([]); setLoading(false); return; }
-    const creatorIds = cs.map(c => c.id);
-    const { data: vRows, error: vErr } = await supabase
-      .from('paid_creator_videos').select('*').in('creator_id', creatorIds);
-    if (vErr) { setErr(vErr.message); setLoading(false); return; }
-    setVideos((vRows as PaidVideo[]) ?? []);
-    setLoading(false);
-  };
-
-  useEffect(() => { load(); }, [brandId]);
-
-  const summaries = useMemo(
-    () => summarizePrograms(programs, creators, videos),
-    [programs, creators, videos],
+  const sortedMonths = useMemo(
+    () => [...months].sort((a, b) => String(b.month).localeCompare(String(a.month))),
+    [months],
   );
 
-  const filteredPrograms = useMemo(() => {
-    if (filter === 'all') return programs;
-    if (filter === 'active') return programs.filter(p => !p.ended_at);
-    return programs.filter(p => !!p.ended_at);
-  }, [programs, filter]);
-
-  const createProgram = async (e: FormEvent) => {
-    e.preventDefault();
-    setNewBusy(true); setNewErr(null);
-    try {
-      const { data, error } = await supabase.from('paid_creator_programs')
-        .insert({
-          brand_id: brandId,
-          name: newName.trim() || null,
-          launch_date: newLaunch || todayISO(),
-          total_budget: 0,
-          currency: 'USD',
-        })
-        .select('*').single();
-      if (error) throw error;
-      const p = data as PaidProgram;
-      setPrograms(prev => [p, ...prev]);
-      setShowNew(false);
-      setNewName('');
-      setNewLaunch(todayISO());
-      // Land the user inside the new program so they can fill it in.
-      setSelectedProgramId(p.id);
-    } catch (e: any) {
-      setNewErr(e?.message ?? 'Failed to create program');
-    } finally {
-      setNewBusy(false);
-    }
-  };
-
-  // Tracker drill-down view
-  if (selectedProgramId) {
-    return (
-      <div>
-        <Button variant="outline-secondary" size="sm" className="mb-3"
-                onClick={() => { setSelectedProgramId(null); load(); }}>
-          <i className="bi bi-arrow-left me-1" /> Back to {brandName} programs
-        </Button>
-        <PaidCollabTracker
-          programId={selectedProgramId}
-          canEdit={canEdit}
-          showBrand={false}
-          onDeleted={() => { setSelectedProgramId(null); load(); }}
-          onProgramChange={() => load()}
-        />
-      </div>
-    );
-  }
+  // Creators grouped by onboarded month (newest first), like the workspace.
+  const groups = useMemo(() => {
+    const map: Record<string, HandlerCreator[]> = {};
+    creators.forEach(c => { const k = monthKey(c.onboarded_on); (map[k] = map[k] || []).push(c); });
+    return Object.keys(map).sort((a, b) => b.localeCompare(a)).map(k => ({
+      key: k,
+      items: map[k].sort((a, b) => String(b.onboarded_on || '').localeCompare(String(a.onboarded_on || ''))),
+    }));
+  }, [creators]);
 
   if (loading) return <div className="text-center py-5"><Spinner animation="border" /></div>;
   if (err) return <Alert variant="danger">{err}</Alert>;
 
-  const activeCount = programs.filter(p => !p.ended_at).length;
-  const endedCount = programs.length - activeCount;
+  if (months.length === 0 && creators.length === 0) {
+    return (
+      <div className="pc-app" style={{ minHeight: 0, background: 'transparent' }}>
+        <div className="pc-card"><div className="pc-empty">
+          <div className="pc-empty-icon">👥</div>
+          <h3>No paid collab data for {brandName}</h3>
+          <p>Enable the “Paid Collabs” scope for this brand and assign it to a handler — their workspace data shows here.</p>
+        </div></div>
+      </div>
+    );
+  }
+
+  const costPerVideo = totals.delivered > 0 ? totals.allocated / totals.delivered : 0;
 
   return (
-    <>
-      <Card className="mb-3">
-        <Card.Body className="d-flex flex-wrap align-items-center justify-content-between gap-3">
-          <div>
-            <h5 className="mb-0">Paid Collab Programs</h5>
-            <div className="text-muted small">
-              {activeCount} active · {endedCount} ended
-            </div>
-          </div>
-          <div className="d-flex gap-2 flex-wrap align-items-center">
-            <Form.Select size="sm" value={filter} onChange={e => setFilter(e.target.value as any)} style={{ width: 140 }}>
-              <option value="all">All programs</option>
-              <option value="active">Active only</option>
-              <option value="ended">Ended only</option>
-            </Form.Select>
-            {canEdit && (
-              <Button size="sm" onClick={() => setShowNew(true)}>
-                <i className="bi bi-plus-lg me-1" /> New program
-              </Button>
-            )}
-          </div>
-        </Card.Body>
-      </Card>
+    <div className="pc-app" style={{ minHeight: 0, background: 'transparent' }}>
+      <div className="pc-kpis pc-kpis-5">
+        <Kpi label="Budget" color="#1259C3" value={fmt$(totals.budget)} sub={`${months.length} month${months.length === 1 ? '' : 's'}`} />
+        <Kpi label="Allocated" color="#8B5CF6" value={fmt$(totals.allocated)} sub={`${creators.length} creator${creators.length === 1 ? '' : 's'}`} />
+        <Kpi label="Paid" color="#2E7D32" value={fmt$(totals.paid)} sub={`${totals.allocated > 0 ? Math.round((totals.paid / totals.allocated) * 100) : 0}% paid out`} />
+        <Kpi label="Videos" color="#0EA5E9" value={`${totals.delivered}/${totals.videos}`} sub={`${totals.videos > 0 ? Math.round((totals.delivered / totals.videos) * 100) : 0}% completed`} />
+        <Kpi label="Cost / Video" color="#E65100" value={costPerVideo ? fmt$(costPerVideo) : '—'} sub="per delivered video" />
+      </div>
 
-      {programs.length === 0 ? (
-        <Card body className="text-center py-5">
-          <div style={{ fontSize: '2.5rem' }} className="mb-2 text-primary"><i className="bi bi-rocket-takeoff" /></div>
-          <h5 className="mb-1">No paid creator programs yet for {brandName}</h5>
-          <p className="text-muted small mb-3">
-            {canEdit
-              ? 'Start the first program to track creators, videos, and milestones.'
-              : 'No paid creator programs have been started for this brand yet.'}
-          </p>
-          {canEdit && (
-            <div>
-              <Button onClick={() => setShowNew(true)}>
-                <i className="bi bi-plus-lg me-1" /> New program
-              </Button>
-            </div>
-          )}
-        </Card>
-      ) : filteredPrograms.length === 0 ? (
-        <Card body className="text-muted text-center">
-          No programs match this filter.
-        </Card>
-      ) : (
-        <Row className="g-3">
-          {filteredPrograms.map(p => {
-            const s = summaries.get(p.id);
-            if (!s) return null;
+      {sortedMonths.length > 0 && (
+        <div className="pc-card" style={{ padding: 16, marginBottom: 16 }}>
+          <div style={{ fontWeight: 700, marginBottom: 10 }}>Monthly budgets &amp; briefs</div>
+          {sortedMonths.map(m => {
+            const products = focusProductList(m.focus_product_url);
             return (
-              <Col md={6} lg={4} key={p.id}>
-                <ProgramCard
-                  summary={s}
-                  onClick={() => setSelectedProgramId(p.id)}
-                />
-              </Col>
+              <div key={m.id} style={{ marginBottom: 10 }}>
+                <div className="pc-dd-links">
+                  <span className="pc-link-chip set">{monthLabel(m.month)} · {fmt$(Number(m.budget) || 0)}</span>
+                  {m.content_guide_url && <a className="pc-link-chip" href={m.content_guide_url} target="_blank" rel="noopener noreferrer">Content guide ↗</a>}
+                  {products.map((p, i) => <a key={i} className="pc-link-chip pc-chip-orange" href={p.url || undefined} target="_blank" rel="noopener noreferrer">{p.name || `Focus product ${i + 1}`} ↗</a>)}
+                </div>
+                {m.notes && m.notes.trim() && <div className="pc-kpi-sub" style={{ marginTop: 4, whiteSpace: 'pre-wrap' }}>{m.notes}</div>}
+              </div>
             );
           })}
-        </Row>
+        </div>
       )}
 
-      <Modal show={showNew} onHide={() => setShowNew(false)} centered>
-        <Form onSubmit={createProgram}>
-          <Modal.Header closeButton>
-            <Modal.Title>New program for {brandName}</Modal.Title>
-          </Modal.Header>
-          <Modal.Body>
-            {newErr && <Alert variant="danger" className="py-2">{newErr}</Alert>}
-            <Form.Group className="mb-3">
-              <Form.Label className="small fw-semibold">Program name *</Form.Label>
-              <Form.Control
-                required
-                value={newName}
-                placeholder="e.g. Summer 2026 Launch"
-                onChange={e => setNewName(e.target.value)}
-                autoFocus
-              />
-            </Form.Group>
-            <Form.Group>
-              <Form.Label className="small fw-semibold">Launch date</Form.Label>
-              <Form.Control
-                type="date"
-                value={newLaunch}
-                onChange={e => setNewLaunch(e.target.value)}
-              />
-              <Form.Text className="text-muted">
-                You can edit budget, products, and other details once the program is created.
-              </Form.Text>
-            </Form.Group>
-          </Modal.Body>
-          <Modal.Footer>
-            <Button variant="secondary" onClick={() => setShowNew(false)} disabled={newBusy}>Cancel</Button>
-            <Button type="submit" disabled={newBusy || !newName.trim()}>
-              {newBusy ? 'Creating…' : 'Create program'}
-            </Button>
-          </Modal.Footer>
-        </Form>
-      </Modal>
-    </>
+      {creators.length === 0 ? (
+        <div className="pc-card"><div className="pc-empty">
+          <div className="pc-empty-icon">👤</div><h3>No creators yet</h3>
+        </div></div>
+      ) : (
+        <div className="pc-card pc-list">
+          <CreatorListHeadRO />
+          {groups.map(g => (
+            <Fragment key={g.key}>
+              <div className="pc-cv-monthhead"><span>{monthLabel(g.key)}</span><span className="pc-cv-monthcount">{g.items.length}</span></div>
+              {g.items.map((c, i) => <CreatorRowRO key={c.id} c={c} idx={i + 1} />)}
+            </Fragment>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

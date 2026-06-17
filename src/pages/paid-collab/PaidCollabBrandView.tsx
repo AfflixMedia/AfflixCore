@@ -9,7 +9,7 @@ import ProgramCard from '../../components/paidcollab/ProgramCard';
 import PaymentControlsTab from '../../components/paidcollab/PaymentControlsTab';
 import { useAuth } from '../../auth/AuthContext';
 
-interface Brand { id: string; name: string; client: string; client_status: string | null; }
+import { useClientPaidCollabData } from './useClientPaidCollabData';
 
 export default function PaidCollabBrandView() {
   const { id } = useParams<{ id: string }>();
@@ -18,12 +18,13 @@ export default function PaidCollabBrandView() {
   const isHandler = profile?.role === 'paid_collab_handler';
   const isBob = profile?.role === 'bob';
   const [section, setSection] = useState<'programs' | 'payments'>('programs');
-  const [brand, setBrand] = useState<Brand | null>(null);
-  const [programs, setPrograms] = useState<PaidProgram[]>([]);
-  const [creators, setCreators] = useState<PaidCreator[]>([]);
-  const [videos, setVideos] = useState<PaidVideo[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
+
+  const { brands: allBrands, programs: allPrograms, creators: allCreators, videos: allVideos, loading, err } = useClientPaidCollabData();
+
+  const brand = useMemo(() => allBrands.find(b => b.id === id) || null, [allBrands, id]);
+  const programs = useMemo(() => allPrograms.filter(p => p.brand_id === id), [allPrograms, id]);
+  const creators = useMemo(() => allCreators.filter(c => programs.some(p => p.id === c.program_id)), [allCreators, programs]);
+  const videos = useMemo(() => allVideos.filter(v => creators.some(c => c.id === v.creator_id)), [allVideos, creators]);
 
   const [filter, setFilter] = useState<'all' | 'active' | 'ended' | 'pending'>('all');
 
@@ -33,39 +34,7 @@ export default function PaidCollabBrandView() {
   const [newBusy, setNewBusy] = useState(false);
   const [newErr, setNewErr] = useState<string | null>(null);
 
-  const load = async () => {
-    setLoading(true); setErr(null);
-    const { data: b, error: bErr } = await supabase
-      .from('brands').select('id,name,client,client_status').eq('id', id).maybeSingle();
-    if (bErr) { setErr(bErr.message); setLoading(false); return; }
-    if (!b) { setErr('Brand not found or you do not have access.'); setLoading(false); return; }
-    setBrand(b as Brand);
-
-    const { data: pRows, error: pErr } = await supabase
-      .from('paid_creator_programs').select('*').eq('brand_id', id)
-      .order('ended_at', { ascending: true, nullsFirst: true })
-      .order('launch_date', { ascending: false });
-    if (pErr) { setErr(pErr.message); setLoading(false); return; }
-    const progs = (pRows as PaidProgram[]) ?? [];
-    setPrograms(progs);
-    if (progs.length === 0) { setCreators([]); setVideos([]); setLoading(false); return; }
-
-    const progIds = progs.map(p => p.id);
-    const { data: cRows, error: cErr } = await supabase
-      .from('paid_creators').select('*').in('program_id', progIds);
-    if (cErr) { setErr(cErr.message); setLoading(false); return; }
-    const cs = (cRows as PaidCreator[]) ?? [];
-    setCreators(cs);
-    if (cs.length === 0) { setVideos([]); setLoading(false); return; }
-    const creatorIds = cs.map(c => c.id);
-    const { data: vRows, error: vErr } = await supabase
-      .from('paid_creator_videos').select('*').in('creator_id', creatorIds);
-    if (vErr) { setErr(vErr.message); setLoading(false); return; }
-    setVideos((vRows as PaidVideo[]) ?? []);
-    setLoading(false);
-  };
-
-  useEffect(() => { load(); }, [id]);
+  const load = () => { /* No-op for now as mutations are disabled in client view */ };
 
   const summaries = useMemo(
     () => summarizePrograms(programs, creators, videos),
@@ -99,7 +68,6 @@ export default function PaidCollabBrandView() {
         .select('*').single();
       if (error) throw error;
       const p = data as PaidProgram;
-      setPrograms(prev => [p, ...prev]);
       setShowNew(false);
       setNewName('');
       setNewLaunch(todayISO());
