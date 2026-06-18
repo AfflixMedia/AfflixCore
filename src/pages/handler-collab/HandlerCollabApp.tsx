@@ -97,6 +97,8 @@ const DEFAULT_STATUS = 'videos_in_progress';
 function deriveStatus(c) {
   return STATUS_OPTIONS.find(s => s.value === c.payment_status) || STATUS_OPTIONS[0];
 }
+// Drilldown groups creators by payment status in this top→bottom order.
+const STATUS_GROUP_ORDER = ['pending', 'videos_in_progress', 'paid'];
 function focusProductList(bm) {
   const raw = bm?.focus_product_url || '';
   if (!raw) return [];
@@ -754,6 +756,18 @@ function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCr
   const bm = row?.bm || {};
   const products = focusProductList(bm);
   const notesHas = !!(notesText && notesText.trim());
+  // group creators by payment status — Payment Pending → Videos in Progress → Payment Sent,
+  // each introduced by a labelled divider. The # index runs continuously top-to-bottom.
+  const statusGroups = useMemo(() => {
+    let n = 0;
+    return STATUS_GROUP_ORDER
+      .map(val => {
+        const opt = STATUS_OPTIONS.find(s => s.value === val);
+        const items = creators.filter(c => deriveStatus(c).value === val).map(c => ({ c, idx: ++n }));
+        return { opt, items };
+      })
+      .filter(g => g.items.length > 0);
+  }, [creators]);
   return (
     <>
       <button className="pc-back" onClick={onBack}>‹ All brands</button>
@@ -803,11 +817,21 @@ function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCr
             <div className="pc-num">#</div><div>Completed on</div><div>Name</div><div>TikTok</div><div className="pc-num">Amount</div>
             <div className="pc-num">Videos</div><div>Payout</div><div>Status</div><div className="pc-num">Content</div>
           </div>
-          {creators.map((c, i) => (
-            <CreatorRow key={c.id} c={c} idx={i + 1} open={openId === c.id}
-              onToggle={() => setOpenId(openId === c.id ? null : c.id)}
-              onEdit={() => onEditCreator(c)} onDelete={() => onDeleteCreator(c.id)}
-              patchCreatorLocal={patchCreatorLocal} onSetStatus={onSetStatus} />
+          {statusGroups.map(g => (
+            <React.Fragment key={g.opt.value}>
+              <div className={`pc-ct-group ${g.opt.cls}`}>
+                <span className="pc-ct-group-label">
+                  <span className={`pc-statusdot ${g.opt.cls}`} />{g.opt.label}
+                  <span className="pc-ct-group-count">{g.items.length}</span>
+                </span>
+              </div>
+              {g.items.map(({ c, idx }) => (
+                <CreatorRow key={c.id} c={c} idx={idx} open={openId === c.id}
+                  onToggle={() => setOpenId(openId === c.id ? null : c.id)}
+                  onEdit={() => onEditCreator(c)} onDelete={() => onDeleteCreator(c.id)}
+                  patchCreatorLocal={patchCreatorLocal} onSetStatus={onSetStatus} />
+              ))}
+            </React.Fragment>
           ))}
         </div>
       )}
@@ -1579,9 +1603,10 @@ function CreatorEditor({ editor, month, directory = [], categories = [], brandPr
   }
   return (
     <div className="pc-overlay" onClick={onClose}>
-      <div className="pc-modal" onClick={e => e.stopPropagation()}>
+      <div className="pc-modal pc-modal-scroll" onClick={e => e.stopPropagation()}>
         <h3>{isAdd ? 'Onboard creator' : 'Edit creator'}</h3>
         <div className="pc-modal-sub">{monthLabel(monthKey(f.onboarded_on) || month)}</div>
+        <div className="pc-modal-body">
         <div className="pc-field" style={{ position: 'relative' }}>
           <label>Name</label>
           <input className="pc-input" placeholder="Creator name" value={f.name} autoFocus
@@ -1661,6 +1686,7 @@ function CreatorEditor({ editor, month, directory = [], categories = [], brandPr
         <div className="pc-field2">
           <div className="pc-field"><label>PayPal</label><input className="pc-input" placeholder="email" value={f.paypal} onChange={e => set('paypal', e.target.value)} /></div>
           <div className="pc-field"><label>Zelle</label><input className="pc-input" placeholder="email / phone" value={f.zelle} onChange={e => set('zelle', e.target.value)} /></div>
+        </div>
         </div>
         <div className="pc-modal-actions">
           <button className="pc-btn pc-btn-ghost" onClick={onClose}>Cancel</button>

@@ -182,7 +182,13 @@
 /* creator table */
 .pc-ct-head, .pc-ct-row{
   display:grid;
-  grid-template-columns: 0.42fr 0.9fr 1.2fr 1.05fr .7fr .55fr 1.4fr 1.45fr .5fr;
+  /* minmax(0,…) so the header and every (independent) row grid resolve identical
+     track widths from the fr ratio alone. With bare fr units each grid sizes its
+     columns to its OWN content's min-width, so wide cells (names, payout, status)
+     shift the body out of line with the headings. */
+  grid-template-columns:
+    minmax(0,0.42fr) minmax(0,0.9fr) minmax(0,1.2fr) minmax(0,1.05fr) minmax(0,.7fr)
+    minmax(0,.55fr) minmax(0,1.4fr) minmax(0,1.45fr) minmax(0,.5fr);
   align-items:center; gap:14px;
 }
 .pc-idx{ display:inline-flex; align-items:center; justify-content:center; min-width:33px; height:24px; padding:0 8px; border-radius:8px; background:var(--pc-accent-light); color:var(--pc-accent); font-size:12px; font-weight:800; font-variant-numeric:tabular-nums; }
@@ -194,6 +200,22 @@
 .pc-cname{ font-weight:600; }
 .pc-handle{ color:var(--pc-text-2); font-size:13px; }
 .pc-content-cell{ display:inline-flex; align-items:center; gap:6px; color:var(--pc-accent); font-weight:600; font-size:13px; }
+/* let every cell shrink to its (fixed) track and clip overflow rather than push the
+   column wider — keeps the body lined up under the headings on long values */
+.pc-ct-head > div, .pc-ct-row > .pc-cell{ min-width:0; }
+.pc-ct-row > .pc-cell{ overflow:hidden; }
+.pc-ct-row .pc-cname, .pc-ct-row .pc-handle{ display:inline-block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:middle; }
+.pc-tiktok{ max-width:100%; min-width:0; }
+
+/* status group separators inside the creator drilldown table
+   (Payment Pending → Videos in Progress → Payment Sent — label centered on the divider) */
+.pc-ct-group{ display:flex; align-items:center; gap:12px; padding:20px 24px 18px; background: white; }
+.pc-ct-group::before, .pc-ct-group::after{ content:''; flex:1; height:1px; background:var(--pc-divider); }
+.pc-ct-group-label{ display:inline-flex; align-items:center; gap:8px; font-size:11.5px; font-weight:800; letter-spacing:.6px; text-transform:uppercase; white-space:nowrap; color:var(--pc-text-2); }
+.pc-ct-group-count{ font-size:11px; font-weight:700; color:var(--pc-text-2); background:var(--pc-card-2); border-radius:var(--pc-pill); padding:1px 8px; min-width:20px; text-align:center; }
+.pc-ct-group.pending .pc-ct-group-label{ color:var(--pc-warn-fg); }
+.pc-ct-group.progress .pc-ct-group-label{ color:var(--pc-info-fg); }
+.pc-ct-group.sent .pc-ct-group-label{ color:var(--pc-success-fg); }
 
 /* inline status dropdown (custom, portal menu) */
 .pc-badge-btn{ border:0; cursor:pointer; transition:filter .15s, transform .12s var(--pc-ease); }
@@ -634,6 +656,13 @@ a.pc-vx-prod:hover{ text-decoration:none; filter:brightness(.97); }
 .pc-modal-actions{ display:flex; gap:10px; margin-top:22px; }
 .pc-modal-actions .pc-btn{ flex:1; justify-content:center; }
 
+/* tall editor modals: cap the height, keep the title + action buttons pinned,
+   and scroll the fields in between so the modal never runs off-screen */
+.pc-modal-scroll{ display:flex; flex-direction:column; max-height:calc(100vh - 36px); }
+.pc-modal-scroll .pc-modal-body{ flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; margin:0 -24px; padding:2px 24px; }
+.pc-modal-scroll .pc-modal-actions{ flex:0 0 auto; margin-top:16px; padding-top:16px; border-top:1px solid var(--pc-divider); }
+@media (max-width:520px){ .pc-modal-scroll{ max-height:88vh; } }
+
 /* ── States ── */
 .pc-empty{ text-align:center; padding:64px 24px; color:var(--pc-text-2); }
 .pc-empty-icon{ font-size:42px; margin-bottom:12px; }
@@ -697,6 +726,8 @@ a.pc-vx-prod:hover{ text-decoration:none; filter:brightness(.97); }
   .pc-bt-row > .pc-cell, .pc-bt-row > .pc-brandcell, .pc-bt-row > .pc-chev,
   .pc-ct-row > .pc-cell, .pc-cv-row > .pc-cell, .pc-pf-row > .pc-cell, .pc-pf-row > .pc-chev{ display:none; }
   .pc-cell-hide-mobile{ display:none !important; }
+  /* status dividers sit between the floating cards — trim the desktop side padding */
+  .pc-ct-group{ padding:14px 2px 8px; }
 
   /* selected / open states → accent ring */
   .pc-cv-row.sel{ background:var(--pc-card); box-shadow:0 0 0 2px var(--pc-accent), var(--pc-shadow); }
