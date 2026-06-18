@@ -1,10 +1,7 @@
-import { useEffect, useMemo, useState, FormEvent } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Spinner, Alert, Button, Badge, Card, Row, Col, Modal, Form } from 'react-bootstrap';
-import { supabase } from '../../lib/supabase';
-import {
-  PaidProgram, PaidCreator, PaidVideo, summarizePrograms, todayISO,
-} from '../../lib/paidCollabSchema';
+import { Spinner, Alert, Button, Badge, Card, Row, Col, Form } from 'react-bootstrap';
+import { summarizePrograms } from '../../lib/paidCollabSchema';
 import ProgramCard from '../../components/paidcollab/ProgramCard';
 import PaymentControlsTab from '../../components/paidcollab/PaymentControlsTab';
 import { useAuth } from '../../auth/AuthContext';
@@ -28,14 +25,6 @@ export default function PaidCollabBrandView() {
 
   const [filter, setFilter] = useState<'all' | 'active' | 'ended' | 'pending'>('all');
 
-  const [showNew, setShowNew] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newLaunch, setNewLaunch] = useState(todayISO());
-  const [newBusy, setNewBusy] = useState(false);
-  const [newErr, setNewErr] = useState<string | null>(null);
-
-  const load = () => { /* No-op for now as mutations are disabled in client view */ };
-
   const summaries = useMemo(
     () => summarizePrograms(programs, creators, videos),
     [programs, creators, videos],
@@ -52,32 +41,6 @@ export default function PaidCollabBrandView() {
   }, [programs, summaries, filter]);
 
   const brandActive = brand?.client_status !== 'closed';
-
-  const createProgram = async (e: FormEvent) => {
-    e.preventDefault();
-    setNewBusy(true); setNewErr(null);
-    try {
-      const { data, error } = await supabase.from('paid_creator_programs')
-        .insert({
-          brand_id: id,
-          name: newName.trim() || null,
-          launch_date: newLaunch || todayISO(),
-          total_budget: 0,
-          currency: 'USD',
-        })
-        .select('*').single();
-      if (error) throw error;
-      const p = data as PaidProgram;
-      setShowNew(false);
-      setNewName('');
-      setNewLaunch(todayISO());
-      nav(`/paid-collab/programs/${p.id}`);
-    } catch (e: any) {
-      setNewErr(e?.message ?? 'Failed to create program');
-    } finally {
-      setNewBusy(false);
-    }
-  };
 
   if (loading) return <div className="text-center py-5"><Spinner animation="border" /></div>;
   if (err) return <Alert variant="danger">{err}</Alert>;
@@ -102,11 +65,6 @@ export default function PaidCollabBrandView() {
           </h2>
           <div className="text-muted small">{brand.client}</div>
         </div>
-        {brandActive && (
-          <Button onClick={() => setShowNew(true)}>
-            <i className="bi bi-plus-lg me-1" /> New program
-          </Button>
-        )}
       </div>
 
       {!brandActive && (
@@ -166,18 +124,11 @@ export default function PaidCollabBrandView() {
         <Card body className="text-center py-5">
           <div style={{ fontSize: '2.5rem' }} className="mb-2 text-primary"><i className="bi bi-rocket-takeoff" /></div>
           <h5 className="mb-1">No programs yet for {brand.name}</h5>
-          <p className="text-muted small mb-3">
+          <p className="text-muted small mb-0">
             {brandActive
-              ? 'Start the first program to track creators, videos, and milestones.'
+              ? 'No programs have been added for this brand yet. Programs are managed in the handler workspace.'
               : 'This brand has no paid collab programs.'}
           </p>
-          {brandActive && (
-            <div>
-              <Button onClick={() => setShowNew(true)}>
-                <i className="bi bi-plus-lg me-1" /> New program
-              </Button>
-            </div>
-          )}
         </Card>
       ) : filteredPrograms.length === 0 ? (
         <Card body className="text-muted text-center">
@@ -200,44 +151,6 @@ export default function PaidCollabBrandView() {
         </Row>
       )}
       </>)}
-
-      <Modal show={showNew} onHide={() => setShowNew(false)} centered>
-        <Form onSubmit={createProgram}>
-          <Modal.Header closeButton>
-            <Modal.Title>New program for {brand.name}</Modal.Title>
-          </Modal.Header>
-          <Modal.Body>
-            {newErr && <Alert variant="danger" className="py-2">{newErr}</Alert>}
-            <Form.Group className="mb-3">
-              <Form.Label className="small fw-semibold">Program name *</Form.Label>
-              <Form.Control
-                required
-                value={newName}
-                placeholder="e.g. Summer 2026 Launch"
-                onChange={e => setNewName(e.target.value)}
-                autoFocus
-              />
-            </Form.Group>
-            <Form.Group>
-              <Form.Label className="small fw-semibold">Launch date</Form.Label>
-              <Form.Control
-                type="date"
-                value={newLaunch}
-                onChange={e => setNewLaunch(e.target.value)}
-              />
-              <Form.Text className="text-muted">
-                You can edit budget, products, and other details inside the program.
-              </Form.Text>
-            </Form.Group>
-          </Modal.Body>
-          <Modal.Footer>
-            <Button variant="secondary" onClick={() => setShowNew(false)} disabled={newBusy}>Cancel</Button>
-            <Button type="submit" disabled={newBusy || !newName.trim()}>
-              {newBusy ? 'Creating…' : 'Create program'}
-            </Button>
-          </Modal.Footer>
-        </Form>
-      </Modal>
     </>
   );
 }

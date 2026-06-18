@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import type { HandlerCreator } from '../handler-collab/store';
 import '../handler-collab/handlerCollab.css';
 
@@ -25,6 +25,19 @@ export const fmt$ = (n: number) => `$${Math.round(n || 0).toLocaleString()}`;
 export const getGradient = (name: string) => (name ? AVATAR_GRADIENTS[name.charCodeAt(0) % AVATAR_GRADIENTS.length] : AVATAR_GRADIENTS[0]);
 export const initial = (name: string) => { const s = (name || '').trim(); return s ? s[0].toUpperCase() : '?'; };
 export const isValidUrl = (s?: string) => !!s && (s.startsWith('http://') || s.startsWith('https://'));
+// PayPal payout value → openable link (URL / www. / paypal.me). Plain emails stay text.
+function paypalUrl(raw?: string | null) {
+  if (!raw) return null;
+  const t = String(raw).trim();
+  if (!t) return null;
+  if (/^https?:\/\//i.test(t)) return t;
+  if (/^(www\.|paypal\.me\/|paypal\.com\/)/i.test(t)) return `https://${t.replace(/^\/+/, '')}`;
+  return null;
+}
+function copyText(t: string) {
+  try { if (navigator.clipboard?.writeText) { navigator.clipboard.writeText(t); return; } } catch { /* ignore */ }
+  try { const ta = document.createElement('textarea'); ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); } catch { /* ignore */ }
+}
 export function monthLabel(key: string) { if (!key) return '—'; const [y, m] = key.split('-'); return `${MONTHS[parseInt(m, 10) - 1] || '?'} ${y}`; }
 export function fmtDate(d?: string | null) { if (!d) return '—'; const x = new Date(d); return isNaN(x.getTime()) ? String(d) : x.toLocaleDateString('en-US', { day: 'numeric', month: 'short' }); }
 function tiktokHandle(raw: string) {
@@ -63,8 +76,31 @@ export function Kpi({ label, value, sub, color }: { label: string; value: string
   );
 }
 
+// Payout cell — PayPal link rendered as a compact clickable PP icon + open arrow
+// (full link on hover via title); Zelle and non-link PayPal values stay as text.
+function PayoutRO({ paypal, zelle }: { paypal?: string | null; zelle?: string | null }) {
+  if (!paypal && !zelle) return <span className="pc-handle">—</span>;
+  const ppUrl = paypalUrl(paypal);
+  return (
+    <div className="pc-payout">
+      {paypal && (ppUrl ? (
+        <a className="pc-payline pc-paylink" href={ppUrl} target="_blank" rel="noopener noreferrer"
+          onClick={e => e.stopPropagation()} title={`PayPal: ${paypal}`} aria-label={`Open PayPal link: ${paypal}`}>
+          <span className="pc-paytag pp">PP</span>
+          <span className="pc-paylink-arrow" aria-hidden>↗</span>
+        </a>
+      ) : (
+        <span className="pc-payline" title={`PayPal: ${paypal}`}><span className="pc-paytag pp">PP</span><span className="pc-payval">{paypal}</span></span>
+      ))}
+      {zelle && <span className="pc-payline" title={`Zelle: ${zelle}`}><span className="pc-paytag zl">Z</span><span className="pc-payval">{zelle}</span></span>}
+    </div>
+  );
+}
+
 export function CreatorRowRO({ c, idx }: { c: HandlerCreator; idx: number }) {
   const [open, setOpen] = useState(false);
+  const [copiedIdx, setCopiedIdx] = useState(-1);
+  const copyCode = (i: number, code: string) => { copyText(code); setCopiedIdx(i); setTimeout(() => setCopiedIdx(x => (x === i ? -1 : x)), 1400); };
   const accounts = tiktokAccounts(c.tiktok_handle);
   const codes = Array.isArray(c.video_codes) ? c.video_codes : [];
   const filled = codes.filter(v => isValidUrl(v.video)).length;
@@ -91,11 +127,7 @@ export function CreatorRowRO({ c, idx }: { c: HandlerCreator; idx: number }) {
         </div>
         <div className="pc-cell pc-num" data-label="Amount"><span className="pc-money">{fmt$(Number(c.amount) || 0)}</span></div>
         <div className="pc-cell pc-num" data-label="Videos">{c.videos_count || '—'}</div>
-        <div className="pc-cell" data-label="Payout">
-          {(c.paypal || c.zelle)
-            ? <div className="pc-payout">{c.paypal && <span className="pc-payline"><span className="pc-paytag pp">PP</span><span className="pc-payval">{c.paypal}</span></span>}{c.zelle && <span className="pc-payline"><span className="pc-paytag zl">Z</span><span className="pc-payval">{c.zelle}</span></span>}</div>
-            : <span className="pc-handle">—</span>}
-        </div>
+        <div className="pc-cell" data-label="Payout"><PayoutRO paypal={c.paypal} zelle={c.zelle} /></div>
         <div className="pc-cell" data-label="Status"><span className={`pc-badge ${st.cls}`}><span className="dot" />{st.label}</span></div>
         <div className="pc-cell pc-num" data-label="Content"><span className="pc-content-cell">{filled > 0 ? <b>{filled}</b> : ''} {open ? '▴' : '▾'}</span></div>
       </div>
@@ -147,11 +179,20 @@ export function CreatorRowRO({ c, idx }: { c: HandlerCreator; idx: number }) {
                       : i + 1}</span>
                     <div className="pc-vx-inp" style={{ alignItems: 'center' }}>
                       <span className="pc-vx-inp-ico"><svg viewBox="0 0 24 24" fill="currentColor" width="11" height="11"><path d="M8 5v14l11-7z" /></svg></span>
-                      {vOk ? <a className="pc-handle" href={row.video} target="_blank" rel="noopener noreferrer">{row.video}</a> : <span className="pc-handle">{row.video || '—'}</span>}
+                      {vOk
+                        ? <a className="pc-handle pc-vx-val" href={row.video} target="_blank" rel="noopener noreferrer" title={row.video} onClick={e => e.stopPropagation()}>{row.video}</a>
+                        : <span className="pc-handle pc-vx-val" title={row.video || ''}>{row.video || '—'}</span>}
                     </div>
                     <div className="pc-vx-inp pc-vx-inp-ad" style={{ alignItems: 'center' }}>
                       <span className="pc-vx-inp-ico">#</span>
-                      <span>{row.adCode || '—'}</span>
+                      <span className="pc-vx-val" title={row.adCode || ''}>{row.adCode || '—'}</span>
+                      {row.adCode ? (
+                        <button type="button" className={`pc-vx-copy ${copiedIdx === i ? 'ok' : ''}`} title="Copy ad code" onClick={e => { e.stopPropagation(); copyCode(i, row.adCode); }}>
+                          {copiedIdx === i
+                            ? <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                            : <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg>}
+                        </button>
+                      ) : null}
                     </div>
                     <span className={`pc-vx-auth ${row.auth ? 'on' : ''}`} aria-checked={row.auth}>
                       {row.auth && <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>}
@@ -176,5 +217,34 @@ export function CreatorListHeadRO() {
       <div className="pc-num">#</div><div>Completed on</div><div>Name</div><div>TikTok</div><div className="pc-num">Amount</div>
       <div className="pc-num">Videos</div><div>Payout</div><div>Status</div><div className="pc-num">Content</div>
     </div>
+  );
+}
+
+const STATUS_GROUP_ORDER = ['pending', 'videos_in_progress', 'paid'];
+const statusGroupKey = (c: HandlerCreator) => (STATUS[c.payment_status] ? c.payment_status : 'videos_in_progress');
+
+// Read-only creator list grouped by payment status (Payment Pending → Videos in
+// Progress → Payment Sent), each introduced by a labelled divider — mirrors the
+// handler Workspace drilldown. `creators` should be pre-sorted; order is preserved
+// within each group and the # index runs continuously top-to-bottom.
+export function CreatorStatusGroupsRO({ creators }: { creators: HandlerCreator[] }) {
+  let n = 0;
+  const groups = STATUS_GROUP_ORDER
+    .map(val => ({ val, st: STATUS[val], items: creators.filter(c => statusGroupKey(c) === val) }))
+    .filter(g => g.items.length > 0);
+  return (
+    <>
+      {groups.map(g => (
+        <Fragment key={g.val}>
+          <div className={`pc-ct-group ${g.st.cls}`}>
+            <span className="pc-ct-group-label">
+              <span className={`pc-statusdot ${g.st.cls}`} />{g.st.label}
+              <span className="pc-ct-group-count">{g.items.length}</span>
+            </span>
+          </div>
+          {g.items.map(c => { n += 1; return <CreatorRowRO key={c.id} c={c} idx={n} />; })}
+        </Fragment>
+      ))}
+    </>
   );
 }

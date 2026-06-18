@@ -603,6 +603,9 @@ a.pc-vx-prod:hover{ text-decoration:none; filter:brightness(.97); }
 .pc-vx-inp input{ border:0; background:transparent; outline:none; flex:1; min-width:0; font-family:inherit; font-size:13.5px; color:var(--pc-text); }
 .pc-vx-inp input::placeholder{ color:var(--pc-text-3); }
 .pc-vx-inp-ad input{ font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12.5px; letter-spacing:.2px; }
+/* read-only video / ad-code values: truncate inside the box instead of overflowing it */
+.pc-vx-val{ flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pc-vx-inp-ad .pc-vx-val{ font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12.5px; letter-spacing:.2px; }
 .pc-vx-copy{ flex:0 0 auto; width:27px; height:27px; border:0; background:transparent; border-radius:8px; color:var(--pc-text-3); display:flex; align-items:center; justify-content:center; transition:all .15s; }
 .pc-vx-copy svg{ display:block; }
 .pc-vx-copy:hover{ background:var(--pc-accent-light); color:var(--pc-accent); }

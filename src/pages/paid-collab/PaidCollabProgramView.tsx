@@ -5,7 +5,7 @@ import { supabase } from '../../lib/supabase';
 import type { HandlerBrandMonth, HandlerCreator } from '../handler-collab/store';
 import {
   fmt$, getGradient, initial, monthKey, monthLabel, focusProductList,
-  deliveredCount, Kpi, CreatorRowRO, CreatorListHeadRO,
+  deliveredCount, Kpi, CreatorListHeadRO, CreatorStatusGroupsRO,
 } from './handlerCollabReadonly';
 
 /**
@@ -108,7 +108,7 @@ export default function PaidCollabProgramView() {
         ) : (
           <div className="pc-card pc-list">
             <CreatorListHeadRO />
-            {sorted.map((c, i) => <CreatorRowRO key={c.id} c={c} idx={i + 1} />)}
+            <CreatorStatusGroupsRO creators={sorted} />
           </div>
         )}
       </div>
