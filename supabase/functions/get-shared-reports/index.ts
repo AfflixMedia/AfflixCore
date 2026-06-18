@@ -198,6 +198,19 @@ serve(async (req) => {
       }
     }
 
+    // Handler-collab data (new model) — months + creators keyed by public.brands.id.
+    let handler_months: any[] = [];
+    let handler_creators: any[] = [];
+    if (includePaidCollab && brands.length > 0) {
+      const allowedIds = brands.map((b: any) => b.id);
+      const [{ data: hmRows }, { data: hcRows }] = await Promise.all([
+        admin.from('handler_collab_brand_months').select('*').in('brand_id', allowedIds),
+        admin.from('handler_collab_creators').select('*').in('brand_id', allowedIds),
+      ]);
+      handler_months = hmRows ?? [];
+      handler_creators = hcRows ?? [];
+    }
+
     return json({
       client,
       brands,
@@ -221,6 +234,8 @@ serve(async (req) => {
       paid_collab_threads,
       paid_collab_performance,
       paid_collab_video_performance,
+      handler_months,
+      handler_creators,
       link_mode: 'brand',
     });
   } catch (e) {

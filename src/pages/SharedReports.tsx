@@ -25,6 +25,8 @@ import ProgramCard from '../components/paidcollab/ProgramCard';
 import ProgramProgress from '../components/paidcollab/ProgramProgress';
 import { CumulativeChart, MonthlyStackedChart } from '../components/paidcollab/Charts';
 import Avatar from '../components/Avatar';
+import SharedHandlerCollabPane from '../components/share/SharedHandlerCollabPane';
+import type { HandlerBrandMonth, HandlerCreator } from './handler-collab/store';
 
 interface ApprovalDecisionRow {
   id: string;
@@ -64,7 +66,7 @@ export default function SharedReports() {
   const [err, setErr] = useState<string | null>(null);
 
   const [activeBrandId, setActiveBrandId] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'reporting' | 'monthly' | 'resources' | 'paid-collab'>('reporting');
+  const [activeTab, setActiveTab] = useState<'reporting' | 'monthly' | 'resources' | 'paid-collab' | 'new-paid-collab'>('reporting');
   const [month, setMonth] = useState(currentMonth());
   const [openId, setOpenId] = useState<string | null>(null);
   const [openMonthlyId, setOpenMonthlyId] = useState<string | null>(null);
@@ -82,6 +84,9 @@ export default function SharedReports() {
   const [pcThreads, setPcThreads] = useState<ProgramThreadComment[]>([]);
   const [pcPerformance, setPcPerformance] = useState<PaidCreatorPerformance[]>([]);
   const [pcNotes, setPcNotes] = useState<ProgramNote[]>([]);
+  // New handler-collab data (current Paid Collab model) for the "New Paid Collab" tab.
+  const [pcMonths, setPcMonths] = useState<HandlerBrandMonth[]>([]);
+  const [pcHandlerCreators, setPcHandlerCreators] = useState<HandlerCreator[]>([]);
   const [openProgramId, setOpenProgramId] = useState<string | null>(null);
   const [linkMode, setLinkMode] = useState<'brand' | 'general'>('brand');
   const [decisions, setDecisions] = useState<ApprovalDecisionRow[]>([]);
@@ -135,6 +140,8 @@ export default function SharedReports() {
         setPcThreads((data.paid_collab_threads ?? []) as ProgramThreadComment[]);
         setPcPerformance((data.paid_collab_performance ?? []) as PaidCreatorPerformance[]);
         setPcNotes((data.paid_collab_program_notes ?? []) as ProgramNote[]);
+        setPcMonths((data.handler_months ?? []) as HandlerBrandMonth[]);
+        setPcHandlerCreators((data.handler_creators ?? []) as HandlerCreator[]);
         const mode: 'brand' | 'general' = data.link_mode === 'general' ? 'general' : 'brand';
         setLinkMode(mode);
         // Default landing tab — first enabled section
@@ -778,6 +785,14 @@ export default function SharedReports() {
                     </Nav.Link>
                   </Nav.Item>
                 )}
+                {includePaidCollab && (
+                  <Nav.Item>
+                    <Nav.Link eventKey="new-paid-collab" className="d-flex align-items-center gap-2 px-3">
+                      <i className="bi bi-people-fill" /> New Paid Collab
+                      <Badge bg="secondary">{pcMonths.filter(m => m.brand_id === activeBrandId).length}</Badge>
+                    </Nav.Link>
+                  </Nav.Item>
+                )}
               </Nav>
             </Card.Header>
             <Card.Body>
@@ -1051,6 +1066,14 @@ export default function SharedReports() {
                     onNameChange={(n) => { setPublicName(n); localStorage.setItem('ac_public_name', n); }}
                   />
                 </Tab.Pane>
+
+                <Tab.Pane eventKey="new-paid-collab">
+                  <SharedHandlerCollabPane
+                    brand={activeBrand}
+                    months={pcMonths}
+                    creators={pcHandlerCreators}
+                  />
+                </Tab.Pane>
               </Tab.Content>
             </Card.Body>
           </Card>
@@ -1217,7 +1240,6 @@ function MonthQuickPicks({ month, setMonth, monthsWithData }: {
   );
 }
 
-// =====================================================================
 // SharedPaidCollabPane — read-only paid collab tab on the client share view.
 // Lists programs for the active brand, and lets the client drill into a
 // single program to see creators / videos / notes + a comment thread.
