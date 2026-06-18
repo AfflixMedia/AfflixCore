@@ -952,9 +952,18 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
                       ) : (
                         <Row className="g-2">
                           {products.map(p => (
-                            <Col md={6} key={p.id}>
-                              <div className="d-flex align-items-center gap-2">
-                                <div className="flex-grow-1 small text-truncate" title={p.name}>{p.name}</div>
+                            <Col md={12} key={p.id}>
+                              <div className="d-flex align-items-center gap-2 ac-pp-row">
+                                <div className="flex-grow-1" style={{ minWidth: 0 }}>
+                                  <div className="small text-truncate" title={p.name}>{p.name}</div>
+                                  {p.external_product_id && (
+                                    <div className="text-muted text-truncate"
+                                      style={{ fontFamily: 'monospace', fontSize: '0.72rem' }}
+                                      title={p.external_product_id}>
+                                      {p.external_product_id}
+                                    </div>
+                                  )}
+                                </div>
                                 <div style={{ width: 110 }}>
                                   <NumberInput
                                     size="sm"
@@ -969,8 +978,8 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
                               </div>
                             </Col>
                           ))}
-                          <Col md={6}>
-                            <div className="d-flex align-items-center gap-2">
+                          <Col md={12}>
+                            <div className="d-flex align-items-center gap-2 ac-pp-row">
                               <div className="flex-grow-1 small fst-italic">Others</div>
                               <div style={{ width: 110 }}>
                                 <NumberInput

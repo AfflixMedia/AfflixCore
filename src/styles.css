@@ -2298,3 +2298,16 @@ input[type="number"] {
   .ac-chat-shell.has-active .ac-chat-list { display: none; }
   .ac-chat-back { display: inline-flex; align-items: center; }
 }
+
+/* ---- Per-product approval rows (brand samples daily-entry modal) ---- */
+.ac-pp-row {
+  border: 1px solid var(--ac-line-l);
+  border-radius: 10px;
+  padding: 8px 10px;
+  transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease;
+}
+.ac-pp-row:hover {
+  background-color: var(--ac-primary-soft);
+  border-color: var(--ac-primary);
+  box-shadow: 0 1px 4px rgba(232, 134, 46, .18);
+}
