@@ -456,7 +456,11 @@
 .pc-soon-pill{ display:inline-block; margin-top:14px; background:var(--pc-accent-light); color:var(--pc-accent); font-size:12.5px; font-weight:700; border-radius:var(--pc-pill); padding:6px 16px; }
 .pc-paytag.pp{ background:var(--pc-info-bg); color:var(--pc-info-fg); }
 .pc-paytag.zl{ background:#EDE7F6; color:#6A1B9A; }
-.pc-payval{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pc-payval{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+/* PayPal link shown as a compact clickable PP icon + open arrow (full link on hover) */
+.pc-paylink{ display:inline-flex; align-items:center; gap:5px; color:var(--pc-accent); text-decoration:none; cursor:pointer; flex:0 0 auto; }
+.pc-paylink:hover{ opacity:.82; }
+.pc-paylink-arrow{ flex:0 0 auto; color:var(--pc-accent); text-decoration:none; font-size:11px; font-weight:700; line-height:1; }
 @media (prefers-color-scheme:dark){ .pc-paytag.zl{ background:rgba(149,117,205,.2); color:#CE93D8; } }
 
 /* confirm modal */

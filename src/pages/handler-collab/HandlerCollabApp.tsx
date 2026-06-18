@@ -44,6 +44,16 @@ function tiktokUrl(raw) {
   if (t.startsWith('http')) return t;
   return `https://www.tiktok.com/${tiktokHandle(t)}`;
 }
+// Turn a PayPal payout value into an openable link when it's a link/paypal.me
+// (a full URL, a www./paypal.me/ form). Plain emails stay as text (return null).
+function paypalUrl(raw) {
+  if (!raw) return null;
+  const t = String(raw).trim();
+  if (!t) return null;
+  if (/^https?:\/\//i.test(t)) return t;
+  if (/^(www\.|paypal\.me\/|paypal\.com\/)/i.test(t)) return `https://${t.replace(/^\/+/, '')}`;
+  return null;
+}
 function monthKey(dateStr) { return dateStr ? String(dateStr).slice(0, 7) : ''; }
 function monthLabel(key) {
   if (!key) return '—';
@@ -897,9 +907,23 @@ function CreatorRow({ c, idx, open, onToggle, onEdit, onDelete, patchCreatorLoca
 
 function PayoutCell({ paypal, zelle }) {
   if (!paypal && !zelle) return <span className="pc-handle">—</span>;
+  const ppUrl = paypalUrl(paypal);
   return (
     <div className="pc-payout">
-      {paypal && <span className="pc-payline" title={`PayPal: ${paypal}`}><span className="pc-paytag pp">PP</span><span className="pc-payval">{paypal}</span></span>}
+      {paypal && (
+        ppUrl ? (
+          <a className="pc-payline pc-paylink" href={ppUrl} target="_blank" rel="noopener noreferrer"
+            onClick={e => e.stopPropagation()} title={`PayPal: ${paypal}`} aria-label={`Open PayPal link: ${paypal}`}>
+            <span className="pc-paytag pp">PP</span>
+            <span className="pc-paylink-arrow" aria-hidden>↗</span>
+          </a>
+        ) : (
+          <span className="pc-payline" title={`PayPal: ${paypal}`}>
+            <span className="pc-paytag pp">PP</span>
+            <span className="pc-payval">{paypal}</span>
+          </span>
+        )
+      )}
       {zelle && <span className="pc-payline" title={`Zelle: ${zelle}`}><span className="pc-paytag zl">Z</span><span className="pc-payval">{zelle}</span></span>}
     </div>
   );
