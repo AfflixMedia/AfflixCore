@@ -20,6 +20,14 @@ export const STATUS = {
   paid: { label: 'Payment Sent', cls: 'sent' },
 } as Record<string, { label: string; cls: string }>;
 
+// Client-facing status: the handler keeps "Payment Pending" hidden until they flip
+// the per-creator toggle on, so all read views (share link, client portal, Bob's
+// brand tab) mask a not-yet-shared pending status back to "Videos in Progress".
+export const clientStatus = (c: HandlerCreator) =>
+  (c.payment_status === 'pending' && !c.pending_visible_to_client) ? 'videos_in_progress' : c.payment_status;
+// True when this creator's payment-pending status is visible to the client.
+export const isPendingVisible = (c: HandlerCreator) => clientStatus(c) === 'pending';
+
 export const monthKey = (d?: string | null) => (d ? String(d).slice(0, 7) : '');
 export const fmt$ = (n: number) => `$${Math.round(n || 0).toLocaleString()}`;
 export const getGradient = (name: string) => (name ? AVATAR_GRADIENTS[name.charCodeAt(0) % AVATAR_GRADIENTS.length] : AVATAR_GRADIENTS[0]);
@@ -110,7 +118,7 @@ export function CreatorRowRO({ c, idx }: { c: HandlerCreator; idx: number }) {
   const adCount = codes.filter(v => (v.adCode || '').trim()).length;
   const authCount = codes.filter(v => v.auth).length;
   const allAuth = adCount > 0 && authCount === adCount;
-  const st = STATUS[c.payment_status] || STATUS.videos_in_progress;
+  const st = STATUS[clientStatus(c)] || STATUS.videos_in_progress;
   const prodList = creatorProducts(c);
   const initials = (c.name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?';
 
@@ -221,7 +229,7 @@ export function CreatorListHeadRO() {
 }
 
 const STATUS_GROUP_ORDER = ['pending', 'videos_in_progress', 'paid'];
-const statusGroupKey = (c: HandlerCreator) => (STATUS[c.payment_status] ? c.payment_status : 'videos_in_progress');
+const statusGroupKey = (c: HandlerCreator) => { const s = clientStatus(c); return STATUS[s] ? s : 'videos_in_progress'; };
 
 // Read-only creator list grouped by payment status (Payment Pending → Videos in
 // Progress → Payment Sent), each introduced by a labelled divider — mirrors the

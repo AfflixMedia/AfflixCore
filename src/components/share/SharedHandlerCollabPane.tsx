@@ -5,7 +5,7 @@ import {
 import type { HandlerBrandMonth, HandlerCreator } from '../../pages/handler-collab/store';
 import {
   fmt$, getGradient, initial, monthKey, monthLabel, focusProductList,
-  deliveredCount, gmvSum, Kpi, CreatorListHeadRO, CreatorStatusGroupsRO,
+  deliveredCount, gmvSum, isPendingVisible, Kpi, CreatorListHeadRO, CreatorStatusGroupsRO,
 } from '../../pages/paid-collab/handlerCollabReadonly';
 
 /* ════════════════════════════════════════════════════════════
@@ -31,9 +31,9 @@ export default function SharedHandlerCollabPane({ brand, months, creators }: {
   // Per-program (month) rollup — creators onboarded that month + their stats.
   const programRows = useMemo(() => bMonths.map(m => {
     const mc = bCreators.filter(c => monthKey(c.onboarded_on) === m.month);
-    let allocated = 0, videos = 0, delivered = 0, gmv = 0;
-    mc.forEach(c => { allocated += Number(c.amount) || 0; videos += Number(c.videos_count) || 0; delivered += deliveredCount(c); gmv += gmvSum(c); });
-    return { m, creators: mc.length, budget: Number(m.budget) || 0, allocated, videos, delivered, gmv };
+    let allocated = 0, videos = 0, delivered = 0, gmv = 0, pendingCount = 0;
+    mc.forEach(c => { allocated += Number(c.amount) || 0; videos += Number(c.videos_count) || 0; delivered += deliveredCount(c); gmv += gmvSum(c); if (isPendingVisible(c)) pendingCount += 1; });
+    return { m, creators: mc.length, budget: Number(m.budget) || 0, allocated, videos, delivered, gmv, pendingCount };
   }), [bMonths, bCreators]);
 
   // Calendar-month GMV / Ad aggregation across every creator's monthly data → chart series.
@@ -136,13 +136,21 @@ export default function SharedHandlerCollabPane({ brand, months, creators }: {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {programRows.map(r => (
-              <div key={r.m.id} className="pc-card" role="button" tabIndex={0}
+              <div key={r.m.id} className={`pc-card pc-prog-card ${r.pendingCount > 0 ? 'pc-prog-pending' : ''}`} role="button" tabIndex={0}
                 style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}
                 onClick={() => setOpenMonth(r.m.month)}
                 onKeyDown={e => { if (e.key === 'Enter') setOpenMonth(r.m.month); }}>
                 <span className="pc-ava" style={{ background: getGradient(brand.name) }}>{initial(brand.name)}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700 }}>{monthLabel(r.m.month)}</div>
+                  <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    {monthLabel(r.m.month)}
+                    {r.pendingCount > 0 && (
+                      <span className="pc-prog-pendpill">
+                        <span className="pc-statusdot pending" />
+                        Payment pending{r.pendingCount > 1 ? ` · ${r.pendingCount}` : ''}
+                      </span>
+                    )}
+                  </div>
                   <div className="pc-kpi-sub">{r.creators} creator{r.creators === 1 ? '' : 's'} · {r.delivered}/{r.videos} videos</div>
                 </div>
                 <div style={{ textAlign: 'right' }}><div style={{ fontWeight: 700 }}>{fmt$(r.budget)}</div><div className="pc-kpi-sub">budget</div></div>

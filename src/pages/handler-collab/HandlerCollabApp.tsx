@@ -142,7 +142,9 @@ function copyText(t) {
 /* ════════════════════════════════════════════════════════════
    Root + optional passcode gate
 ════════════════════════════════════════════════════════════ */
-export default function HandlerCollabApp() {
+// initialBrandId / initialMonth deep-link the workspace straight into a program's
+// (brand + month) editable drilldown — used by the handler's Programs → program route.
+export default function HandlerCollabApp({ initialBrandId = null, initialMonth = null }: { initialBrandId?: string | null; initialMonth?: string | null } = {}) {
   useEffect(() => {
     document.title = 'Paid Collaborations';
     // Lock to light mode regardless of OS dark setting.
@@ -152,7 +154,7 @@ export default function HandlerCollabApp() {
     try { document.body.style.background = '#FAFAFA'; } catch {}
   }, []);
 
-  return <Dashboard />;
+  return <Dashboard initialBrandId={initialBrandId} initialMonth={initialMonth} />;
 }
 
 function PasscodeGate({ onUnlock }) {
@@ -182,7 +184,7 @@ function PasscodeGate({ onUnlock }) {
 /* ════════════════════════════════════════════════════════════
    Dashboard
 ════════════════════════════════════════════════════════════ */
-function Dashboard() {
+function Dashboard({ initialBrandId = null, initialMonth = null }) {
   const [brands, setBrands] = useState([]);
   const [brandMonths, setBrandMonths] = useState([]);
   const [creators, setCreators] = useState([]);
@@ -191,9 +193,9 @@ function Dashboard() {
   const [err, setErr] = useState('');
   const { user } = useAuth();
 
-  const [month, setMonth] = useState(thisMonthKey());
+  const [month, setMonth] = useState(initialMonth || thisMonthKey());
   const [tab, setTab] = useState('brands'); // brands | creators | reporting
-  const [drillId, setDrillId] = useState(null);
+  const [drillId, setDrillId] = useState(initialBrandId || null);
   const [search, setSearch] = useState('');
   const [brandEditor, setBrandEditor] = useState(null);   // { mode:'add'|'edit', brand? }
   const [creatorEditor, setCreatorEditor] = useState(null); // { mode, brandId, creator? }
@@ -466,6 +468,12 @@ function Dashboard() {
     try { await store.updateCreator(id, { payment_status }); }
     catch (e) { alert(`Couldn't update status: ${e.message}`); reload(); }
   }, [patchCreatorLocal, reload]);
+  // Toggle whether a "Payment Pending" creator's status is visible to the client.
+  const setCreatorPendingVisible = useCallback(async (id, visible) => {
+    patchCreatorLocal(id, { pending_visible_to_client: visible });
+    try { await store.updateCreator(id, { pending_visible_to_client: visible }); }
+    catch (e) { alert(`Couldn't update visibility: ${e.message}`); reload(); }
+  }, [patchCreatorLocal, reload]);
 
   return (
     <div className="pc-app">
@@ -503,7 +511,7 @@ function Dashboard() {
           tab === 'creators' ? (
             <CreatorsView rows={allCreatorsList}
               onEdit={(c) => setCreatorEditor({ mode: 'edit', brandId: c.brand_id, creator: c })}
-              onSetStatus={setCreatorStatus} />
+              onSetStatus={setCreatorStatus} onToggleVisible={setCreatorPendingVisible} />
           ) : tab === 'performance' ? (
             <PerformanceView brands={brands} creators={creators} brandById={brandById} onSaveMonthly={saveCreatorMonthly} />
           ) : tab === 'reporting' ? (
@@ -521,6 +529,7 @@ function Dashboard() {
                   notesText={(bmByKey[`${drillId}|${month}`] || {}).notes || ''}
                   patchCreatorLocal={patchCreatorLocal}
                   onSetStatus={setCreatorStatus}
+                  onToggleVisible={setCreatorPendingVisible}
                 />
               : <BrandLevel
                   rows={brandRows} totals={totals} month={month}
@@ -761,7 +770,7 @@ function BrandRow({ r, onOpen, onEditBudget, onNotes }) {
 /* ════════════════════════════════════════════════════════════
    Drilldown
 ════════════════════════════════════════════════════════════ */
-function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCreator, onDeleteCreator, onEditBudget, onDeleteBrand, onNotes, notesText, patchCreatorLocal, onSetStatus }) {
+function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCreator, onDeleteCreator, onEditBudget, onDeleteBrand, onNotes, notesText, patchCreatorLocal, onSetStatus, onToggleVisible }) {
   const [openId, setOpenId] = useState(null);
   const bm = row?.bm || {};
   const products = focusProductList(bm);
@@ -839,7 +848,7 @@ function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCr
                 <CreatorRow key={c.id} c={c} idx={idx} open={openId === c.id}
                   onToggle={() => setOpenId(openId === c.id ? null : c.id)}
                   onEdit={() => onEditCreator(c)} onDelete={() => onDeleteCreator(c.id)}
-                  patchCreatorLocal={patchCreatorLocal} onSetStatus={onSetStatus} />
+                  patchCreatorLocal={patchCreatorLocal} onSetStatus={onSetStatus} onToggleVisible={onToggleVisible} />
               ))}
             </React.Fragment>
           ))}
@@ -849,7 +858,7 @@ function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCr
   );
 }
 
-function CreatorRow({ c, idx, open, onToggle, onEdit, onDelete, patchCreatorLocal, onSetStatus }) {
+function CreatorRow({ c, idx, open, onToggle, onEdit, onDelete, patchCreatorLocal, onSetStatus, onToggleVisible }) {
   const accounts = tiktokAccounts(c.tiktok_handle);
   const filled = Array.isArray(c.video_codes) ? c.video_codes.filter(v => v?.video).length : 0;
   const rowRef = useRef(null);
@@ -872,7 +881,10 @@ function CreatorRow({ c, idx, open, onToggle, onEdit, onDelete, patchCreatorLoca
         <div className="pc-cell pc-num" data-label="Amount"><span className="pc-money">{fmt$(c.amount)}</span></div>
         <div className="pc-cell pc-num" data-label="Videos">{c.videos_count || '—'}</div>
         <div className="pc-cell" data-label="Payout"><PayoutCell paypal={c.paypal} zelle={c.zelle} /></div>
-        <div className="pc-cell" data-label="Status"><StatusDropdown value={c.payment_status} onChange={v => onSetStatus(c.id, v)} /></div>
+        <div className="pc-cell" data-label="Status">
+          <StatusDropdown value={c.payment_status} onChange={v => onSetStatus(c.id, v)} />
+          <PendingVisibilityToggle c={c} onToggleVisible={onToggleVisible} />
+        </div>
         <div className="pc-cell pc-num" data-label="Content"><span className="pc-content-cell">{filled > 0 ? <b>{filled}</b> : ''} {open ? '▴' : '▾'}</span></div>
 
         {/* ── purpose-built mobile card ── */}
@@ -896,6 +908,7 @@ function CreatorRow({ c, idx, open, onToggle, onEdit, onDelete, patchCreatorLoca
           </div>
           <div className="pc-mc-foot">
             <StatusDropdown value={c.payment_status} onChange={v => onSetStatus(c.id, v)} />
+            <PendingVisibilityToggle c={c} onToggleVisible={onToggleVisible} />
             {(c.paypal || c.zelle) && <span className="pc-mc-footmeta"><PayoutCell paypal={c.paypal} zelle={c.zelle} /></span>}
           </div>
         </div>
@@ -932,7 +945,7 @@ function PayoutCell({ paypal, zelle }) {
 /* ════════════════════════════════════════════════════════════
    Creators tab — every creator (per brand) for the month
 ════════════════════════════════════════════════════════════ */
-function CreatorsView({ rows, onEdit, onSetStatus }) {
+function CreatorsView({ rows, onEdit, onSetStatus, onToggleVisible }) {
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(() => new Set());
   const [copied, setCopied] = useState('');
@@ -1010,7 +1023,7 @@ function CreatorsView({ rows, onEdit, onSetStatus }) {
           {groups.map(g => (
             <React.Fragment key={g.key}>
               <div className="pc-cv-monthhead"><span>{monthLabel(g.key)}</span><span className="pc-cv-monthcount">{g.items.length}</span></div>
-              {g.items.map((c, i) => <CreatorGlobalRow key={c.id} c={c} idx={i + 1} onEdit={() => onEdit(c)} onSetStatus={onSetStatus} selected={sel.has(c.id)} onToggleSelect={() => toggle(c.id)} />)}
+              {g.items.map((c, i) => <CreatorGlobalRow key={c.id} c={c} idx={i + 1} onEdit={() => onEdit(c)} onSetStatus={onSetStatus} onToggleVisible={onToggleVisible} selected={sel.has(c.id)} onToggleSelect={() => toggle(c.id)} />)}
             </React.Fragment>
           ))}
         </div>
@@ -1027,7 +1040,7 @@ function CreatorsView({ rows, onEdit, onSetStatus }) {
   );
 }
 
-function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, selected, onToggleSelect }) {
+function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, onToggleVisible, selected, onToggleSelect }) {
   const accounts = tiktokAccounts(c.tiktok_handle);
   const amount = Number(c.amount) || 0;
   const videos = parseInt(c.videos_count, 10) || 0;
@@ -1049,7 +1062,10 @@ function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, selected, onToggleSelec
       <div className="pc-cell" data-label="Onboarded"><span className="pc-handle">{c.onboarded_on ? fmtDate(c.onboarded_on) : '—'}</span></div>
       <div className="pc-cell pc-num" data-label="Deal"><span className="pc-dealwrap"><span className="pc-money">{fmt$(amount)}</span>{videos > 0 && <span className="pc-deal-vid"> · {videos}v</span>}</span></div>
       <div className="pc-cell pc-num" data-label="Rate/Vid"><span className="pc-money">{avg ? fmt$(avg) : '—'}</span></div>
-      <div className="pc-cell" data-label="Status"><StatusDropdown value={c.payment_status} onChange={v => onSetStatus(c.id, v)} /></div>
+      <div className="pc-cell" data-label="Status">
+        <StatusDropdown value={c.payment_status} onChange={v => onSetStatus(c.id, v)} />
+        <PendingVisibilityToggle c={c} onToggleVisible={onToggleVisible} />
+      </div>
 
       {/* ── purpose-built mobile card ── */}
       <div className="pc-mc">
@@ -1076,6 +1092,7 @@ function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, selected, onToggleSelec
         </div>
         <div className="pc-mc-foot">
           <StatusDropdown value={c.payment_status} onChange={v => onSetStatus(c.id, v)} />
+          <PendingVisibilityToggle c={c} onToggleVisible={onToggleVisible} />
           <div className="pc-mc-footmeta">
             {c.category ? <span className="pc-cat">{c.category}</span> : null}
             {c.onboarded_on && <span className="pc-mc-muted">{fmtDate(c.onboarded_on)}</span>}
@@ -1294,6 +1311,27 @@ function MatrixCell({ value, onCommit, ad, l30 }) {
   return (
     <input className={`pc-mx-input ${ad ? 'ad' : ''} ${l30 ? 'l30' : ''}`} type="number" inputMode="numeric" placeholder="–"
       value={v} onChange={e => setV(e.target.value)} onBlur={() => onCommit(v)} onClick={e => e.stopPropagation()} />
+  );
+}
+
+// Shown only while a creator is "Payment Pending". Off (default) = the client/Bob
+// read views mask the status as "Videos in Progress"; on = client sees "Payment Pending".
+function PendingVisibilityToggle({ c, onToggleVisible }) {
+  if (c.payment_status !== 'pending' || !onToggleVisible) return null;
+  const on = !!c.pending_visible_to_client;
+  return (
+    <button
+      type="button"
+      className={`pc-visbtn ${on ? 'on' : ''}`}
+      onClick={e => { e.stopPropagation(); onToggleVisible(c.id, !on); }}
+      title={on
+        ? 'Client can see “Payment Pending”. Click to hide it.'
+        : 'Hidden from client. Click to show “Payment Pending”.'}
+      aria-pressed={on}
+    >
+      <i className={`bi ${on ? 'bi-eye-fill' : 'bi-eye-slash'}`} />
+      <span className="pc-visbtn-txt">{on ? 'Visible to client' : 'Hidden from client'}</span>
+    </button>
   );
 }
 

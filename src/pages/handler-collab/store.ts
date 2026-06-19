@@ -56,6 +56,9 @@ export interface HandlerCreator {
   email: string;
   category: string;
   payment_status: PaymentStatus;
+  // When payment_status === 'pending', clients/Bob only see the "Payment Pending"
+  // label once the handler flips this on (see handlerCollabReadonly.clientStatus).
+  pending_visible_to_client: boolean;
   onboarded_on: string | null;
   completed_on: string | null;
   video_codes: VideoCode[];

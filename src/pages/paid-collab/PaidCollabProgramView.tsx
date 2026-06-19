@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Spinner, Alert } from 'react-bootstrap';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../auth/AuthContext';
+import HandlerCollabApp from '../handler-collab/HandlerCollabApp';
 import type { HandlerBrandMonth, HandlerCreator } from '../handler-collab/store';
 import {
   fmt$, getGradient, initial, monthKey, monthLabel, focusProductList,
@@ -18,6 +20,7 @@ interface Brand { id: string; name: string; client: string }
 export default function PaidCollabProgramView() {
   const { programId } = useParams<{ programId: string }>();
   const nav = useNavigate();
+  const { profile } = useAuth();
   const [brand, setBrand] = useState<Brand | null>(null);
   const [bm, setBm] = useState<HandlerBrandMonth | null>(null);
   const [creators, setCreators] = useState<HandlerCreator[]>([]);
@@ -66,6 +69,11 @@ export default function PaidCollabProgramView() {
 
   if (loading) return <div className="text-center py-5"><Spinner animation="border" /></div>;
   if (err) return <Alert variant="danger">{err}</Alert>;
+  // Handlers edit this program in their own workspace, deep-linked to the brand+month
+  // drilldown (same role, same data) — clients/Bob keep the read-only view below.
+  if (profile?.role === 'paid_collab_handler' && bm) {
+    return <HandlerCollabApp initialBrandId={bm.brand_id} initialMonth={bm.month} />;
+  }
   if (!brand || !bm) return null;
 
   const budget = Number(bm.budget) || 0;

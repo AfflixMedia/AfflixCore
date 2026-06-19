@@ -231,6 +231,18 @@
 .pc-statusdot.pending{ background:var(--pc-warn-fg); }
 .pc-statusdot.progress{ background:var(--pc-info-fg); }
 
+/* "Payment Pending" client-visibility toggle (handler workspace only) */
+.pc-visbtn{
+  margin-top:7px; display:flex; width:fit-content; align-items:center; gap:6px; max-width:100%;
+  border:1px dashed var(--pc-divider); background:var(--pc-card-2); color:var(--pc-text-2);
+  border-radius:var(--pc-pill); padding:4px 11px; font-size:11.5px; font-weight:700; cursor:pointer;
+  transition:border-color .15s, background .15s, color .15s, transform .12s var(--pc-ease);
+}
+.pc-visbtn:hover{ transform:translateY(-1px); }
+.pc-visbtn .bi{ font-size:13px; line-height:1; }
+.pc-visbtn.on{ border-style:solid; border-color:var(--pc-warn-fg); background:var(--pc-warn-bg); color:var(--pc-warn-fg); }
+.pc-visbtn-txt{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
 /* payout cell (PayPal + Zelle) */
 .pc-payout{ display:flex; flex-direction:column; gap:2px; min-width:0; }
 .pc-payline{ display:flex; align-items:center; gap:5px; min-width:0; font-size:12.5px; color:var(--pc-text); }
@@ -797,4 +809,16 @@ a.pc-vx-prod:hover{ text-decoration:none; filter:brightness(.97); }
   /* expand panel header wraps cleanly */
   .pc-vx-head{ gap:10px; }
   .pc-vx-actions{ width:100%; justify-content:flex-start; }
+}
+
+/* ── Share link "New Paid Collab": highlight a program with a payment pending ── */
+.pc-prog-card{ transition:box-shadow .18s var(--pc-ease), border-color .18s; }
+.pc-prog-card.pc-prog-pending{
+  border-color:var(--pc-warn-fg);
+  box-shadow:inset 4px 0 0 var(--pc-warn-fg), var(--pc-shadow-lg);
+}
+.pc-prog-pendpill{
+  display:inline-flex; align-items:center; gap:6px;
+  background:var(--pc-warn-bg); color:var(--pc-warn-fg);
+  border-radius:var(--pc-pill); padding:3px 10px; font-size:11.5px; font-weight:700;
 }
