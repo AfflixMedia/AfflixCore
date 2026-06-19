@@ -15,8 +15,9 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
   const isTeamLead = profile?.role === 'team_lead';
   const isPaidCollabClient = profile?.role === 'paid_collab_client';
   const isPaidCollabHandler = profile?.role === 'paid_collab_handler';
-  // Internal staff (admin / team lead / apc / handler) get the team Chats feature.
-  const isInternal = isBob || isTeamLead || isApc || isPaidCollabHandler;
+  // Internal staff (admin / team lead / apc) get the team Chats feature.
+  // Paid Collab handlers are intentionally excluded from chat.
+  const isInternal = isBob || isTeamLead || isApc;
   const chatUnread = notifications.filter(n => !n.read_at && n.type === 'chat').length;
   const taskUnread = notifications.filter(n => !n.read_at && n.type === 'task').length;
   // Tasks are used by Team Leads (assign), APCs (do), and Bob (oversight).
@@ -126,7 +127,7 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
             )}
           </>
         )}
-        {!isPaidCollabClient && (collapsed ? (
+        {!isPaidCollabClient && !isPaidCollabHandler && (collapsed ? (
           <NavLink to="/reporting/weekly" title="Reporting">
             <i className="bi bi-bar-chart" />
             {reportingUnread > 0 && <Badge bg="danger" pill className="ms-2 ac-nav-label">{reportingUnread}</Badge>}
