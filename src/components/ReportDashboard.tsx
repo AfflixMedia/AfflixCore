@@ -370,7 +370,7 @@ export default function ReportDashboard({
               <MiniStat label="Ad Spend" cur={gm.ad_spend} prev={pgm?.not_yet_started ? undefined : pgm?.ad_spend} money />
               <MiniStat label="ROI"      cur={gm.roi}      prev={pgm?.not_yet_started ? undefined : pgm?.roi} dec />
               <MiniStat label="Orders"   cur={gm.orders}   prev={pgm?.not_yet_started ? undefined : pgm?.orders} />
-              <MiniStat label="CPO"      cur={gm.cpo}      prev={pgm?.not_yet_started ? undefined : pgm?.cpo} money />
+              <MiniStat label="CPO"      cur={gm.cpo}      prev={pgm?.not_yet_started ? undefined : pgm?.cpo} money invert />
               <MiniStat label="GMV"      cur={gm.gmv}      prev={pgm?.not_yet_started ? undefined : pgm?.gmv} money />
               {gm.notes && <Col md={12}><small className="text-muted">{gm.notes}</small></Col>}
             </Row>
@@ -830,8 +830,10 @@ function KpiCard({ label, value, prev, cur, money, dec, sub }: {
   );
 }
 
-function MiniStat({ label, cur, prev, money, dec, suffix }: {
+function MiniStat({ label, cur, prev, money, dec, suffix, invert }: {
   label: string; cur: number; prev?: number; money?: boolean; dec?: boolean; suffix?: string;
+  /** lower-is-better metric (e.g. CPO): an increase shows red, a decrease green. */
+  invert?: boolean;
 }) {
   const fmt = (n: number) =>
     money ? `$${n.toLocaleString()}`
@@ -843,19 +845,21 @@ function MiniStat({ label, cur, prev, money, dec, suffix }: {
       <div className="p-3 rounded" style={{ background: '#f8fafc', border: '1px solid #e5e7eb' }}>
         <div className="ac-label">{label}</div>
         <div className="fs-5 fw-semibold mt-1">{fmt(cur)}</div>
-        <Delta cur={cur} prev={prev} money={money} dec={dec} />
+        <Delta cur={cur} prev={prev} money={money} dec={dec} invert={invert} />
       </div>
     </Col>
   );
 }
 
-function Delta({ cur, prev, money, dec }: { cur: number; prev?: number; money?: boolean; dec?: boolean; }) {
+function Delta({ cur, prev, money, dec, invert }: { cur: number; prev?: number; money?: boolean; dec?: boolean; invert?: boolean; }) {
   if (prev == null) return <small className="text-muted">—</small>;
   if (prev === 0 && cur === 0) return <small className="text-muted">no change</small>;
   const diff = cur - prev;
   const pct = prev === 0 ? 100 : (diff / prev) * 100;
   const up = diff >= 0;
-  const color = up ? 'text-success' : 'text-danger';
+  // Color by whether the change is good: for lower-is-better metrics a rise is bad (red).
+  const good = invert ? diff <= 0 : diff >= 0;
+  const color = good ? 'text-success' : 'text-danger';
   const icon = up ? 'bi-arrow-up-right' : 'bi-arrow-down-right';
   const fmt = (n: number) => money ? `$${Math.abs(n).toLocaleString()}` : dec ? Math.abs(n).toFixed(2) : Math.abs(n).toLocaleString();
   return (
