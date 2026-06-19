@@ -105,12 +105,18 @@ function PayoutRO({ paypal, zelle }: { paypal?: string | null; zelle?: string | 
   );
 }
 
-export function CreatorRowRO({ c, idx }: { c: HandlerCreator; idx: number }) {
+export function CreatorRowRO({ c, idx, onToggleAuth }: {
+  c: HandlerCreator; idx: number;
+  // When provided, the "Authorised" cell becomes a clickable checkbox (APC/Bob).
+  onToggleAuth?: (videoIndex: number, auth: boolean) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [copiedIdx, setCopiedIdx] = useState(-1);
   const copyCode = (i: number, code: string) => { copyText(code); setCopiedIdx(i); setTimeout(() => setCopiedIdx(x => (x === i ? -1 : x)), 1400); };
   const accounts = tiktokAccounts(c.tiktok_handle);
   const codes = Array.isArray(c.video_codes) ? c.video_codes : [];
+  // Parent owns the optimistic state (so it can revert on failure); we just report the toggle.
+  const toggleAuth = (i: number) => { if (onToggleAuth) onToggleAuth(i, !codes[i].auth); };
   const filled = codes.filter(v => isValidUrl(v.video)).length;
   const total = Math.max(codes.length, Number(c.videos_count) || 0);
   const pct = total ? filled / total : 0;
@@ -202,9 +208,18 @@ export function CreatorRowRO({ c, idx }: { c: HandlerCreator; idx: number }) {
                         </button>
                       ) : null}
                     </div>
-                    <span className={`pc-vx-auth ${row.auth ? 'on' : ''}`} aria-checked={row.auth}>
-                      {row.auth && <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>}
-                    </span>
+                    {onToggleAuth ? (
+                      <button type="button" role="checkbox" aria-checked={row.auth}
+                        className={`pc-vx-auth pc-vx-auth-edit ${row.auth ? 'on' : ''}`}
+                        title={row.auth ? 'Authorised — click to unmark' : 'Mark as authorised'}
+                        onClick={e => { e.stopPropagation(); toggleAuth(i); }}>
+                        {row.auth && <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>}
+                      </button>
+                    ) : (
+                      <span className={`pc-vx-auth ${row.auth ? 'on' : ''}`} aria-checked={row.auth}>
+                        {row.auth && <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>}
+                      </span>
+                    )}
                     <a className="pc-vx-open" href={vOk ? row.video : undefined} target="_blank" rel="noopener noreferrer" aria-disabled={!vOk}>
                       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 17 17 7M9 7h8v8" /></svg>
                     </a>
@@ -235,7 +250,10 @@ const statusGroupKey = (c: HandlerCreator) => { const s = clientStatus(c); retur
 // Progress → Payment Sent), each introduced by a labelled divider — mirrors the
 // handler Workspace drilldown. `creators` should be pre-sorted; order is preserved
 // within each group and the # index runs continuously top-to-bottom.
-export function CreatorStatusGroupsRO({ creators }: { creators: HandlerCreator[] }) {
+export function CreatorStatusGroupsRO({ creators, onToggleAuth }: {
+  creators: HandlerCreator[];
+  onToggleAuth?: (creatorId: string, videoIndex: number, auth: boolean) => void;
+}) {
   let n = 0;
   const groups = STATUS_GROUP_ORDER
     .map(val => ({ val, st: STATUS[val], items: creators.filter(c => statusGroupKey(c) === val) }))
@@ -250,7 +268,7 @@ export function CreatorStatusGroupsRO({ creators }: { creators: HandlerCreator[]
               <span className="pc-ct-group-count">{g.items.length}</span>
             </span>
           </div>
-          {g.items.map(c => { n += 1; return <CreatorRowRO key={c.id} c={c} idx={n} />; })}
+          {g.items.map(c => { n += 1; return <CreatorRowRO key={c.id} c={c} idx={n} onToggleAuth={onToggleAuth ? (i, a) => onToggleAuth(c.id, i, a) : undefined} />; })}
         </Fragment>
       ))}
     </>

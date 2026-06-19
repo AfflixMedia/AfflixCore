@@ -1,6 +1,7 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { Spinner, Alert } from 'react-bootstrap';
 import { supabase } from '../../lib/supabase';
+import { setCreatorVideoAuth } from '../handler-collab/store';
 import type { HandlerBrandMonth, HandlerCreator } from '../handler-collab/store';
 import {
   fmt$, monthKey, monthLabel, focusProductList, deliveredCount,
@@ -54,6 +55,23 @@ export default function BrandPaidCollabTab({ brandId, brandName }: Props) {
     });
     return { budget, allocated, paid, videos, delivered };
   }, [months, creators]);
+
+  // Toggle a video's "Authorised" flag (APC/Bob). Optimistic; reverts on failure.
+  const handleToggleAuth = useCallback(async (creatorId: string, index: number, auth: boolean) => {
+    const apply = (val: boolean) => setCreators(prev => prev.map(c => {
+      if (c.id !== creatorId) return c;
+      const codes = Array.isArray(c.video_codes) ? c.video_codes.slice() : [];
+      if (codes[index]) codes[index] = { ...codes[index], auth: val };
+      return { ...c, video_codes: codes };
+    }));
+    apply(auth);
+    try {
+      await setCreatorVideoAuth(creatorId, index, auth);
+    } catch (e) {
+      apply(!auth); // revert
+      alert(`Couldn't update authorised status: ${(e as Error).message}`);
+    }
+  }, []);
 
   const sortedMonths = useMemo(
     () => [...months].sort((a, b) => String(b.month).localeCompare(String(a.month))),
@@ -126,7 +144,8 @@ export default function BrandPaidCollabTab({ brandId, brandName }: Props) {
           {groups.map(g => (
             <Fragment key={g.key}>
               <div className="pc-cv-monthhead"><span>{monthLabel(g.key)}</span><span className="pc-cv-monthcount">{g.items.length}</span></div>
-              {g.items.map((c, i) => <CreatorRowRO key={c.id} c={c} idx={i + 1} />)}
+              {g.items.map((c, i) => <CreatorRowRO key={c.id} c={c} idx={i + 1}
+                onToggleAuth={(vi, a) => handleToggleAuth(c.id, vi, a)} />)}
             </Fragment>
           ))}
         </div>

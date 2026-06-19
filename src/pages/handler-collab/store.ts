@@ -158,3 +158,13 @@ export async function deleteCreator(id: string) {
   const { error } = await supabase.from('handler_collab_creators').delete().eq('id', id);
   if (error) throw error;
 }
+
+// Toggle a single video's "Authorised" flag. Uses a SECURITY DEFINER RPC so APCs /
+// team leads with brand access can flip it from the read-only views without broad
+// write access to the creators table (bob / handler can also call it).
+export async function setCreatorVideoAuth(creatorId: string, index: number, auth: boolean) {
+  const { error } = await supabase.rpc('set_handler_creator_video_auth', {
+    p_creator: creatorId, p_index: index, p_auth: auth,
+  });
+  if (error) throw error;
+}
