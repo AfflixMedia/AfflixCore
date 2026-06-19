@@ -701,7 +701,8 @@ function Kpi({ label, value, sub, color }) {
 }
 
 function BrandRow({ r, onOpen, onEditBudget, onNotes }) {
-  const usageColor = r.usage > 100 ? 'var(--pc-error-fg)' : r.usage >= 90 ? 'var(--pc-warn-fg)' : 'var(--pc-success-fg)';
+  // Usage bar color: below 50% red, 50%+ blue, fully used (100%+) green.
+  const usageColor = r.usage >= 100 ? 'var(--pc-success-fg)' : r.usage >= 50 ? 'var(--pc-info-fg)' : 'var(--pc-error-fg)';
   function edit(e) { e.stopPropagation(); onEditBudget(); }
   function notes(e) { e.stopPropagation(); onNotes(); }
   const hasNotes = !!(r.bm.notes && r.bm.notes.trim());
@@ -1322,7 +1323,7 @@ function PendingVisibilityToggle({ c, onToggleVisible }) {
   return (
     <button
       type="button"
-      className={`pc-visbtn ${on ? 'on' : ''}`}
+      className={`pc-badge pc-visbtn ${on ? 'on' : ''}`}
       onClick={e => { e.stopPropagation(); onToggleVisible(c.id, !on); }}
       title={on
         ? 'Client can see “Payment Pending”. Click to hide it.'
