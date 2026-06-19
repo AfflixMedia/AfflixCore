@@ -714,7 +714,7 @@ function BrandRow({ r, onOpen, onEditBudget, onNotes }) {
           <div className="pc-brandname">{r.brand}</div>
           <div className="pc-brandsub">{r.creators} creator{r.creators === 1 ? '' : 's'} · {r.delivered}/{r.videos} delivered</div>
         </div>
-        <button className={`pc-note-btn ${hasNotes ? 'has' : ''}`} onClick={notes} title={hasNotes ? 'View / edit notes' : 'Add notes'} aria-label="Notes">
+        <button className={`pc-note-btn ${hasNotes ? 'has' : ''}`} onClick={notes} title={hasNotes ? r.bm.notes.trim() : 'Add notes'} aria-label="Notes">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="8" y1="13" x2="16" y2="13" /><line x1="8" y1="17" x2="13" y2="17" /></svg>
         </button>
       </div>
@@ -745,7 +745,7 @@ function BrandRow({ r, onOpen, onEditBudget, onNotes }) {
             <div className="pc-mc-name">{r.brand}</div>
             <div className="pc-mc-subline">{r.creators} creator{r.creators === 1 ? '' : 's'} · {r.delivered}/{r.videos} delivered</div>
           </div>
-          <button className={`pc-note-btn ${hasNotes ? 'has' : ''}`} onClick={notes} aria-label="Notes">
+          <button className={`pc-note-btn ${hasNotes ? 'has' : ''}`} onClick={notes} title={hasNotes ? r.bm.notes.trim() : 'Add notes'} aria-label="Notes">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="8" y1="13" x2="16" y2="13" /><line x1="8" y1="17" x2="13" y2="17" /></svg>
           </button>
         </div>
