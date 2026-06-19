@@ -701,8 +701,8 @@ function Kpi({ label, value, sub, color }) {
 }
 
 function BrandRow({ r, onOpen, onEditBudget, onNotes }) {
-  // Usage bar color: below 50% red, 50%+ blue, fully used (100%+) green.
-  const usageColor = r.usage >= 100 ? 'var(--pc-success-fg)' : r.usage >= 50 ? 'var(--pc-info-fg)' : 'var(--pc-error-fg)';
+  // Usage bar color: below 90% red, 90%+ green.
+  const usageColor = r.usage >= 90 ? 'var(--pc-success-fg)' : 'var(--pc-error-fg)';
   function edit(e) { e.stopPropagation(); onEditBudget(); }
   function notes(e) { e.stopPropagation(); onNotes(); }
   const hasNotes = !!(r.bm.notes && r.bm.notes.trim());
