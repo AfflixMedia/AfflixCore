@@ -473,6 +473,19 @@
 .pc-paylink{ display:inline-flex; align-items:center; gap:5px; color:var(--pc-accent); text-decoration:none; cursor:pointer; flex:0 0 auto; }
 .pc-paylink:hover{ opacity:.82; }
 .pc-paylink-arrow{ flex:0 0 auto; color:var(--pc-accent); text-decoration:none; font-size:11px; font-weight:700; line-height:1; }
+/* copy-chip payout (row): tag + copy button (+ open ↗ when a link) */
+.pc-paychip{ display:inline-flex; align-items:center; gap:4px; min-width:0; }
+.pc-paycopy{ flex:0 0 auto; width:22px; height:22px; display:inline-flex; align-items:center; justify-content:center; padding:0; border:1px solid var(--pc-divider); background:var(--pc-card); border-radius:6px; color:var(--pc-text-2); cursor:pointer; transition:background .15s, color .15s, border-color .15s; }
+.pc-paycopy:hover{ background:var(--pc-accent-light); color:var(--pc-accent); border-color:var(--pc-accent); }
+.pc-payopen{ flex:0 0 auto; width:22px; height:22px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--pc-divider); background:var(--pc-card); border-radius:6px; color:var(--pc-text-2); text-decoration:none; transition:color .15s, border-color .15s; }
+.pc-payopen:hover{ color:var(--pc-accent); border-color:var(--pc-accent); }
+/* payout lines in the expanded panel */
+.pc-vx-payouts{ display:flex; flex-wrap:wrap; gap:9px; margin:2px 0 12px; }
+.pc-payoutline{ display:inline-flex; align-items:center; gap:8px; max-width:100%; background:var(--pc-card-2); border:1px solid var(--pc-divider); border-radius:10px; padding:6px 10px; font-size:13px; }
+.pc-payoutline-label{ flex:0 0 auto; font-weight:800; color:var(--pc-text-2); font-size:10.5px; text-transform:uppercase; letter-spacing:.3px; }
+.pc-payoutline-val{ color:var(--pc-text); word-break:break-all; min-width:0; }
+a.pc-payoutline-val{ color:var(--pc-accent); text-decoration:none; }
+a.pc-payoutline-val:hover{ text-decoration:underline; }
 @media (prefers-color-scheme:dark){ .pc-paytag.zl{ background:rgba(149,117,205,.2); color:#CE93D8; } }
 
 /* confirm modal */

@@ -14,6 +14,7 @@ import { useAuth } from '../../auth/AuthContext';
 const CREATOR_STATUS_VALUES: CreatorStatus[] = ['active', 'paused', 'done', 'dropped'];
 
 import { useClientPaidCollabData, Brand } from './useClientPaidCollabData';
+import { copyWithToast } from '../../lib/copyToast';
 import './creatorsTable.css';
 
 const CCT_GRADIENTS = [
@@ -341,10 +342,22 @@ export default function PaidCollabCreators() {
                           <div className="cct-dt-v">
                             {(paypal || zelle) ? (
                               <div className="cct-pay-list">
-                                {paypal && (ppUrl
-                                  ? <a className="cct-pay" href={ppUrl} target="_blank" rel="noopener noreferrer"><span className="cct-paytag pp">PP</span>{paypal}</a>
-                                  : <span className="cct-pay"><span className="cct-paytag pp">PP</span>{paypal}</span>)}
-                                {zelle && <span className="cct-pay"><span className="cct-paytag zl">Z</span>{zelle}</span>}
+                                {paypal && (
+                                  <span className="cct-pay">
+                                    <span className="cct-paytag pp">PP</span>
+                                    {ppUrl
+                                      ? <a href={ppUrl} target="_blank" rel="noopener noreferrer">{paypal}</a>
+                                      : <span>{paypal}</span>}
+                                    <button type="button" className="cct-vcopy" title={`Copy ${ppUrl ? 'link' : 'email'}`} onClick={() => copyWithToast(ppUrl || paypal, ppUrl ? 'Link' : undefined)}><i className="bi bi-clipboard" /></button>
+                                  </span>
+                                )}
+                                {zelle && (
+                                  <span className="cct-pay">
+                                    <span className="cct-paytag zl">Z</span>
+                                    <span>{zelle}</span>
+                                    <button type="button" className="cct-vcopy" title="Copy" onClick={() => copyWithToast(zelle)}><i className="bi bi-clipboard" /></button>
+                                  </span>
+                                )}
                               </div>
                             ) : <span className="cct-muted">—</span>}
                           </div>

@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { supabase } from '../../lib/supabase';
 import * as store from './store';
 import { useAuth } from '../../auth/AuthContext';
+import { PayChip, PayoutDetail } from '../paid-collab/handlerCollabReadonly';
 import './handlerCollab.css';
 
 const storeMode = 'supabase';
@@ -921,24 +922,10 @@ function CreatorRow({ c, idx, open, onToggle, onEdit, onDelete, patchCreatorLoca
 
 function PayoutCell({ paypal, zelle }) {
   if (!paypal && !zelle) return <span className="pc-handle">—</span>;
-  const ppUrl = paypalUrl(paypal);
   return (
     <div className="pc-payout">
-      {paypal && (
-        ppUrl ? (
-          <a className="pc-payline pc-paylink" href={ppUrl} target="_blank" rel="noopener noreferrer"
-            onClick={e => e.stopPropagation()} title={`PayPal: ${paypal}`} aria-label={`Open PayPal link: ${paypal}`}>
-            <span className="pc-paytag pp">PP</span>
-            <span className="pc-paylink-arrow" aria-hidden>↗</span>
-          </a>
-        ) : (
-          <span className="pc-payline" title={`PayPal: ${paypal}`}>
-            <span className="pc-paytag pp">PP</span>
-            <span className="pc-payval">{paypal}</span>
-          </span>
-        )
-      )}
-      {zelle && <span className="pc-payline" title={`Zelle: ${zelle}`}><span className="pc-paytag zl">Z</span><span className="pc-payval">{zelle}</span></span>}
+      {paypal && <PayChip kind="pp" value={paypal} />}
+      {zelle && <PayChip kind="zl" value={zelle} />}
     </div>
   );
 }
@@ -1494,6 +1481,12 @@ function CreatorExpand({ c, onEdit, onDelete, patchCreatorLocal }) {
             {prodList.map((p, i) => (p.url
               ? <a key={i} className="pc-vx-prod" href={p.url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} title={p.url}><span className="pc-vx-prod-dot" />{p.name || 'Product'}<span className="pc-vx-prod-go">↗</span></a>
               : <span key={i} className="pc-vx-prod" title={p.name}><span className="pc-vx-prod-dot" />{p.name}</span>))}
+          </div>
+        )}
+        {(c.paypal || c.zelle) && (
+          <div className="pc-vx-payouts">
+            {c.paypal && <PayoutDetail kind="pp" value={c.paypal} />}
+            {c.zelle && <PayoutDetail kind="zl" value={c.zelle} />}
           </div>
         )}
         <div className="pc-vx-collabels">

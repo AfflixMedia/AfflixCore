@@ -1,5 +1,6 @@
 import { Fragment, useState } from 'react';
 import type { HandlerCreator } from '../handler-collab/store';
+import { copyWithToast, payoutKind } from '../../lib/copyToast';
 import '../handler-collab/handlerCollab.css';
 
 /* ════════════════════════════════════════════════════════════
@@ -84,23 +85,57 @@ export function Kpi({ label, value, sub, color }: { label: string; value: string
   );
 }
 
-// Payout cell — PayPal link rendered as a compact clickable PP icon + open arrow
-// (full link on hover via title); Zelle and non-link PayPal values stay as text.
+const CopyIcon = (
+  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg>
+);
+const OpenIcon = (
+  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 17 17 7M9 7h8v8" /></svg>
+);
+
+// Compact payout chip for table rows: a tag + a copy button (+ an open ↗ when the
+// value is a link). Never prints the raw email/link inline — clicking copy puts it
+// on the clipboard and shows a toast. `value` hover-title still reveals the full value.
+export function PayChip({ kind, value }: { kind: 'pp' | 'zl'; value: string }) {
+  const url = kind === 'pp' ? paypalUrl(value) : null;
+  const k = url ? 'Link' : payoutKind(value);
+  return (
+    <span className="pc-paychip" title={value}>
+      <span className={`pc-paytag ${kind}`}>{kind === 'pp' ? 'PP' : 'Z'}</span>
+      <button type="button" className="pc-paycopy" aria-label={`Copy ${k.toLowerCase()}`} title={`Copy ${k.toLowerCase()}`}
+        onClick={e => { e.stopPropagation(); copyWithToast(url || value, k); }}>{CopyIcon}</button>
+      {url && (
+        <a className="pc-payopen" href={url} target="_blank" rel="noopener noreferrer"
+          onClick={e => e.stopPropagation()} title="Open link" aria-label="Open link">{OpenIcon}</a>
+      )}
+    </span>
+  );
+}
+
+// Full payout line for the expanded panel: label + value (clickable when it's a link)
+// + a copy button.
+export function PayoutDetail({ kind, value }: { kind: 'pp' | 'zl'; value: string }) {
+  const url = kind === 'pp' ? paypalUrl(value) : null;
+  const k = url ? 'Link' : payoutKind(value);
+  return (
+    <div className="pc-payoutline">
+      <span className={`pc-paytag ${kind}`}>{kind === 'pp' ? 'PP' : 'Z'}</span>
+      <span className="pc-payoutline-label">{kind === 'pp' ? 'PayPal' : 'Zelle'}</span>
+      {url
+        ? <a className="pc-payoutline-val pc-paylink" href={url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>{value}</a>
+        : <span className="pc-payoutline-val">{value}</span>}
+      <button type="button" className="pc-paycopy" aria-label={`Copy ${k.toLowerCase()}`} title={`Copy ${k.toLowerCase()}`}
+        onClick={e => { e.stopPropagation(); copyWithToast(url || value, k); }}>{CopyIcon}</button>
+    </div>
+  );
+}
+
+// Payout cell — compact copy chips (PP / Z). No raw email/link printed in the row.
 function PayoutRO({ paypal, zelle }: { paypal?: string | null; zelle?: string | null }) {
   if (!paypal && !zelle) return <span className="pc-handle">—</span>;
-  const ppUrl = paypalUrl(paypal);
   return (
     <div className="pc-payout">
-      {paypal && (ppUrl ? (
-        <a className="pc-payline pc-paylink" href={ppUrl} target="_blank" rel="noopener noreferrer"
-          onClick={e => e.stopPropagation()} title={`PayPal: ${paypal}`} aria-label={`Open PayPal link: ${paypal}`}>
-          <span className="pc-paytag pp">PP</span>
-          <span className="pc-paylink-arrow" aria-hidden>↗</span>
-        </a>
-      ) : (
-        <span className="pc-payline" title={`PayPal: ${paypal}`}><span className="pc-paytag pp">PP</span><span className="pc-payval">{paypal}</span></span>
-      ))}
-      {zelle && <span className="pc-payline" title={`Zelle: ${zelle}`}><span className="pc-paytag zl">Z</span><span className="pc-payval">{zelle}</span></span>}
+      {paypal && <PayChip kind="pp" value={paypal} />}
+      {zelle && <PayChip kind="zl" value={zelle} />}
     </div>
   );
 }
@@ -178,6 +213,12 @@ export function CreatorRowRO({ c, idx, onToggleAuth }: {
                 {prodList.map((p, i) => (p.url
                   ? <a key={i} className="pc-vx-prod" href={p.url} target="_blank" rel="noopener noreferrer"><span className="pc-vx-prod-dot" />{p.name || 'Product'}<span className="pc-vx-prod-go">↗</span></a>
                   : <span key={i} className="pc-vx-prod"><span className="pc-vx-prod-dot" />{p.name}</span>))}
+              </div>
+            )}
+            {(c.paypal || c.zelle) && (
+              <div className="pc-vx-payouts">
+                {c.paypal && <PayoutDetail kind="pp" value={c.paypal} />}
+                {c.zelle && <PayoutDetail kind="zl" value={c.zelle} />}
               </div>
             )}
             <div className="pc-vx-collabels"><span /><span>Video</span><span>Ad code</span><span className="pc-vx-cl-auth">Authorised</span><span /></div>
