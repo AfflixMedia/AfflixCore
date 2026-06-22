@@ -13,6 +13,7 @@ import {
 import { useClientPaidCollabData, Brand } from './useClientPaidCollabData';
 import Avatar from '../../components/Avatar';
 import ProgramProgress from '../../components/paidcollab/ProgramProgress';
+import './dashboard.css';
 
 export default function PaidCollabDashboard() {
   const { profile } = useAuth();
@@ -200,36 +201,21 @@ export default function PaidCollabDashboard() {
   if (err) return <Alert variant="danger">{err}</Alert>;
 
   return (
-    <>
+    <div className="pcd">
       {/* Hero header */}
-      <div
-        className="rounded shadow-sm mb-4 p-4"
-        style={{
-          background: 'linear-gradient(135deg, #141620 0%, #232638 60%, #2c2f44 100%)',
-          color: '#fff',
-        }}
-      >
-        <div className="d-flex justify-content-between align-items-start flex-wrap gap-3">
+      <div className="pcd-hero">
+        <div className="pcd-hero-inner">
           <div>
-            <div className="opacity-75 small mb-1">{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</div>
-            <h2 className="mb-1" style={{ fontFamily: 'Sora, sans-serif', fontWeight: 600, color: '#fff' }}>
-              {greeting}, {firstName}
-            </h2>
-            <div className="opacity-75">
-              Here's what's happening across your {kpis.brands} brand{kpis.brands === 1 ? '' : 's'}.
-            </div>
+            <div className="pcd-hero-date">{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</div>
+            <h2 className="pcd-hero-title">{greeting}, {firstName}</h2>
+            <div className="pcd-hero-sub">Here's what's happening across your {kpis.brands} brand{kpis.brands === 1 ? '' : 's'}.</div>
           </div>
           {kpis.paymentPending > 0 && (
-            <div
-              className="ac-payment-pending-badge d-inline-flex align-items-center gap-2 px-3 py-2 rounded"
-              style={{ backgroundColor: '#e8862e', color: '#fff', fontSize: '.9rem' }}
-            >
-              <i className="bi bi-cash-stack fs-5" />
+            <div className="pcd-hero-cta">
+              <span className="pcd-hero-cta-ico"><i className="bi bi-cash-stack" /></span>
               <div>
-                <div style={{ fontWeight: 700, lineHeight: 1 }}>
-                  {kpis.paymentPending} payment{kpis.paymentPending === 1 ? '' : 's'} pending
-                </div>
-                <div className="opacity-75" style={{ fontSize: '.75rem' }}>Action needed</div>
+                <div className="pcd-hero-cta-big">{kpis.paymentPending} payment{kpis.paymentPending === 1 ? '' : 's'} pending</div>
+                <div className="pcd-hero-cta-small">Action needed</div>
               </div>
             </div>
           )}
@@ -237,14 +223,14 @@ export default function PaidCollabDashboard() {
       </div>
 
       {/* KPI tiles */}
-      <Row className="g-3 mb-4">
-        <KpiCard icon="bi-shop"            color="#0d6efd" label="Brands"             value={fmtNumber(kpis.brands)} />
-        <KpiCard icon="bi-rocket-takeoff"  color="#e8862e" label="Active programs"    value={fmtNumber(kpis.activePrograms)} sub={`${kpis.endedPrograms} ended`} />
-        <KpiCard icon="bi-people-fill"     color="#6610f2" label="Creators"           value={fmtNumber(kpis.creators)} />
-        <KpiCard icon="bi-broadcast"       color="#198754" label="Live videos"        value={fmtNumber(kpis.live)} sub={`${kpis.pipeline} in pipeline`} />
-        <KpiCard icon="bi-cash-coin"       color="#20c997" label="Total GMV"          value={fmtMoney(kpis.totalGmv, currency)} />
-        <KpiCard icon="bi-cash-stack"      color="#fd7e14" label="Spent on fees"      value={fmtMoney(kpis.spent, currency)} />
-      </Row>
+      <div className="pcd-kpis">
+        <KpiCard icon="bi-shop"            color="#0d6efd" label="Brands"          value={fmtNumber(kpis.brands)} />
+        <KpiCard icon="bi-rocket-takeoff"  color="#e8862e" label="Active programs" value={fmtNumber(kpis.activePrograms)} sub={`${kpis.endedPrograms} ended`} />
+        <KpiCard icon="bi-people-fill"     color="#6610f2" label="Creators"        value={fmtNumber(kpis.creators)} />
+        <KpiCard icon="bi-broadcast"       color="#198754" label="Live videos"     value={fmtNumber(kpis.live)} sub={`${kpis.pipeline} in pipeline`} />
+        <KpiCard icon="bi-cash-coin"       color="#20c997" label="Total GMV"       value={fmtMoney(kpis.totalGmv, currency)} />
+        <KpiCard icon="bi-cash-stack"      color="#fd7e14" label="Spent on fees"   value={fmtMoney(kpis.spent, currency)} />
+      </div>
 
       {/* Payment-pending panel + recent activity */}
       <Row className="g-3 mb-4">
@@ -540,13 +526,13 @@ export default function PaidCollabDashboard() {
       </Row>
 
       {/* Quick-jump tiles */}
-      <Row className="g-3">
+      <div className="pcd-jumps">
         <QuickJump to="/paid-collab/brands"   icon="bi-shop"             title="Brands"   count={kpis.brands}          color="#0d6efd" />
         <QuickJump to="/paid-collab/programs" icon="bi-collection"       title="Programs" count={programs.length}      color="#e8862e" />
         <QuickJump to="/paid-collab/creators" icon="bi-people"           title="Creators" count={kpis.creators}        color="#6610f2" />
         <QuickJump to="/paid-collab/videos"   icon="bi-collection-play"  title="Videos"   count={videos.length}        color="#198754" />
-      </Row>
-    </>
+      </div>
+    </div>
   );
 }
 
@@ -557,24 +543,14 @@ function KpiCard({ icon, color, label, value, sub }: {
   icon: string; color: string; label: string; value: string; sub?: string;
 }) {
   return (
-    <Col md={6} lg={4} xl={2}>
-      <Card className="h-100 shadow-sm" style={{ borderTop: `3px solid ${color}` }}>
-        <Card.Body className="d-flex align-items-center gap-3 py-3">
-          <div className="d-flex align-items-center justify-content-center rounded text-white flex-shrink-0"
-               style={{
-                 width: 44, height: 44,
-                 background: `linear-gradient(135deg, ${color} 0%, ${color}cc 100%)`,
-               }}>
-            <i className={`bi ${icon}`} style={{ fontSize: '1.2rem' }} />
-          </div>
-          <div className="min-w-0">
-            <div className="text-muted small text-truncate" style={{ fontSize: '.75rem' }}>{label}</div>
-            <div className="fw-bold" style={{ fontSize: '1.25rem', color: '#1f2937' }}>{value}</div>
-            {sub && <div className="text-muted" style={{ fontSize: '.7rem' }}>{sub}</div>}
-          </div>
-        </Card.Body>
-      </Card>
-    </Col>
+    <div className="pcd-kpi" style={{ ['--c' as any]: color }}>
+      <div className="pcd-kpi-ico" style={{ background: `linear-gradient(135deg, ${color}, ${color}cc)` }}>
+        <i className={`bi ${icon}`} />
+      </div>
+      <div className="pcd-kpi-l">{label}</div>
+      <div className="pcd-kpi-v">{value}</div>
+      {sub && <div className="pcd-kpi-sub">{sub}</div>}
+    </div>
   );
 }
 
@@ -585,31 +561,18 @@ function QuickJump({ to, icon, title, count, color }: {
   to: string; icon: string; title: string; count: number; color: string;
 }) {
   return (
-    <Col md={6} lg={3}>
-      <Link to={to} className="text-decoration-none text-reset">
-        <Card className="shadow-sm h-100"
-              style={{ transition: 'transform .15s, box-shadow .15s', cursor: 'pointer' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.transform = 'translateY(-3px)'; (e.currentTarget as HTMLElement).style.boxShadow = '0 10px 24px rgba(0,0,0,.08)'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.transform = ''; (e.currentTarget as HTMLElement).style.boxShadow = ''; }}>
-          <Card.Body className="d-flex align-items-center gap-3">
-            <div className="d-flex align-items-center justify-content-center rounded text-white flex-shrink-0"
-                 style={{
-                   width: 52, height: 52,
-                   background: `linear-gradient(135deg, ${color} 0%, ${color}aa 100%)`,
-                 }}>
-              <i className={`bi ${icon}`} style={{ fontSize: '1.5rem' }} />
-            </div>
-            <div className="flex-grow-1">
-              <div className="text-muted small" style={{ fontSize: '.75rem' }}>{title}</div>
-              <div className="d-flex align-items-baseline gap-2">
-                <span className="fw-bold" style={{ fontSize: '1.5rem' }}>{fmtNumber(count)}</span>
-                <span className="text-muted small">total</span>
-              </div>
-            </div>
-            <i className="bi bi-arrow-right text-muted fs-4" />
-          </Card.Body>
-        </Card>
-      </Link>
-    </Col>
+    <Link to={to} className="pcd-jump">
+      <span className="pcd-jump-ico" style={{ background: `linear-gradient(135deg, ${color}, ${color}aa)` }}>
+        <i className={`bi ${icon}`} />
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="pcd-jump-l">{title}</div>
+        <div className="d-flex align-items-baseline gap-2">
+          <span className="pcd-jump-v">{fmtNumber(count)}</span>
+          <span className="text-muted small">total</span>
+        </div>
+      </div>
+      <i className="bi bi-arrow-right text-muted fs-4" />
+    </Link>
   );
 }

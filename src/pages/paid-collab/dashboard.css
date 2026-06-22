@@ -1,0 +1,82 @@
+/* ════════════════════════════════════════════════════════════
+   Paid Collab Client dashboard — modern data-dense look, consistent
+   with the pct-/cct- table pages. Scoped under `.pcd`.
+════════════════════════════════════════════════════════════ */
+.pcd {
+  --pcd-accent:#0d6efd; --pcd-divider:#ECEEF1; --pcd-card-2:#F7F8FA;
+  --pcd-text:#1f2937; --pcd-text-2:#6b7280; --pcd-text-3:#9ca3af;
+  --pcd-success:#198754; --pcd-orange:#e8862e;
+  color:var(--pcd-text);
+}
+
+/* gently unify every bootstrap card on the page */
+.pcd .card { border:1px solid var(--pcd-divider); border-radius:16px; box-shadow:0 1px 2px rgba(0,0,0,.04), 0 8px 26px rgba(0,0,0,.05); }
+.pcd h6 { font-weight:800; }
+.pcd .pcd-eyebrow { font-size:10.5px; font-weight:800; letter-spacing:.5px; text-transform:uppercase; color:var(--pcd-text-3); }
+
+/* ── hero ── */
+.pcd-hero {
+  position:relative; overflow:hidden; border-radius:20px; padding:26px 28px; margin-bottom:22px; color:#fff;
+  background:linear-gradient(135deg,#0b1220 0%,#16203a 55%,#1e2a4a 100%);
+  box-shadow:0 16px 44px rgba(13,22,46,.32);
+}
+.pcd-hero::after {
+  content:''; position:absolute; right:-70px; top:-70px; width:260px; height:260px; border-radius:50%;
+  background:radial-gradient(circle, rgba(59,130,246,.40), transparent 70%); pointer-events:none;
+}
+.pcd-hero-inner { position:relative; display:flex; justify-content:space-between; align-items:flex-start; gap:18px; flex-wrap:wrap; }
+.pcd-hero-date { font-size:12px; letter-spacing:.4px; opacity:.65; margin-bottom:7px; text-transform:uppercase; }
+.pcd-hero-title { font-size:26px; font-weight:800; margin:0 0 5px; letter-spacing:-.3px; }
+.pcd-hero-sub { opacity:.82; font-size:14px; }
+.pcd-hero-cta {
+  display:inline-flex; align-items:center; gap:13px; border-radius:15px; padding:12px 16px;
+  background:rgba(232,134,46,.14); border:1px solid rgba(232,134,46,.55);
+}
+.pcd-hero-cta-ico { width:40px; height:40px; border-radius:11px; background:var(--pcd-orange); display:flex; align-items:center; justify-content:center; font-size:19px; flex:0 0 auto; }
+.pcd-hero-cta-big { font-weight:800; line-height:1.05; font-size:15px; }
+.pcd-hero-cta-small { opacity:.8; font-size:11.5px; }
+
+/* ── KPI tiles ── */
+.pcd-kpis { display:grid; grid-template-columns:repeat(6,1fr); gap:14px; margin-bottom:22px; }
+@media (max-width:1200px){ .pcd-kpis { grid-template-columns:repeat(3,1fr); } }
+@media (max-width:620px){ .pcd-kpis { grid-template-columns:repeat(2,1fr); } }
+.pcd-kpi {
+  position:relative; overflow:hidden; background:#fff; border:1px solid var(--pcd-divider); border-radius:15px;
+  padding:16px; box-shadow:0 1px 2px rgba(0,0,0,.04); transition:transform .15s, box-shadow .2s;
+}
+.pcd-kpi::before { content:''; position:absolute; left:0; top:0; bottom:0; width:4px; background:var(--c,var(--pcd-accent)); }
+.pcd-kpi:hover { transform:translateY(-2px); box-shadow:0 12px 28px rgba(0,0,0,.08); }
+.pcd-kpi-ico { width:40px; height:40px; border-radius:11px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:18px; margin-bottom:12px; }
+.pcd-kpi-l { font-size:11px; font-weight:800; letter-spacing:.3px; text-transform:uppercase; color:var(--pcd-text-2); }
+.pcd-kpi-v { font-size:24px; font-weight:800; font-variant-numeric:tabular-nums; line-height:1.1; margin-top:3px; }
+.pcd-kpi-sub { font-size:11.5px; color:var(--pcd-text-3); margin-top:3px; }
+
+/* ── section header ── */
+.pcd-sec-h { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; }
+.pcd-sec-h h6 { margin:0; font-size:14px; }
+
+/* ── compact list rows (recent activity / pending / top brands) ── */
+.pcd-row { display:flex; align-items:center; gap:11px; padding:9px 11px; border:1px solid var(--pcd-divider); border-radius:12px; background:#fff; cursor:pointer; transition:background .15s, border-color .15s; text-decoration:none; color:inherit; }
+.pcd-row:hover { background:var(--pcd-card-2); border-color:#dfe3e8; }
+.pcd-row-ico { width:38px; height:38px; border-radius:11px; display:flex; align-items:center; justify-content:center; color:#fff; flex:0 0 auto; font-size:16px; }
+.pcd-row-title { font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pcd-row-sub { font-size:12px; color:var(--pcd-text-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pcd-chip { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:800; border-radius:999px; padding:3px 10px; white-space:nowrap; }
+.pcd-chip.green { background:#E8F5E9; color:var(--pcd-success); }
+.pcd-chip.blue  { background:#E7F0FF; color:var(--pcd-accent); }
+.pcd-chip.grey  { background:var(--pcd-card-2); color:var(--pcd-text-2); border:1px solid var(--pcd-divider); }
+
+/* rank badge for top brands */
+.pcd-rank { width:30px; height:30px; border-radius:9px; display:flex; align-items:center; justify-content:center; font-weight:800; color:#fff; font-size:13px; flex:0 0 auto; font-variant-numeric:tabular-nums; }
+
+/* ── quick jump tiles ── */
+.pcd-jumps { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
+@media (max-width:900px){ .pcd-jumps { grid-template-columns:repeat(2,1fr); } }
+@media (max-width:480px){ .pcd-jumps { grid-template-columns:1fr; } }
+.pcd-jump { display:flex; align-items:center; gap:14px; padding:16px; border:1px solid var(--pcd-divider); border-radius:15px; background:#fff; cursor:pointer; transition:transform .15s, box-shadow .2s; text-decoration:none; color:inherit; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+.pcd-jump:hover { transform:translateY(-3px); box-shadow:0 14px 30px rgba(0,0,0,.09); }
+.pcd-jump-ico { width:50px; height:50px; border-radius:13px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:22px; flex:0 0 auto; }
+.pcd-jump-l { font-size:12px; color:var(--pcd-text-2); }
+.pcd-jump-v { font-size:24px; font-weight:800; font-variant-numeric:tabular-nums; }
+
+.pcd-empty-ico { width:64px; height:64px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:30px; }
