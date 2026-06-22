@@ -9,6 +9,7 @@ import {
 import Avatar from '../../components/Avatar';
 import PerformanceModal from '../../components/paidcollab/PerformanceModal';
 import NumberInput from '../../components/NumberInput';
+import { useAuth } from '../../auth/AuthContext';
 
 const CREATOR_STATUS_VALUES: CreatorStatus[] = ['active', 'paused', 'done', 'dropped'];
 
@@ -25,6 +26,12 @@ const cctGradient = (name: string) => (name ? CCT_GRADIENTS[name.charCodeAt(0) %
 const cctInitials = (name: string) =>
   (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?';
 const cctIsUrl = (s?: string) => !!s && (s.startsWith('http://') || s.startsWith('https://'));
+// This Creators page is shared by the handler AND the client. The handler sees ALL
+// pending; the client only sees a creator's "Payment Pending" once the handler toggles
+// pending_visible_to_client on (mirrors handlerCollabReadonly.clientStatus). Pass
+// revealAll=true for the handler view.
+const cctPendingVisible = (c: any, revealAll = false) =>
+  c?.payment_status === 'pending' && (revealAll || !!c?.pending_visible_to_client);
 // PayPal payout value → openable link (URL / www. / paypal.me). Plain emails stay text.
 function cctPaypalUrl(raw?: string | null) {
   if (!raw) return null;
@@ -44,6 +51,9 @@ type PaymentFilter = 'all' | 'pending' | 'paid';
 
 export default function PaidCollabCreators() {
   const { brands, programs, creators, videos, loading, err } = useClientPaidCollabData();
+  const { profile } = useAuth();
+  // Handlers see every pending creator; clients only see pending that's toggled visible.
+  const revealPending = profile?.role === 'paid_collab_handler';
 
   const [search, setSearch] = useState('');
   const [brandFilter, setBrandFilter] = useState('');
@@ -98,10 +108,8 @@ export default function PaidCollabCreators() {
       if (brandFilter && prog.brand_id !== brandFilter) return false;
       if (programFilter && c.program_id !== programFilter) return false;
       if (statusFilter !== 'all' && c.status !== statusFilter) return false;
-      const live = liveByCreator.get(c.id) ?? 0;
       const b = brandById.get(prog.brand_id) ?? null;
-      const pending = isCreatorPaymentPending(c, live, prog, b);
-      if (paymentFilter === 'pending' && !pending) return false;
+      if (paymentFilter === 'pending' && !cctPendingVisible(c, revealPending)) return false;
       if (paymentFilter === 'paid' && !c.paid_out) return false;
       if (q) {
         const hay = `${c.name} ${c.handle ?? ''} ${b?.name ?? ''} ${programDisplayName(prog)}`.toLowerCase();
@@ -109,16 +117,20 @@ export default function PaidCollabCreators() {
       }
       return true;
     });
-  }, [creators, programById, brandById, brandFilter, programFilter, statusFilter, paymentFilter, search, liveByCreator]);
+  }, [creators, programById, brandById, brandFilter, programFilter, statusFilter, paymentFilter, search, revealPending]);
+
+  // Order rows by payment state: pending first, then "remaining", paid last.
+  // Stable sort keeps the original order inside each group.
+  const displayed = useMemo(() => {
+    const rank = (c: PaidCreator) =>
+      cctPendingVisible(c, revealPending) ? 0 : (c.paid_out ? 2 : 1);
+    return [...filtered].sort((a, b) => rank(a) - rank(b));
+  }, [filtered, revealPending]);
 
   if (loading) return <div className="text-center py-5"><Spinner animation="border" /></div>;
   if (err) return <Alert variant="danger">{err}</Alert>;
 
-  const totalPending = creators.filter(c => {
-    const prog = programById.get(c.program_id);
-    const b = prog ? brandById.get(prog.brand_id) : null;
-    return isCreatorPaymentPending(c, liveByCreator.get(c.id) ?? 0, prog, b);
-  }).length;
+  const totalPending = creators.filter(c => cctPendingVisible(c, revealPending)).length;
 
   return (
     <>
@@ -211,13 +223,13 @@ export default function PaidCollabCreators() {
             <div>Status</div>
             <div />
           </div>
-          {filtered.map((c, i) => {
+          {displayed.map((c, i) => {
             const prog = programById.get(c.program_id);
             if (!prog) return null;
             const b = brandById.get(prog.brand_id);
             const live = liveByCreator.get(c.id) ?? 0;
             const pipeline = pipelineByCreator.get(c.id) ?? 0;
-            const pending = isCreatorPaymentPending(c, live, prog, b);
+            const pending = cctPendingVisible(c, revealPending);
             const meta = CREATOR_STATUS_META[c.status];
             const agreed = c.agreed_videos || 0;
             const progressPct = agreed > 0 ? Math.min(100, Math.round((live / agreed) * 100)) : 0;

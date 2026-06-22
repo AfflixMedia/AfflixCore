@@ -79,6 +79,9 @@ export function useClientPaidCollabData() {
           paypal: c.paypal || '',
           zelle: c.zelle || '',
           payment_status: c.payment_status,
+          // The handler keeps "Payment Pending" hidden from the client until they
+          // flip this on — so the client only ever sees a pending status when true.
+          pending_visible_to_client: !!c.pending_visible_to_client,
           completed_on: c.completed_on || null,
         } as unknown as PaidCreator;
       });
