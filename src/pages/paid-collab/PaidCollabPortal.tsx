@@ -1,11 +1,27 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Card, Spinner, Alert, Form, InputGroup, Badge, Row, Col } from 'react-bootstrap';
 import { supabase } from '../../lib/supabase';
 import {
   PaidProgram, PaidCreator, PaidVideo, summarizePrograms, fmtNumber,
 } from '../../lib/paidCollabSchema';
-import { useClientPaidCollabData, Brand } from './useClientPaidCollabData';
+import { useClientPaidCollabData, Brand, isPaidCollabPendingVisible } from './useClientPaidCollabData';
+import { useAuth } from '../../auth/AuthContext';
+import FilterPill from './FilterPill';
+import './portalTables.css';
+
+const PCT_GRADIENTS = [
+  'linear-gradient(135deg,#6366F1,#8B5CF6)', 'linear-gradient(135deg,#EC4899,#F43F5E)',
+  'linear-gradient(135deg,#14B8A6,#06B6D4)', 'linear-gradient(135deg,#F59E0B,#EF4444)',
+  'linear-gradient(135deg,#10B981,#059669)', 'linear-gradient(135deg,#3B82F6,#2563EB)',
+  'linear-gradient(135deg,#8B5CF6,#EC4899)',
+];
+const pctGradient = (name: string) => (name ? PCT_GRADIENTS[name.charCodeAt(0) % PCT_GRADIENTS.length] : PCT_GRADIENTS[0]);
+const pctInitials = (name: string) =>
+  (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?';
+const pctChevron = (
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="m9 6 6 6-6 6" /></svg>
+);
 
 interface BrandOverview {
   brand: Brand;
@@ -21,9 +37,25 @@ type StatusFilter = 'all' | 'has_pending' | 'has_active' | 'closed';
 
 export default function PaidCollabPortal() {
   const { brands, programs, creators, videos, loading, err } = useClientPaidCollabData();
+  const nav = useNavigate();
+  const { profile } = useAuth();
+  // Handler sees every pending creator; client only sees pending toggled visible.
+  const revealPending = profile?.role === 'paid_collab_handler';
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+
+  // Role-aware payment-pending count per program (overrides the legacy summary count,
+  // which ignores pending_visible_to_client).
+  const pendingByProgram = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const c of creators) {
+      if (isPaidCollabPendingVisible(c, revealPending)) {
+        m.set(c.program_id, (m.get(c.program_id) ?? 0) + 1);
+      }
+    }
+    return m;
+  }, [creators, revealPending]);
 
   const overviews = useMemo<BrandOverview[]>(() => {
     const summaries = summarizePrograms(programs, creators, videos);
@@ -44,11 +76,11 @@ export default function PaidCollabPortal() {
         totalCreators   += s.creatorCount;
         videosLive      += s.videosLive;
         videosPipeline  += s.videosPipeline;
-        paymentPending  += s.paymentPending;
+        paymentPending  += pendingByProgram.get(p.id) ?? 0;
       }
       return { brand: b, activePrograms, endedPrograms, totalCreators, videosLive, videosPipeline, paymentPending };
     });
-  }, [brands, programs, creators, videos]);
+  }, [brands, programs, creators, videos, pendingByProgram]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -96,6 +128,16 @@ export default function PaidCollabPortal() {
         </Card>
       ) : (
         <>
+          <div className="pct-pills">
+            <FilterPill label="Brands" value={brands.length} active={statusFilter === 'all'} onClick={() => setStatusFilter('all')} />
+            <FilterPill label="Active programs" value={overviews.reduce((s, o) => s + o.activePrograms, 0)} tone="green"
+              active={statusFilter === 'has_active'} onClick={() => setStatusFilter(f => f === 'has_active' ? 'all' : 'has_active')} />
+            {totalPending > 0 && (
+              <FilterPill label="Payments pending" value={totalPending} tone="orange"
+                active={statusFilter === 'has_pending'} onClick={() => setStatusFilter(f => f === 'has_pending' ? 'all' : 'has_pending')} />
+            )}
+          </div>
+
           {/* Search + filter */}
           <Card className="mb-3">
             <Card.Body className="py-2">
@@ -133,71 +175,70 @@ export default function PaidCollabPortal() {
               No brands match your search.
             </Card>
           ) : (
-            <Row className="g-3">
-              {filtered.map(o => {
+            <div className="pct pct--brands">
+              <div className="pct-head">
+                <div className="pct-num">#</div>
+                <div>Brand</div>
+                <div className="pct-num">Programs</div>
+                <div className="pct-num">Creators</div>
+                <div className="pct-num">Pipeline / Live</div>
+                <div>Status</div>
+                <div />
+              </div>
+              {filtered.map((o, i) => {
                 const isClosed = o.brand.client_status === 'closed';
-                const accent = o.paymentPending > 0 ? '#e8862e' : (o.activePrograms > 0 ? '#198754' : '#6c757d');
+                const totalProgs = o.activePrograms + o.endedPrograms;
+                const go = () => nav(`/paid-collab/brands/${o.brand.id}`);
+                const status = (
+                  <div className="pct-statuscell">
+                    {isClosed
+                      ? <span className="pct-pill-s closed"><i className="bi bi-archive" />Closed</span>
+                      : o.activePrograms > 0
+                        ? <span className="pct-pill-s active"><span className="dot" />{o.activePrograms} active</span>
+                        : <span className="pct-pill-s ended"><span className="dot" />No active</span>}
+                    {o.paymentPending > 0 && <span className="pct-tag pend"><i className="bi bi-cash-stack" />{o.paymentPending} pending</span>}
+                  </div>
+                );
                 return (
-                  <Col md={6} lg={4} key={o.brand.id}>
-                    <Link to={`/paid-collab/brands/${o.brand.id}`}
-                      className="text-decoration-none text-reset">
-                      <Card
-                        className={`h-100 shadow-sm ${o.paymentPending > 0 ? 'ac-payment-pending-card' : ''}`}
-                        style={{
-                          cursor: 'pointer',
-                          borderLeft: `4px solid ${accent}`,
-                          transition: 'transform .15s, box-shadow .15s',
-                        }}
-                        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)'; }}
-                        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.transform = ''; }}
-                      >
-                        <Card.Body className="d-flex flex-column">
-                          <div className="d-flex align-items-start justify-content-between gap-2 mb-2">
-                            <div className="flex-grow-1 min-w-0">
-                              <div className="text-muted small">{o.brand.client}</div>
-                              <div className="fs-5 fw-semibold text-truncate">{o.brand.name}</div>
-                            </div>
-                            <div className="d-flex flex-column align-items-end gap-1">
-                              {isClosed && <Badge bg="dark"><i className="bi bi-archive me-1" />Closed</Badge>}
-                              {o.activePrograms > 0
-                                ? <Badge bg="success">{o.activePrograms} active</Badge>
-                                : <Badge bg="secondary">No active</Badge>}
-                            </div>
-                          </div>
+                  <div className={`pct-row ${o.paymentPending > 0 ? 'pending' : ''}`} key={o.brand.id}
+                    role="button" tabIndex={0} onClick={go} onKeyDown={e => { if (e.key === 'Enter') go(); }}>
+                    <div className="pct-cell pct-num"><span className="pct-idx">#{i + 1}</span></div>
+                    <div className="pct-cell">
+                      <div className="pct-id">
+                        <span className="pct-ava" style={{ background: pctGradient(o.brand.name) }}>{pctInitials(o.brand.name)}</span>
+                        <div className="pct-idtext">
+                          <div className="pct-name">{o.brand.name}</div>
+                          <div className="pct-sub">{o.brand.client || '—'}</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="pct-cell pct-num"><span className="pct-big">{fmtNumber(totalProgs)}</span></div>
+                    <div className="pct-cell pct-num"><span className="pct-big">{fmtNumber(o.totalCreators)}</span></div>
+                    <div className="pct-cell pct-num"><span className="pct-pl"><span className="pipe">{fmtNumber(o.videosPipeline)}</span><span className="sep">/</span><span className="live">{fmtNumber(o.videosLive)}</span></span></div>
+                    <div className="pct-cell">{status}</div>
+                    <div className="pct-cell pct-chev">{pctChevron}</div>
 
-                          {o.paymentPending > 0 && (
-                            <div className="ac-payment-pending-badge mb-2 d-inline-flex align-items-center gap-2 px-2 py-1 rounded align-self-start"
-                                 style={{ backgroundColor: '#e8862e', color: '#fff', fontSize: '.8rem' }}>
-                              <i className="bi bi-cash-stack" />
-                              <strong>{o.paymentPending} payment{o.paymentPending === 1 ? '' : 's'} pending</strong>
-                            </div>
-                          )}
-
-                          <div className="row g-2 mt-auto small">
-                            <div className="col-4">
-                              <div className="text-muted" style={{ fontSize: '.7rem' }}>Programs</div>
-                              <div className="fw-bold">{fmtNumber(o.activePrograms + o.endedPrograms)}</div>
-                            </div>
-                            <div className="col-4">
-                              <div className="text-muted" style={{ fontSize: '.7rem' }}>Creators</div>
-                              <div className="fw-bold">{fmtNumber(o.totalCreators)}</div>
-                            </div>
-                            <div className="col-4">
-                              <div className="text-muted" style={{ fontSize: '.7rem' }}>Pipeline / Live</div>
-                              <div className="fw-bold">
-                                <span style={{ color: '#fd7e14' }}>{fmtNumber(o.videosPipeline)}</span>
-                                <span className="text-muted mx-1">/</span>
-                                <span style={{ color: '#198754' }}>{fmtNumber(o.videosLive)}</span>
-                              </div>
-                            </div>
-                          </div>
-                        </Card.Body>
-                      </Card>
-                    </Link>
-                  </Col>
+                    {/* mobile card */}
+                    <div className="pct-mc">
+                      <div className="pct-mc-head">
+                        <span className="pct-ava" style={{ background: pctGradient(o.brand.name) }}>{pctInitials(o.brand.name)}</span>
+                        <div className="pct-mc-idblock">
+                          <div className="pct-mc-name">{o.brand.name}</div>
+                          <div className="pct-mc-sub">{o.brand.client || '—'}</div>
+                        </div>
+                        <span className="pct-mc-chev">{pctChevron}</span>
+                      </div>
+                      <div className="pct-mc-stats">
+                        <div className="pct-mc-stat"><b>{fmtNumber(totalProgs)}</b><span>Programs</span></div>
+                        <div className="pct-mc-stat"><b>{fmtNumber(o.totalCreators)}</b><span>Creators</span></div>
+                        <div className="pct-mc-stat"><b>{fmtNumber(o.videosPipeline)}/{fmtNumber(o.videosLive)}</b><span>Pipe/Live</span></div>
+                      </div>
+                      <div className="pct-mc-foot">{status}</div>
+                    </div>
+                  </div>
                 );
               })}
-            </Row>
+            </div>
           )}
         </>
       )}

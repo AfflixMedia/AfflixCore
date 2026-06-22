@@ -10,6 +10,12 @@ export interface Brand {
   payment_popup_default?: any;
 }
 
+// Role-aware "is this creator's Payment Pending shown" check. The client only sees a
+// creator's pending status once the handler toggles pending_visible_to_client on; the
+// handler (revealAll) sees every pending. Mirrors handlerCollabReadonly.clientStatus.
+export const isPaidCollabPendingVisible = (c: any, revealAll = false) =>
+  c?.payment_status === 'pending' && (revealAll || !!c?.pending_visible_to_client);
+
 export function useClientPaidCollabData() {
   const [brands, setBrands] = useState<Brand[]>([]);
   const [programs, setPrograms] = useState<PaidProgram[]>([]);
