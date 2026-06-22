@@ -8,8 +8,23 @@ import {
 } from '../../lib/paidCollabSchema';
 
 import { useClientPaidCollabData, Brand } from './useClientPaidCollabData';
+import './portalTables.css';
 
 type UrlFilter = 'all' | 'with_url' | 'no_url';
+
+const PCT_GRADIENTS = [
+  'linear-gradient(135deg,#6366F1,#8B5CF6)', 'linear-gradient(135deg,#EC4899,#F43F5E)',
+  'linear-gradient(135deg,#14B8A6,#06B6D4)', 'linear-gradient(135deg,#F59E0B,#EF4444)',
+  'linear-gradient(135deg,#10B981,#059669)', 'linear-gradient(135deg,#3B82F6,#2563EB)',
+  'linear-gradient(135deg,#8B5CF6,#EC4899)',
+];
+const pctGradient = (name: string) => (name ? PCT_GRADIENTS[name.charCodeAt(0) % PCT_GRADIENTS.length] : PCT_GRADIENTS[0]);
+const pctInitials = (name: string) =>
+  (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?';
+function pctCopy(t: string) {
+  try { if (navigator.clipboard?.writeText) { navigator.clipboard.writeText(t); return; } } catch { /* ignore */ }
+  try { const ta = document.createElement('textarea'); ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); } catch { /* ignore */ }
+}
 
 export default function PaidCollabVideos() {
   const nav = useNavigate();
@@ -81,22 +96,11 @@ export default function PaidCollabVideos() {
         <h2 className="mb-0">Videos</h2>
       </div>
 
-      <Card className="mb-3">
-        <Card.Body className="d-flex flex-wrap align-items-center gap-3">
-          <div>
-            <div className="text-muted small">Total</div>
-            <div className="fs-4 fw-bold">{videos.length}</div>
-          </div>
-          <div>
-            <div className="text-muted small">In pipeline</div>
-            <div className="fs-4 fw-bold" style={{ color: '#fd7e14' }}>{totalPipeline}</div>
-          </div>
-          <div>
-            <div className="text-muted small">Live</div>
-            <div className="fs-4 fw-bold" style={{ color: '#198754' }}>{totalLive}</div>
-          </div>
-        </Card.Body>
-      </Card>
+      <div className="pct-pills">
+        <div className="pct-pill pct-pill--static"><span className="pct-pill-l">Total</span><span className="pct-pill-v">{videos.length}</span></div>
+        <div className="pct-pill pct-pill--static"><span className="pct-pill-l">In pipeline</span><span className="pct-pill-v orange">{totalPipeline}</span></div>
+        <div className="pct-pill pct-pill--static"><span className="pct-pill-l">Live</span><span className="pct-pill-v green">{totalLive}</span></div>
+      </div>
 
       <Card className="mb-3">
         <Card.Body className="py-2">
@@ -154,76 +158,89 @@ export default function PaidCollabVideos() {
           No videos match your filters.
         </Card>
       ) : (
-        <div className="d-flex flex-column gap-2">
-          {filtered.map(v => {
+        <div className="pct pct--videos">
+          <div className="pct-head">
+            <div className="pct-num">#</div>
+            <div>Video</div>
+            <div>Creator</div>
+            <div>Brand · Program</div>
+            <div>Ad code</div>
+            <div />
+          </div>
+          {filtered.map((v, i) => {
             const cr = creatorById.get(v.creator_id);
             const prog = cr ? programById.get(cr.program_id) : null;
             const b = prog ? brandById.get(prog.brand_id) : null;
-            const prod = null as any;
+            const adCode = (v as any).ad_code as string | null;
+            const authorised = !!(v as any).ad_code_authorized;
+            const posted = v.posted_on ? new Date(v.posted_on + 'T00:00:00').toLocaleDateString('en-US', { day: 'numeric', month: 'short' }) : null;
             return (
-              <Card key={v.id} className="shadow-sm">
-                <Card.Body className="d-flex gap-3 align-items-start flex-wrap">
-                  <div
-                    className="d-flex align-items-center justify-content-center rounded text-white flex-shrink-0"
-                    style={{ width: 44, height: 44, backgroundColor: '#198754' }}
-                  >
-                    <i className="bi bi-broadcast fs-5" />
-                  </div>
-                  <div className="flex-grow-1 min-w-0">
-                    <div className="d-flex align-items-center gap-2 flex-wrap mb-1">
-                      <Badge bg="success">Live</Badge>
-                      {prod ? (
-                        <Badge bg="primary"><i className="bi bi-tag-fill me-1" />{prod.name}</Badge>
-                      ) : v.product_id ? (
-                        <Badge bg="secondary"><i className="bi bi-tag me-1" />Removed product</Badge>
-                      ) : (
-                        <Badge bg="light" text="dark" className="border">
-                          <i className="bi bi-exclamation-circle me-1" />No product
-                        </Badge>
-                      )}
-                      {v.posted_on && (
-                        <Badge bg="light" text="dark" className="border">
-                          <i className="bi bi-calendar me-1" />{new Date(v.posted_on + 'T00:00:00').toLocaleDateString()}
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="fw-semibold">
-                      {v.tiktok_url ? (
-                        <a href={v.tiktok_url} target="_blank" rel="noreferrer">
-                          <i className="bi bi-tiktok me-1" />
-                          <span className="text-truncate" style={{ maxWidth: 480, display: 'inline-block', verticalAlign: 'middle' }}>
-                            {v.tiktok_url}
-                          </span>
-                        </a>
-                      ) : (
-                        <span className="text-muted fst-italic">No TikTok URL yet</span>
-                      )}
-                    </div>
-                    <div className="small text-muted mt-1">
-                      <strong>{cr?.name ?? '—'}</strong>
-                      {cr?.handle && <span> · <i className="bi bi-at" />{cr.handle.replace(/^@/, '')}</span>}
-                      <span className="mx-2">·</span>
-                      {b?.name ?? '—'}
-                      <span className="mx-2">·</span>
-                      {prog ? programDisplayName(prog) : '—'}
-                    </div>
-                    {v.notes && (
-                      <div className="small mt-1 text-muted" style={{ whiteSpace: 'pre-wrap' }}>
-                        {v.notes}
+              <div className="pct-row" key={v.id}>
+                <div className="pct-cell pct-num"><span className="pct-idx">#{i + 1}</span></div>
+                <div className="pct-cell">
+                  <div className="pct-id">
+                    <span className="pct-ava" style={{ background: '#198754', borderRadius: 11 }}><i className="bi bi-broadcast" /></span>
+                    <div className="pct-idtext">
+                      <div className="pct-name">
+                        {v.tiktok_url
+                          ? <a className="pct-vlink" href={v.tiktok_url} target="_blank" rel="noreferrer" title={v.tiktok_url}><i className="bi bi-tiktok" /><span>{v.tiktok_url}</span></a>
+                          : <span className="pct-muted">No TikTok URL yet</span>}
                       </div>
-                    )}
+                      <div className="pct-sub"><span className="pct-live"><span className="dot" />Live</span>{posted && <> · {posted}</>}{authorised && <> · <i className="bi bi-shield-check" style={{ color: '#198754' }} /> auth</>}</div>
+                    </div>
                   </div>
-                  <div>
+                </div>
+                <div className="pct-cell">
+                  <div className="pct-id">
+                    <span className="pct-ava" style={{ background: pctGradient(cr?.name || '?'), width: 30, height: 30, fontSize: 12, borderRadius: 9 }}>{pctInitials(cr?.name || '?')}</span>
+                    <div className="pct-idtext">
+                      <div className="pct-name">{cr?.name ?? '—'}</div>
+                      {cr?.handle && <div className="pct-sub">@{cr.handle.replace(/^@/, '')}</div>}
+                    </div>
+                  </div>
+                </div>
+                <div className="pct-cell">
+                  <div className="pct-idtext">
+                    <div className="pct-name">{b?.name ?? '—'}</div>
+                    <div className="pct-sub">{prog ? programDisplayName(prog) : '—'}</div>
+                  </div>
+                </div>
+                <div className="pct-cell">
+                  {adCode
+                    ? <div className="pct-code"><code title={adCode}>{adCode}</code><button type="button" className="pct-copy" title="Copy ad code" onClick={() => pctCopy(adCode)}><i className="bi bi-clipboard" /></button></div>
+                    : <span className="pct-muted">—</span>}
+                </div>
+                <div className="pct-cell pct-num">
+                  {prog && (
+                    <a className="pct-open" title="Open the program" onClick={e => { e.preventDefault(); nav(`/paid-collab/programs/${prog.id}`); }} href={`/paid-collab/programs/${prog.id}`}>
+                      <i className="bi bi-box-arrow-up-right" />
+                    </a>
+                  )}
+                </div>
+
+                {/* mobile card */}
+                <div className="pct-mc">
+                  <div className="pct-mc-head">
+                    <span className="pct-ava" style={{ background: '#198754', borderRadius: 11 }}><i className="bi bi-broadcast" /></span>
+                    <div className="pct-mc-idblock">
+                      <div className="pct-mc-name">
+                        {v.tiktok_url
+                          ? <a className="pct-vlink" href={v.tiktok_url} target="_blank" rel="noreferrer"><i className="bi bi-tiktok" /><span>{v.tiktok_url}</span></a>
+                          : <span className="pct-muted">No TikTok URL</span>}
+                      </div>
+                      <div className="pct-mc-sub">{cr?.name ?? '—'}{cr?.handle ? ` · @${cr.handle.replace(/^@/, '')}` : ''} · {b?.name ?? '—'}</div>
+                    </div>
                     {prog && (
-                      <Button size="sm" variant="outline-primary"
-                        onClick={() => nav(`/paid-collab/programs/${prog.id}`)}
-                        title="Open the program">
+                      <a className="pct-open" title="Open program" onClick={e => { e.preventDefault(); nav(`/paid-collab/programs/${prog.id}`); }} href={`/paid-collab/programs/${prog.id}`}>
                         <i className="bi bi-box-arrow-up-right" />
-                      </Button>
+                      </a>
                     )}
                   </div>
-                </Card.Body>
-              </Card>
+                  {adCode && (
+                    <div className="pct-mc-foot pct-code"><code title={adCode}>{adCode}</code><button type="button" className="pct-copy" title="Copy ad code" onClick={() => pctCopy(adCode)}><i className="bi bi-clipboard" /></button></div>
+                  )}
+                </div>
+              </div>
             );
           })}
         </div>

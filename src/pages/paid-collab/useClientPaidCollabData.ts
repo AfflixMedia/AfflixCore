@@ -104,6 +104,8 @@ export function useClientPaidCollabData() {
                 id: `${c.id}-vid-${idx}`,
                 creator_id: c.id,
                 tiktok_url: v.video,
+                ad_code: v.adCode || null,
+                ad_code_authorized: !!v.auth,
                 posted_on: c.completed_on || c.onboarded_on || c.created_at,
                 status: 'live',
                 created_at: c.created_at
