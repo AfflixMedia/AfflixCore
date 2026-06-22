@@ -13,6 +13,31 @@ import NumberInput from '../../components/NumberInput';
 const CREATOR_STATUS_VALUES: CreatorStatus[] = ['active', 'paused', 'done', 'dropped'];
 
 import { useClientPaidCollabData, Brand } from './useClientPaidCollabData';
+import './creatorsTable.css';
+
+const CCT_GRADIENTS = [
+  'linear-gradient(135deg,#6366F1,#8B5CF6)', 'linear-gradient(135deg,#EC4899,#F43F5E)',
+  'linear-gradient(135deg,#14B8A6,#06B6D4)', 'linear-gradient(135deg,#F59E0B,#EF4444)',
+  'linear-gradient(135deg,#10B981,#059669)', 'linear-gradient(135deg,#3B82F6,#2563EB)',
+  'linear-gradient(135deg,#8B5CF6,#EC4899)',
+];
+const cctGradient = (name: string) => (name ? CCT_GRADIENTS[name.charCodeAt(0) % CCT_GRADIENTS.length] : CCT_GRADIENTS[0]);
+const cctInitials = (name: string) =>
+  (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?';
+const cctIsUrl = (s?: string) => !!s && (s.startsWith('http://') || s.startsWith('https://'));
+// PayPal payout value → openable link (URL / www. / paypal.me). Plain emails stay text.
+function cctPaypalUrl(raw?: string | null) {
+  if (!raw) return null;
+  const t = String(raw).trim();
+  if (!t) return null;
+  if (/^https?:\/\//i.test(t)) return t;
+  if (/^(www\.|paypal\.me\/|paypal\.com\/)/i.test(t)) return `https://${t.replace(/^\/+/, '')}`;
+  return null;
+}
+function cctCopy(t: string) {
+  try { if (navigator.clipboard?.writeText) { navigator.clipboard.writeText(t); return; } } catch { /* ignore */ }
+  try { const ta = document.createElement('textarea'); ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); } catch { /* ignore */ }
+}
 
 type StatusFilter = 'all' | 'active' | 'paused' | 'done' | 'dropped';
 type PaymentFilter = 'all' | 'pending' | 'paid';
@@ -26,8 +51,10 @@ export default function PaidCollabCreators() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('all');
 
-  // Creator popup — opens on creator card click instead of navigating away.
+  // Creator popup — full videos/details modal, opened from the expanded row.
   const [openCreator, setOpenCreator] = useState<PaidCreator | null>(null);
+  // Which table row is expanded inline.
+  const [openId, setOpenId] = useState<string | null>(null);
 
   // Lookup maps
   const brandById = useMemo(() => {
@@ -174,8 +201,17 @@ export default function PaidCollabCreators() {
           No creators match your filters.
         </Card>
       ) : (
-        <Row className="g-3">
-          {filtered.map(c => {
+        <div className="cct">
+          <div className="cct-head">
+            <div className="cct-num">#</div>
+            <div>Creator</div>
+            <div>Brand · Program</div>
+            <div>Progress</div>
+            <div className="cct-num">Deal</div>
+            <div>Status</div>
+            <div />
+          </div>
+          {filtered.map((c, i) => {
             const prog = programById.get(c.program_id);
             if (!prog) return null;
             const b = brandById.get(prog.brand_id);
@@ -183,109 +219,188 @@ export default function PaidCollabCreators() {
             const pipeline = pipelineByCreator.get(c.id) ?? 0;
             const pending = isCreatorPaymentPending(c, live, prog, b);
             const meta = CREATOR_STATUS_META[c.status];
-            const progressPct = c.agreed_videos > 0
-              ? Math.min(100, Math.round((live / c.agreed_videos) * 100)) : 0;
+            const agreed = c.agreed_videos || 0;
+            const progressPct = agreed > 0 ? Math.min(100, Math.round((live / agreed) * 100)) : 0;
+            const currency = prog.currency || 'USD';
+            const open = openId === c.id;
+            const handle = c.handle ? `@${c.handle.replace(/^@/, '')}` : '';
+            // raw passthrough (see useClientPaidCollabData) — video links + ad codes + payout
+            const cc = c as any;
+            const videoCodes: { video?: string; adCode?: string; auth?: boolean }[] =
+              Array.isArray(cc.video_codes) ? cc.video_codes : [];
+            const paypal: string = cc.paypal || '';
+            const zelle: string = cc.zelle || '';
+            const ppUrl = cctPaypalUrl(paypal);
+            const statusPill = (
+              <span className="cct-pill" style={{ background: meta.color + '1A', color: meta.color }}>
+                <span className="dot" />{meta.label}
+              </span>
+            );
+            const tags = (
+              <>
+                {c.paid_out && <span className="cct-paid"><i className="bi bi-check-circle-fill" />Paid</span>}
+                {pending && <span className="cct-pendtag"><i className="bi bi-cash-stack" />Pending</span>}
+              </>
+            );
             return (
-              <Col md={6} lg={4} key={c.id}>
-                <Card
-                  className={`h-100 shadow-sm ${pending ? 'ac-payment-pending-card' : ''}`}
-                  role="button"
-                  onClick={() => setOpenCreator(c)}
-                  style={{ cursor: 'pointer', transition: 'transform .15s' }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)'; }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.transform = ''; }}
+              <div className="cct-group" key={c.id}>
+                <div
+                  className={`cct-row ${open ? 'open' : ''} ${pending ? 'pending' : ''}`}
+                  role="button" tabIndex={0}
+                  onClick={() => setOpenId(open ? null : c.id)}
+                  onKeyDown={e => { if (e.key === 'Enter') setOpenId(open ? null : c.id); }}
                 >
-                  <Card.Body className="d-flex flex-column">
-                    {pending && (
-                      <div className="mb-2">
-                        <Badge
-                          bg=""
-                          className="ac-payment-pending-badge w-100 justify-content-center py-2"
-                          style={{ backgroundColor: '#e8862e', color: '#fff' }}
-                        >
-                          <i className="bi bi-cash-stack me-1" />
-                          Payment pending
-                        </Badge>
+                  <div className="cct-cell cct-num"><span className="cct-idx">#{i + 1}</span></div>
+                  <div className="cct-cell">
+                    <div className="cct-id">
+                      <span className="cct-ava" style={{ background: cctGradient(c.name) }}>{cctInitials(c.name)}</span>
+                      <div className="cct-idtext">
+                        <div className="cct-name">{c.name}</div>
+                        <div className="cct-handle">{handle || <span className="cct-muted">no handle</span>}</div>
                       </div>
-                    )}
-                    <div className="d-flex gap-2 align-items-start">
-                      <Avatar name={c.name} size="lg" />
-                      <div className="flex-grow-1 min-w-0">
-                        <div className="fw-semibold text-truncate">{c.name}</div>
-                        {c.handle && (
-                          <div className="text-muted small text-truncate">
-                            <i className="bi bi-at" />{c.handle.replace(/^@/, '')}
+                    </div>
+                  </div>
+                  <div className="cct-cell cct-bp">
+                    <div className="cct-bp-brand">{b?.name ?? '—'}</div>
+                    <div className="cct-bp-prog">{programDisplayName(prog)}</div>
+                  </div>
+                  <div className="cct-cell cct-prog">
+                    {agreed > 0 ? (
+                      <>
+                        <div className="cct-prog-top"><span>Live</span><span>{live}/{agreed}</span></div>
+                        <div className="cct-prog-track"><div className="cct-prog-fill" style={{ width: `${progressPct}%`, background: meta.color }} /></div>
+                      </>
+                    ) : <span className="cct-muted">{live} live</span>}
+                  </div>
+                  <div className="cct-cell cct-num"><span className="cct-money">{fmtMoney(Number(c.fee), currency)}</span></div>
+                  <div className="cct-cell">
+                    <div className="cct-statuscell">{statusPill}{tags}</div>
+                  </div>
+                  <div className="cct-cell cct-chev">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+                  </div>
+
+                  {/* mobile card */}
+                  <div className="cct-mc">
+                    <div className="cct-mc-head">
+                      <span className="cct-ava" style={{ background: cctGradient(c.name) }}>{cctInitials(c.name)}</span>
+                      <div className="cct-mc-idblock">
+                        <div className="cct-mc-name">{c.name}</div>
+                        <div className="cct-mc-sub">{handle || 'no handle'} · {b?.name ?? '—'}</div>
+                      </div>
+                      <span className="cct-mc-chev">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+                      </span>
+                    </div>
+                    <div className="cct-mc-stats">
+                      <div className="cct-mc-stat"><b>{fmtMoney(Number(c.fee), currency)}</b><span>Deal</span></div>
+                      <div className="cct-mc-stat"><b>{live}/{agreed || live || 0}</b><span>Live</span></div>
+                      <div className="cct-mc-stat"><b>{pipeline}</b><span>Pipeline</span></div>
+                    </div>
+                    <div className="cct-mc-foot cct-statuscell">{statusPill}{tags}</div>
+                  </div>
+                </div>
+
+                {open && (
+                  <div className="cct-expand" onClick={e => e.stopPropagation()}>
+                    <div className="cct-expand-inner">
+                      <div className="cct-ex-head">
+                        <span className="cct-ava" style={{ background: cctGradient(c.name) }}>{cctInitials(c.name)}</span>
+                        <div className="cct-idtext">
+                          <div className="cct-ex-name">{c.name}</div>
+                          <div className="cct-ex-handle">{handle || <span className="cct-muted">no handle</span>}</div>
+                        </div>
+                      </div>
+                      <div className="cct-stats">
+                        <div className="cct-stat"><div className="cct-stat-l">Deal</div><div className="cct-stat-v">{fmtMoney(Number(c.fee), currency)}</div></div>
+                        <div className="cct-stat"><div className="cct-stat-l">Live videos</div><div className="cct-stat-v green">{live}</div></div>
+                        <div className="cct-stat"><div className="cct-stat-l">Pipeline</div><div className="cct-stat-v orange">{pipeline}</div></div>
+                        <div className="cct-stat"><div className="cct-stat-l">Agreed</div><div className="cct-stat-v">{agreed || '—'}</div></div>
+                        <div className="cct-stat"><div className="cct-stat-l">GMV</div><div className="cct-stat-v green">{fmtMoney(Number(c.gmv) || 0, currency)}</div></div>
+                        <div className="cct-stat"><div className="cct-stat-l">Items sold</div><div className="cct-stat-v blue">{fmtNumber(Number(c.items_sold) || 0)}</div></div>
+                      </div>
+                      <div className="cct-details">
+                        <div><div className="cct-dt-l">Brand</div><div className="cct-dt-v">{b?.name ?? '—'}</div></div>
+                        <div><div className="cct-dt-l">Program</div><div className="cct-dt-v">{programDisplayName(prog)}</div></div>
+                        <div><div className="cct-dt-l">Status</div><div className="cct-dt-v">{meta.label}</div></div>
+                        <div><div className="cct-dt-l">Payment</div><div className="cct-dt-v">{c.paid_out ? 'Paid' : pending ? 'Pending' : '—'}</div></div>
+                        <div>
+                          <div className="cct-dt-l">Payment link</div>
+                          <div className="cct-dt-v">
+                            {(paypal || zelle) ? (
+                              <div className="cct-pay-list">
+                                {paypal && (ppUrl
+                                  ? <a className="cct-pay" href={ppUrl} target="_blank" rel="noopener noreferrer"><span className="cct-paytag pp">PP</span>{paypal}</a>
+                                  : <span className="cct-pay"><span className="cct-paytag pp">PP</span>{paypal}</span>)}
+                                {zelle && <span className="cct-pay"><span className="cct-paytag zl">Z</span>{zelle}</span>}
+                              </div>
+                            ) : <span className="cct-muted">—</span>}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="cct-videos">
+                        <div className="cct-videos-title">Videos &amp; ad codes{videoCodes.length > 0 && <span className="cct-videos-count">{videoCodes.length}</span>}</div>
+                        {videoCodes.length === 0 ? (
+                          <div className="cct-muted" style={{ padding: '6px 2px', fontSize: 13 }}>No videos added yet.</div>
+                        ) : (
+                          <div className="cct-vlist">
+                            {videoCodes.map((vc, vi) => {
+                              const vOk = cctIsUrl(vc.video);
+                              return (
+                                <div className={`cct-vrow ${vOk ? 'done' : ''}`} key={vi}>
+                                  <span className="cct-vnum">{vi + 1}</span>
+                                  <div className="cct-vlink">
+                                    {vOk
+                                      ? <a href={vc.video} target="_blank" rel="noopener noreferrer" title={vc.video}>{vc.video}</a>
+                                      : <span className="cct-muted">No link yet</span>}
+                                  </div>
+                                  <div className="cct-vcode">
+                                    {vc.adCode
+                                      ? <>
+                                          <code title={vc.adCode}>{vc.adCode}</code>
+                                          <button type="button" className="cct-vcopy" title="Copy ad code" onClick={() => cctCopy(vc.adCode || '')}>
+                                            <i className="bi bi-clipboard" />
+                                          </button>
+                                        </>
+                                      : <span className="cct-muted">—</span>}
+                                  </div>
+                                  <span className={`cct-vauth ${vc.auth ? 'on' : ''}`} title={vc.auth ? 'Authorised' : 'Not authorised'}>
+                                    {vc.auth ? <i className="bi bi-shield-check" /> : <i className="bi bi-shield" />}
+                                  </span>
+                                  {vOk && <a className="cct-vopen" href={vc.video} target="_blank" rel="noopener noreferrer" title="Open video"><i className="bi bi-box-arrow-up-right" /></a>}
+                                </div>
+                              );
+                            })}
                           </div>
                         )}
                       </div>
-                      <div className="d-flex flex-column align-items-end gap-1">
-                        <Badge bg="" style={{ backgroundColor: meta.color }}>{meta.label}</Badge>
-                        {c.paid_out && <Badge bg="success"><i className="bi bi-check-circle-fill me-1" />Paid</Badge>}
-                      </div>
                     </div>
-
-                    <div className="mt-2 small">
-                      <div className="text-muted" style={{ fontSize: '.7rem' }}>Brand · Program</div>
-                      <div className="fw-semibold text-truncate">
-                        {b?.name ?? '—'} <span className="text-muted">·</span> {programDisplayName(prog)}
-                      </div>
-                    </div>
-
-                    {c.agreed_videos > 0 && (
-                      <div className="mt-3">
-                        <div className="d-flex justify-content-between small">
-                          <span className="text-muted">Live progress</span>
-                          <span>{live}/{c.agreed_videos}</span>
-                        </div>
-                        <div className="progress" style={{ height: 6 }}>
-                          <div
-                            className="progress-bar"
-                            style={{ width: `${progressPct}%`, backgroundColor: meta.color }}
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="mt-3 d-flex gap-2 flex-wrap">
-                      <Badge bg="warning" text="dark">
-                        <i className="bi bi-hourglass-split me-1" />{pipeline} pipeline
-                      </Badge>
-                      <Badge bg="success">
-                        <i className="bi bi-broadcast me-1" />{live} live
-                      </Badge>
-                    </div>
-
-                    <div className="row g-2 mt-2 small">
-                      <div className="col-6 text-center p-2 rounded" style={{ background: 'rgba(32, 201, 151, 0.1)' }}>
-                        <div className="text-muted" style={{ fontSize: '.65rem' }}>GMV</div>
-                        <div className="fw-bold" style={{ color: '#198754' }}>{fmtMoney(Number(c.gmv), prog.currency || 'USD')}</div>
-                      </div>
-                      <div className="col-6 text-center p-2 rounded" style={{ background: 'rgba(13, 110, 253, 0.1)' }}>
-                        <div className="text-muted" style={{ fontSize: '.65rem' }}>Items</div>
-                        <div className="fw-bold" style={{ color: '#0d6efd' }}>{fmtNumber(c.items_sold)}</div>
-                      </div>
-                    </div>
-                  </Card.Body>
-                </Card>
-              </Col>
+                  </div>
+                )}
+              </div>
             );
           })}
-        </Row>
+        </div>
       )}
 
-      {openCreator && (() => {
+      {/*
+        CreatorPopupModal is DISABLED — the Creators page is now a read-only,
+        inline-expand view that reads the current handler_collab_* tables. The popup
+        (and its Add / Edit / Bulk-video sub-modals) edited the LEGACY paid_creator_*
+        tables and is intentionally not rendered. The component code is kept below for
+        reference. `openCreator` / `setOpenCreator` state is retained but unused.
+
+        {openCreator && (() => {
           const op = openCreator;
           const opProg = programById.get(op.program_id) ?? null;
           const opBrandId = opProg?.brand_id ?? '';
           const opBrand = brandById.get(opBrandId) ?? null;
-          // Every creator + program in the SAME brand as this creator — used
-          // by the popup's PerformanceModal to surface cross-program entries
-          // and label them with their program name.
           const brandProgs = programs.filter(p => p.brand_id === opBrandId);
           const brandProgIds = new Set(brandProgs.map(p => p.id));
           const brandCreatorsForOp = creators.filter(c => brandProgIds.has(c.program_id));
-          const programLabels = new Map<string, string>();
-          const progNameById = new Map<string, string>();
+          const programLabels = new Map();
+          const progNameById = new Map();
           for (const p of brandProgs) progNameById.set(p.id, programDisplayName(p));
           for (const c of brandCreatorsForOp) {
             const n = progNameById.get(c.program_id);
@@ -299,23 +414,24 @@ export default function PaidCollabCreators() {
               brandCreators={brandCreatorsForOp}
               programLabelByCreatorId={programLabels}
               onClose={() => setOpenCreator(null)}
-              onVideoAdded={(v) => { /* read only */ }}
-              onCreatorDeleted={(id) => {
-                // read only
-              }}
-              onCreatorUpdated={(c) => {
-                // read only
-                setOpenCreator(c);
-              }}
+              onVideoAdded={() => {}}
+              onCreatorDeleted={() => {}}
+              onCreatorUpdated={(c) => { setOpenCreator(c); }}
             />
           );
         })()}
+      */}
     </>
   );
 }
 
 // =====================================================================
-// Creator popup — Overview / Videos tabs (defaults to Videos)
+// [UNUSED] Creator popup — Overview / Videos tabs (defaults to Videos)
+// -----------------------------------------------------------------
+// No longer rendered: the Creators page is read-only and reads the current
+// handler_collab_* tables, while this popup (and the ManualAddVideoModal /
+// EditCreatorModal / BulkAddVideoModal sub-modals below) read & WRITE the LEGACY
+// paid_creator_* tables. Kept for reference / possible future re-enable.
 // =====================================================================
 function CreatorPopupModal({
   creator, program, brand, brandCreators, programLabelByCreatorId,

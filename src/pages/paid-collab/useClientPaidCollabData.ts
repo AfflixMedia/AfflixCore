@@ -72,7 +72,14 @@ export function useClientPaidCollabData() {
           agreed_videos: c.videos_count,
           status: 'active',
           paid_out: c.payment_status === 'paid',
-          created_at: c.created_at
+          created_at: c.created_at,
+          // Raw passthrough for the read-only expand panel (video links + ad codes,
+          // payout / payment link). These come straight from handler_collab_creators.
+          video_codes: Array.isArray(c.video_codes) ? c.video_codes : [],
+          paypal: c.paypal || '',
+          zelle: c.zelle || '',
+          payment_status: c.payment_status,
+          completed_on: c.completed_on || null,
         } as unknown as PaidCreator;
       });
       setCreators(cs);
