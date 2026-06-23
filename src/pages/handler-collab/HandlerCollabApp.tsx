@@ -751,8 +751,8 @@ const DragGrip = (
 );
 
 function BrandRow({ r, onOpen, onEditBudget, onNotes }) {
-  // Usage bar color: below 90% red, 90%+ green.
-  const usageColor = r.usage >= 90 ? 'var(--pc-success-fg)' : 'var(--pc-error-fg)';
+  // Usage bar color: below 80% red, 80%+ green.
+  const usageColor = r.usage >= 80 ? 'var(--pc-success-fg)' : 'var(--pc-error-fg)';
   function edit(e) { e.stopPropagation(); onEditBudget(); }
   function notes(e) { e.stopPropagation(); onNotes(); }
   const hasNotes = !!(r.bm.notes && r.bm.notes.trim());
