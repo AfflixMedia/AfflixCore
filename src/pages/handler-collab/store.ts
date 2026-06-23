@@ -159,6 +159,28 @@ export async function deleteCreator(id: string) {
   if (error) throw error;
 }
 
+// ── persisted brand ordering (drag-and-drop in the workspace) ──
+// Returns the caller's saved brand-id order (RLS scopes to their own rows).
+export async function loadBrandOrder(): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('handler_collab_brand_order')
+    .select('brand_id, position')
+    .order('position', { ascending: true });
+  if (error) throw error;
+  return (data || []).map((r: any) => r.brand_id);
+}
+// Replace the caller's order with `ids` (positions = array index). Reordering keeps
+// every brand, so an upsert is enough; stale rows cascade-drop with the brand.
+export async function saveBrandOrder(handlerId: string, ids: string[]) {
+  if (!handlerId) return;
+  const rows = ids.map((id, i) => ({ handler_id: handlerId, brand_id: id, position: i }));
+  if (rows.length === 0) return;
+  const { error } = await supabase
+    .from('handler_collab_brand_order')
+    .upsert(rows, { onConflict: 'handler_id,brand_id' });
+  if (error) throw error;
+}
+
 // Toggle a single video's "Authorised" flag. Uses a SECURITY DEFINER RPC so APCs /
 // team leads with brand access can flip it from the read-only views without broad
 // write access to the creators table (bob / handler can also call it).

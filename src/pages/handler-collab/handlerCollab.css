@@ -488,6 +488,12 @@ a.pc-payoutline-val{ color:var(--pc-accent); text-decoration:none; }
 a.pc-payoutline-val:hover{ text-decoration:underline; }
 @media (prefers-color-scheme:dark){ .pc-paytag.zl{ background:rgba(149,117,205,.2); color:#CE93D8; } }
 
+/* ── drag-to-reorder handle on brand rows ── */
+.pc-drag{ flex:0 0 auto; width:24px; height:30px; display:inline-flex; align-items:center; justify-content:center; padding:0; margin-left:-6px; border:0; background:transparent; color:var(--pc-text-3); cursor:grab; border-radius:8px; touch-action:none; transition:color .15s, background .15s; }
+.pc-drag:hover{ color:var(--pc-text-2); background:var(--pc-card-2); }
+.pc-drag:active{ cursor:grabbing; }
+.pc-bt-row.is-dragging{ background:var(--pc-card); box-shadow:0 14px 36px rgba(0,0,0,.18); border-radius:var(--pc-radius-sm); opacity:.97; }
+
 /* confirm modal */
 .pc-modal-confirm{ max-width:400px; text-align:center; }
 .pc-confirm-ico{ font-size:34px; margin-bottom:8px; }

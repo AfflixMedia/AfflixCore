@@ -5,6 +5,9 @@ import { supabase } from '../../lib/supabase';
 import * as store from './store';
 import { useAuth } from '../../auth/AuthContext';
 import { PayChip, PayoutDetail } from '../paid-collab/handlerCollabReadonly';
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import './handlerCollab.css';
 
 const storeMode = 'supabase';
@@ -196,6 +199,24 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
 
   const [month, setMonth] = useState(initialMonth || thisMonthKey());
   const [tab, setTab] = useState('brands'); // brands | creators | reporting
+
+  // Custom brand ordering (drag-and-drop), persisted per handler in the database
+  // (handler_collab_brand_order) so it follows the account across devices. It's a saved
+  // sequence of brand ids; the brand list sorts by it (unordered fall to the bottom in the
+  // default order). Reordering merges the moved subset back, keeping brands not currently
+  // visible in their existing slots. Loaded in reload().
+  const [brandOrder, setBrandOrder] = useState([]);
+  const reorderBrands = useCallback((newVisibleIds) => {
+    setBrandOrder(prev => {
+      const visible = new Set(newVisibleIds);
+      const base = prev.slice();
+      newVisibleIds.forEach(id => { if (!base.includes(id)) base.push(id); });
+      let i = 0;
+      const merged = base.map(id => (visible.has(id) ? newVisibleIds[i++] : id));
+      if (user?.id) store.saveBrandOrder(user.id, merged).catch(e => console.warn('Save brand order failed', e));
+      return merged;
+    });
+  }, [user]);
   const [drillId, setDrillId] = useState(initialBrandId || null);
   const [search, setSearch] = useState('');
   const [brandEditor, setBrandEditor] = useState(null);   // { mode:'add'|'edit', brand? }
@@ -235,6 +256,9 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
       setClients(allClients);
       setErr('');
       reconcileShared(data.creators);
+      // Saved drag order (per handler, cross-device). Keep current order on a fetch error.
+      const order = await store.loadBrandOrder().catch(() => null);
+      if (order) setBrandOrder(order);
     } catch (e) {
       setErr(e.message || 'Failed to load');
     }
@@ -303,9 +327,16 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
     }).filter(r => r.show);
 
     if (search.trim()) { const q = search.trim().toLowerCase(); rows = rows.filter(r => r.brand.toLowerCase().includes(q)); }
-    rows.sort((x, y) => y.allocated - x.allocated || x.brand.localeCompare(y.brand));
+    // Custom drag order first (brands present in brandOrder, in that sequence); the rest
+    // fall to the bottom in the default allocated-desc order.
+    const oIdx = (id) => { const i = brandOrder.indexOf(id); return i === -1 ? Infinity : i; };
+    rows.sort((x, y) => {
+      const ox = oIdx(x.id), oy = oIdx(y.id);
+      if (ox !== oy) return ox - oy;
+      return y.allocated - x.allocated || x.brand.localeCompare(y.brand);
+    });
     return rows;
-  }, [brands, creators, bmByKey, month, search]);
+  }, [brands, creators, bmByKey, month, search, brandOrder]);
 
   const totals = useMemo(() => brandRows.reduce((t, r) => ({
     budget: t.budget + r.budget, allocated: t.allocated + r.allocated, paid: t.paid + r.paid,
@@ -539,6 +570,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
                   onEditBudget={(r) => setBrandEditor({ mode: 'edit', brand: brands.find(b => b.id === r.id) || { id: r.id, name: r.brand } })}
                   onAddBrand={() => setBrandEditor({ mode: 'add', brand: { id: null, name: '' } })}
                   onNotes={(r) => setNotesBrand({ id: r.id, name: r.brand })}
+                  onReorder={reorderBrands}
                 />
           )
         )}
@@ -640,8 +672,17 @@ function UndoToast({ label, onUndo }) {
 /* ════════════════════════════════════════════════════════════
    Brand-level table
 ════════════════════════════════════════════════════════════ */
-function BrandLevel({ rows, totals, month, search, setSearch, onOpen, onEditBudget, onAddBrand, onNotes }) {
+function BrandLevel({ rows, totals, month, search, setSearch, onOpen, onEditBudget, onAddBrand, onNotes, onReorder }) {
   const collected = totals.allocated > 0 ? Math.round((totals.paid / totals.allocated) * 100) : 0;
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  function handleDragEnd(e) {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const ids = rows.map(r => r.id);
+    const oldI = ids.indexOf(active.id), newI = ids.indexOf(over.id);
+    if (oldI < 0 || newI < 0) return;
+    onReorder && onReorder(arrayMove(ids, oldI, newI));
+  }
   return (
     <>
       <div className="pc-kpis pc-kpis-5">
@@ -672,7 +713,11 @@ function BrandLevel({ rows, totals, month, search, setSearch, onOpen, onEditBudg
             <div className="pc-num">Videos</div><div className="pc-num">Creators</div><div className="pc-num">Cost/Vid</div>
             <div />
           </div>
-          {rows.map(r => <BrandRow key={r.id} r={r} onOpen={() => onOpen(r.id)} onEditBudget={() => onEditBudget(r)} onNotes={() => onNotes(r)} />)}
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={rows.map(r => r.id)} strategy={verticalListSortingStrategy}>
+              {rows.map(r => <BrandRow key={r.id} r={r} onOpen={() => onOpen(r.id)} onEditBudget={() => onEditBudget(r)} onNotes={() => onNotes(r)} />)}
+            </SortableContext>
+          </DndContext>
           <div className="pc-bt-row is-total">
             <div className="pc-brandcell"><span style={{ marginLeft: 4 }}>Totals</span></div>
             <div className="pc-cell pc-num" data-label="Budget">{fmt$(totals.budget)}</div>
@@ -701,15 +746,26 @@ function Kpi({ label, value, sub, color }) {
   );
 }
 
+const DragGrip = (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden><circle cx="9" cy="6" r="1.7" /><circle cx="15" cy="6" r="1.7" /><circle cx="9" cy="12" r="1.7" /><circle cx="15" cy="12" r="1.7" /><circle cx="9" cy="18" r="1.7" /><circle cx="15" cy="18" r="1.7" /></svg>
+);
+
 function BrandRow({ r, onOpen, onEditBudget, onNotes }) {
   // Usage bar color: below 90% red, 90%+ green.
   const usageColor = r.usage >= 90 ? 'var(--pc-success-fg)' : 'var(--pc-error-fg)';
   function edit(e) { e.stopPropagation(); onEditBudget(); }
   function notes(e) { e.stopPropagation(); onNotes(); }
   const hasNotes = !!(r.bm.notes && r.bm.notes.trim());
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: r.id });
+  const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 50 : undefined, position: isDragging ? 'relative' : undefined };
+  const handle = (
+    <button type="button" className="pc-drag" {...attributes} {...listeners}
+      onClick={e => e.stopPropagation()} title="Drag to reorder" aria-label="Drag to reorder">{DragGrip}</button>
+  );
   return (
-    <div className="pc-bt-row" onClick={onOpen} role="button" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter') onOpen(); }}>
+    <div ref={setNodeRef} style={style} className={`pc-bt-row ${isDragging ? 'is-dragging' : ''}`} onClick={onOpen} role="button" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter') onOpen(); }}>
       <div className="pc-brandcell">
+        {handle}
         <span className="pc-ava" style={{ background: getGradient(r.brand) }}>{initial(r.brand)}</span>
         <div style={{ minWidth: 0 }}>
           <div className="pc-brandname">{r.brand}</div>
@@ -741,6 +797,7 @@ function BrandRow({ r, onOpen, onEditBudget, onNotes }) {
       {/* ── purpose-built mobile card ── */}
       <div className="pc-mc">
         <div className="pc-mc-head">
+          {handle}
           <span className="pc-ava" style={{ background: getGradient(r.brand) }}>{initial(r.brand)}</span>
           <div className="pc-mc-idblock">
             <div className="pc-mc-name">{r.brand}</div>
