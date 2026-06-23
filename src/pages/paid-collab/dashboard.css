@@ -26,7 +26,7 @@
 }
 .pcd-hero-inner { position:relative; display:flex; justify-content:space-between; align-items:flex-start; gap:18px; flex-wrap:wrap; }
 .pcd-hero-date { font-size:12px; letter-spacing:.4px; opacity:.65; margin-bottom:7px; text-transform:uppercase; }
-.pcd-hero-title { font-size:26px; font-weight:800; margin:0 0 5px; letter-spacing:-.3px; }
+.pcd-hero-title { font-size:26px; font-weight:800; margin:0 0 5px; letter-spacing:-.3px; color: white; }
 .pcd-hero-sub { opacity:.82; font-size:14px; }
 .pcd-hero-cta {
   display:inline-flex; align-items:center; gap:13px; border-radius:15px; padding:12px 16px;
