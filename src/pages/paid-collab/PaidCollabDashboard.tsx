@@ -7,10 +7,10 @@ import {
 } from 'recharts';
 import { useAuth } from '../../auth/AuthContext';
 import {
-  programDisplayName, isCreatorPaymentPending, fmtMoney, fmtNumber,
+  programDisplayName, fmtMoney, fmtNumber,
   PaidProgram, PaidCreator, PaidVideo, PaidCreatorPerformance
 } from '../../lib/paidCollabSchema';
-import { useClientPaidCollabData, Brand } from './useClientPaidCollabData';
+import { useClientPaidCollabData, Brand, isPaidCollabPendingVisible } from './useClientPaidCollabData';
 import Avatar from '../../components/Avatar';
 import ProgramProgress from '../../components/paidcollab/ProgramProgress';
 import './dashboard.css';
@@ -18,6 +18,9 @@ import './dashboard.css';
 export default function PaidCollabDashboard() {
   const { profile } = useAuth();
   const nav = useNavigate();
+  // Client only sees a creator's "Payment Pending" once the handler toggles it visible;
+  // the handler (if ever on this view) sees all pending. Mirrors the Brands/Programs pages.
+  const revealPending = profile?.role === 'paid_collab_handler';
 
   const { brands, programs, creators, videos, performance, loading, err } = useClientPaidCollabData();
 
@@ -71,7 +74,7 @@ export default function PaidCollabDashboard() {
     const totalGmv = [...gmvByCreator.values()].reduce((s, v) => s + v, 0);
     const spent = creators.reduce((s, c) => s + Number(c.fee || 0), 0);
     const paymentPending = creators.filter(c =>
-      isCreatorPaymentPending(c, liveByCreator.get(c.id) ?? 0, programById.get(c.program_id))).length;
+      isPaidCollabPendingVisible(c, revealPending)).length;
     return {
       brands: brands.length,
       activePrograms,
@@ -83,7 +86,7 @@ export default function PaidCollabDashboard() {
       spent,
       paymentPending,
     };
-  }, [brands, programs, creators, videos, liveByCreator, pipelineByCreator, gmvByCreator]);
+  }, [brands, programs, creators, videos, liveByCreator, pipelineByCreator, gmvByCreator, revealPending]);
 
   // Currency assumption: use first program's currency, default USD.
   const currency = useMemo(
@@ -180,9 +183,9 @@ export default function PaidCollabDashboard() {
   // Payment pending creators (for the call-to-action panel)
   const pendingCreators = useMemo(() =>
     creators
-      .filter(c => isCreatorPaymentPending(c, liveByCreator.get(c.id) ?? 0, programById.get(c.program_id)))
+      .filter(c => isPaidCollabPendingVisible(c, revealPending))
       .slice(0, 6),
-    [creators, liveByCreator, programById],
+    [creators, revealPending],
   );
 
   const greeting = useMemo(() => {
