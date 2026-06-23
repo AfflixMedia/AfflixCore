@@ -50,6 +50,42 @@ function cctCopy(t: string) {
 type StatusFilter = 'all' | 'active' | 'paused' | 'done' | 'dropped';
 type PaymentFilter = 'all' | 'pending' | 'paid';
 
+// Compact payout chips for the table row — a PP/Z tag + copy button (+ open ↗ when
+// the PayPal value is a link). Mirrors the handler workspace's "Payout" column; never
+// prints the raw email/link inline (hover title reveals it, copy puts it on clipboard).
+function PayoutChips({ paypal, zelle }: { paypal: string; zelle: string }) {
+  if (!paypal && !zelle) return <span className="cct-muted">—</span>;
+  const ppUrl = cctPaypalUrl(paypal);
+  return (
+    <div className="cct-pay-chips">
+      {paypal && (
+        <span className="cct-paychip" title={paypal}>
+          <span className="cct-paytag pp">PP</span>
+          <button type="button" className="cct-vcopy" title={`Copy ${ppUrl ? 'link' : 'email'}`}
+            onClick={e => { e.stopPropagation(); copyWithToast(ppUrl || paypal, ppUrl ? 'Link' : undefined); }}>
+            <i className="bi bi-clipboard" />
+          </button>
+          {ppUrl && (
+            <a className="cct-vopen" href={ppUrl} target="_blank" rel="noopener noreferrer"
+              onClick={e => e.stopPropagation()} title="Open link">
+              <i className="bi bi-box-arrow-up-right" />
+            </a>
+          )}
+        </span>
+      )}
+      {zelle && (
+        <span className="cct-paychip" title={zelle}>
+          <span className="cct-paytag zl">Z</span>
+          <button type="button" className="cct-vcopy" title="Copy"
+            onClick={e => { e.stopPropagation(); copyWithToast(zelle); }}>
+            <i className="bi bi-clipboard" />
+          </button>
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function PaidCollabCreators() {
   const { brands, programs, creators, videos, loading, err } = useClientPaidCollabData();
   const { profile } = useAuth();
@@ -221,6 +257,7 @@ export default function PaidCollabCreators() {
             <div>Brand · Program</div>
             <div>Progress</div>
             <div className="cct-num">Deal</div>
+            <div>Payout</div>
             <div>Status</div>
             <div />
           </div>
@@ -286,6 +323,7 @@ export default function PaidCollabCreators() {
                     ) : <span className="cct-muted">{live} live</span>}
                   </div>
                   <div className="cct-cell cct-num"><span className="cct-money">{fmtMoney(Number(c.fee), currency)}</span></div>
+                  <div className="cct-cell cct-payout"><PayoutChips paypal={paypal} zelle={zelle} /></div>
                   <div className="cct-cell">
                     <div className="cct-statuscell">{statusPill}{tags}</div>
                   </div>
@@ -310,7 +348,7 @@ export default function PaidCollabCreators() {
                       <div className="cct-mc-stat"><b>{live}/{agreed || live || 0}</b><span>Live</span></div>
                       <div className="cct-mc-stat"><b>{pipeline}</b><span>Pipeline</span></div>
                     </div>
-                    <div className="cct-mc-foot cct-statuscell">{statusPill}{tags}</div>
+                    <div className="cct-mc-foot cct-statuscell">{statusPill}{tags}<PayoutChips paypal={paypal} zelle={zelle} /></div>
                   </div>
                 </div>
 

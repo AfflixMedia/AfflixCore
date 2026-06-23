@@ -20,7 +20,7 @@
 
 .cct-head, .cct-row{
   display:grid;
-  grid-template-columns:46px minmax(180px,1.7fr) 1.35fr 1fr 0.8fr 1.05fr 34px;
+  grid-template-columns:46px minmax(170px,1.6fr) 1.3fr 0.95fr 0.75fr 0.8fr 1fr 34px;
   align-items:center;
   gap:12px;
 }
@@ -79,6 +79,11 @@ a.cct-pay:hover{ text-decoration:underline; color:var(--cct-accent); }
 .cct-paytag{ display:inline-flex; align-items:center; justify-content:center; min-width:24px; height:20px; padding:0 5px; border-radius:6px; font-size:10.5px; font-weight:800; color:#fff; }
 .cct-paytag.pp{ background:#0070BA; }
 .cct-paytag.zl{ background:#6D28D9; }
+
+/* payout column — compact PP/Z copy chips */
+.cct-payout{ min-width:0; }
+.cct-pay-chips{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.cct-paychip{ display:inline-flex; align-items:center; gap:4px; }
 
 /* videos & ad codes */
 .cct-videos{ margin-top:16px; }

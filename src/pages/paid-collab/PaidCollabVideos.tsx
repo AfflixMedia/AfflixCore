@@ -173,13 +173,16 @@ export default function PaidCollabVideos() {
             const b = prog ? brandById.get(prog.brand_id) : null;
             const adCode = (v as any).ad_code as string | null;
             const authorised = !!(v as any).ad_code_authorized;
+            // Broadcast icon colour reflects ad-code authorisation: green when
+            // authorised, orange otherwise.
+            const iconBg = authorised ? '#198754' : '#fd7e14';
             const posted = v.posted_on ? new Date(v.posted_on + 'T00:00:00').toLocaleDateString('en-US', { day: 'numeric', month: 'short' }) : null;
             return (
               <div className="pct-row" key={v.id}>
                 <div className="pct-cell pct-num"><span className="pct-idx">#{i + 1}</span></div>
                 <div className="pct-cell">
                   <div className="pct-id">
-                    <span className="pct-ava" style={{ background: '#198754', borderRadius: 11 }}><i className="bi bi-broadcast" /></span>
+                    <span className="pct-ava" style={{ background: iconBg, borderRadius: 11 }} title={authorised ? 'Ad code authorised' : 'Ad code not authorised'}><i className="bi bi-broadcast" /></span>
                     <div className="pct-idtext">
                       <div className="pct-name">
                         {v.tiktok_url
@@ -221,7 +224,7 @@ export default function PaidCollabVideos() {
                 {/* mobile card */}
                 <div className="pct-mc">
                   <div className="pct-mc-head">
-                    <span className="pct-ava" style={{ background: '#198754', borderRadius: 11 }}><i className="bi bi-broadcast" /></span>
+                    <span className="pct-ava" style={{ background: iconBg, borderRadius: 11 }} title={authorised ? 'Ad code authorised' : 'Ad code not authorised'}><i className="bi bi-broadcast" /></span>
                     <div className="pct-mc-idblock">
                       <div className="pct-mc-name">
                         {v.tiktok_url
