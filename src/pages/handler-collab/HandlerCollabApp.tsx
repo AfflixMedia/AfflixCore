@@ -1337,6 +1337,10 @@ function ReportingView({ brands, brandById, creators, month }) {
   }, [scoped, kpis, trend, approvals, month, isWeekly, activeWeek]);
 
   const moneyTip = (v) => fmt$(Number(v) || 0);
+  // When the chart has only one populated period (a single week/month of data), a
+  // line/area is invisible — so render bigger dots and value labels instead.
+  const fewPoints = trend.filter(t => (t.gmv || 0) || (t.ad || 0)).length <= 1;
+  const lblMoney = (v) => (Number(v) > 0 ? fmt$(v) : '');
 
   if (!creators.length) {
     return (
@@ -1373,7 +1377,7 @@ function ReportingView({ brands, brandById, creators, month }) {
           <button className={`pc-rd-appr ${approvals.total ? 'has' : ''}`} onClick={() => setApprovalsOpen(true)}
             title="Items that need action">
             <i className="bi bi-clipboard-check" />
-            Approvals needed
+            Actions Needed
             <span className="pc-rd-appr-badge">{approvals.total}</span>
           </button>
           <PerfModeToggle mode={mode} setMode={setMode} />
@@ -1424,8 +1428,14 @@ function ReportingView({ brands, brandById, creators, month }) {
                   <XAxis dataKey="label" stroke="#8b93a1" fontSize={11} tickLine={false} axisLine={false} />
                   <YAxis stroke="#8b93a1" fontSize={11} tickLine={false} axisLine={false} width={48} tickFormatter={(v) => v >= 1000 ? `${Math.round(v / 1000)}k` : v} />
                   <Tooltip formatter={moneyTip} contentStyle={{ borderRadius: 10, border: '1px solid #e9ecef', fontSize: 12 }} />
-                  <Area type="monotone" dataKey="gmv" name="GMV" stroke="#1259C3" strokeWidth={2.5} fill="url(#rdGmv)" dot={{ r: 2 }} />
-                  <Area type="monotone" dataKey="ad" name="Ad spend" stroke="#E8862E" strokeWidth={2.5} fill="url(#rdAd)" dot={{ r: 2 }} />
+                  <Area type="monotone" dataKey="gmv" name="GMV" stroke="#1259C3" strokeWidth={2.5} fill="url(#rdGmv)"
+                    dot={{ r: fewPoints ? 5 : 3, strokeWidth: 0, fill: '#1259C3' }} activeDot={{ r: 6 }}>
+                    {fewPoints && <LabelList dataKey="gmv" position="top" offset={12} formatter={lblMoney} style={{ fontSize: 11, fontWeight: 800, fill: '#1259C3' }} />}
+                  </Area>
+                  <Area type="monotone" dataKey="ad" name="Ad spend" stroke="#E8862E" strokeWidth={2.5} fill="url(#rdAd)"
+                    dot={{ r: fewPoints ? 5 : 3, strokeWidth: 0, fill: '#E8862E' }} activeDot={{ r: 6 }}>
+                    {fewPoints && <LabelList dataKey="ad" position="bottom" offset={12} formatter={lblMoney} style={{ fontSize: 11, fontWeight: 800, fill: '#E8862E' }} />}
+                  </Area>
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -1508,7 +1518,7 @@ function ReportingView({ brands, brandById, creators, month }) {
         <div className="pc-overlay" onClick={() => setApprovalsOpen(false)}>
           <div className="pc-modal pc-appr-modal" onClick={e => e.stopPropagation()}>
             <div className="pc-appr-head">
-              <h3>Approvals needed</h3>
+              <h3>Actions Needed</h3>
               <button className="pc-iconbtn" onClick={() => setApprovalsOpen(false)} aria-label="Close">✕</button>
             </div>
             {approvals.total === 0 ? (
