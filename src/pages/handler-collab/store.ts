@@ -302,3 +302,14 @@ export async function setCreatorVideoAuth(creatorId: string, index: number, auth
   });
   if (error) throw error;
 }
+
+// Update a creator's `monthly` GMV / Ad Spent / L30 map (the Performance tab). Goes
+// through a SECURITY DEFINER RPC so internal staff (apc / team_lead) with brand access
+// — not only bob / the assigned handler — can edit performance numbers without broad
+// write access to the creators table (bob / handlers are allowed too).
+export async function setCreatorMonthly(creatorId: string, monthly: Record<string, any>) {
+  const { error } = await supabase.rpc('set_handler_creator_monthly', {
+    p_creator: creatorId, p_monthly: monthly,
+  });
+  if (error) throw error;
+}

@@ -1938,7 +1938,7 @@ function PerfBrandList({ brands, byBrand, mode, setMode, onOpen }) {
   );
 }
 
-function BrandMatrix({ brand, creators, mode, setMode, month, brandReportWeeks, brandAnchor, onCreateWeek, onBack, onSaveMonthly }) {
+function BrandMatrix({ brand, creators, mode, setMode, month, brandReportWeeks, brandAnchor, onCreateWeek, onBack, onSaveMonthly, monthNav = null }) {
   const isWeekly = mode === 'weekly';
   const [creating, setCreating] = useState(false);
   const canon = useMemo(() => {
@@ -2049,7 +2049,7 @@ function BrandMatrix({ brand, creators, mode, setMode, month, brandReportWeeks, 
 
   return (
     <>
-      <button className="pc-back" onClick={onBack}>‹ All brands</button>
+      {onBack && <button className="pc-back" onClick={onBack}>‹ All brands</button>}
       <div className="pc-dd-head">
         <span className="pc-ava" style={{ background: getGradient(brand.name) }}>{initial(brand.name)}</span>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -2059,6 +2059,7 @@ function BrandMatrix({ brand, creators, mode, setMode, month, brandReportWeeks, 
             : ` · ${periods.length} ${periodNoun}${periods.length === 1 ? '' : 's'} tracked`}</div>
         </div>
         <div className="pc-dd-actions">
+          {monthNav}
           {isWeekly && nextWindow && (
             <button className="pc-btn pc-btn-primary pc-btn-sm" disabled={creating} onClick={createNext}
               title={`Create the next weekly report (${rangeLong(nextWindow.start, nextWindow.end)})`}>
@@ -2131,6 +2132,104 @@ function BrandMatrix({ brand, creators, mode, setMode, month, brandReportWeeks, 
         </>
       )}
     </>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════
+   Brand Performance pane — the Performance matrix for ONE brand, reused outside the
+   handler workspace (Brand Detail → Paid Collab tab) so Bob / assigned APCs can view
+   AND edit GMV (monthly or weekly) exactly like the handler does. It loads its own
+   creators + weekly-report weeks/anchor for the brand and writes the `monthly` jsonb
+   via store.setCreatorMonthly (a SECURITY DEFINER RPC → APCs can write too). Editing
+   is gated by `canEdit`; the host only mounts this when the viewer may edit.
+════════════════════════════════════════════════════════════ */
+export function BrandPerformancePane({ brandId, brandName, canEdit = false }) {
+  const { user } = useAuth();
+  const [creators, setCreators] = useState([]);
+  const [month, setMonth] = useState(thisMonthKey());
+  const [mode, setMode] = useState('monthly'); // 'monthly' | 'weekly'
+  const [reportWeeks, setReportWeeks] = useState([]); // [{ start, end }]
+  const [anchor, setAnchor] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('handler_collab_creators').select('*').eq('brand_id', brandId);
+      if (error) throw error;
+      setCreators(data || []);
+      const rw = await store.loadBrandReportWeeks([brandId]).catch(() => ({}));
+      setReportWeeks(rw[brandId] || []);
+      const an = await store.loadBrandReportAnchors([brandId]).catch(() => ({}));
+      setAnchor(an[brandId] || null);
+      setErr('');
+    } catch (e) {
+      setErr(e.message || 'Failed to load performance');
+    } finally {
+      setLoading(false);
+    }
+  }, [brandId]);
+  useEffect(() => { setLoading(true); load(); }, [load]);
+
+  // Save a creator's monthly/weekly GMV map (optimistic, persist via the RPC).
+  const saveMonthly = useCallback((id, monthly) => {
+    if (!canEdit) return;
+    setCreators(prev => prev.map(c => (c.id === id ? { ...c, monthly } : c)));
+    store.setCreatorMonthly(id, monthly).catch(e => { alert(`Couldn't save: ${e.message}`); load(); });
+  }, [canEdit, load]);
+
+  // Create the next weekly report for this brand (mirrors the workspace flow). On the
+  // very first report, firstAnchor seeds the brand's weekly anchor.
+  const createWeek = useCallback(async (bId, firstAnchor) => {
+    if (!user?.id) return;
+    const existingArr = (reportWeeks || []).map(w => w.start);
+    const existing = new Set(existingArr);
+    let a = anchor || (existingArr.length ? existingArr.slice().sort()[0] : null) || firstAnchor || null;
+    if (!a) { alert('Pick an anchor (week-1 start) date first.'); return; }
+    if (firstAnchor && !anchor && existingArr.length === 0) {
+      try { await store.setBrandWeeklyAnchor(bId, firstAnchor); }
+      catch (e) { alert(`Couldn't set anchor: ${e.message}`); return; }
+      setAnchor(firstAnchor); a = firstAnchor;
+    }
+    let start = a, wn = 1;
+    while (existing.has(start)) { start = addDaysISO(start, 7); wn++; }
+    const end = addDaysISO(start, 6);
+    try { await store.createWeeklyReport(bId, user.id, start, end, wn); }
+    catch (e) { alert(`Couldn't create weekly report: ${e.message}`); return; }
+    await load();
+    setMonth(start.slice(0, 7));
+  }, [reportWeeks, anchor, user, load]);
+
+  if (loading) return <div className="pc-app" style={{ minHeight: 0, background: 'transparent' }}><div className="pc-spinner" /></div>;
+
+  // Only the weekly view is month-scoped (which weeks show); give it a compact month nav.
+  const monthNav = mode === 'weekly' ? (
+    <div className="pc-monthnav">
+      <button className="pc-mn-arrow" aria-label="Previous month" onClick={() => setMonth(addMonth(month, -1))}>‹</button>
+      <label className="pc-monthpicker" title="Pick a month">
+        <span className="pc-monthpicker-ico">📅</span>
+        <input type="month" value={month} onChange={e => { if (e.target.value) setMonth(e.target.value); }} />
+      </label>
+      <button className="pc-mn-arrow" aria-label="Next month" onClick={() => setMonth(addMonth(month, 1))}>›</button>
+    </div>
+  ) : null;
+
+  return (
+    <div className="pc-app" style={{ minHeight: 0, background: 'transparent' }}>
+      {err && <div className="pc-banner" style={{ background: 'var(--pc-error-bg)', color: 'var(--pc-error-fg)' }}><span>⚠️</span><span>{err}</span></div>}
+      <BrandMatrix
+        brand={{ id: brandId, name: brandName }}
+        creators={creators}
+        mode={mode} setMode={setMode}
+        month={month}
+        brandReportWeeks={reportWeeks}
+        brandAnchor={anchor}
+        onCreateWeek={createWeek}
+        onSaveMonthly={saveMonthly}
+        monthNav={monthNav}
+      />
+    </div>
   );
 }
 

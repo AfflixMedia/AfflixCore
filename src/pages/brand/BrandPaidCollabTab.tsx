@@ -3,6 +3,7 @@ import { Spinner, Alert } from 'react-bootstrap';
 import { supabase } from '../../lib/supabase';
 import { setCreatorVideoAuth } from '../handler-collab/store';
 import type { HandlerBrandMonth, HandlerCreator } from '../handler-collab/store';
+import { BrandPerformancePane } from '../handler-collab/HandlerCollabApp';
 import {
   fmt$, monthKey, monthLabel, focusProductList, deliveredCount,
   Kpi, CreatorRowRO, CreatorListHeadRO,
@@ -15,16 +16,23 @@ interface Props {
 }
 
 /* ════════════════════════════════════════════════════════════
-   Paid Collab tab — read-only view of the handler workspace data for THIS brand,
-   styled like the handler Workspace drilldown (pc-* via handlerCollab.css). Keyed by
-   public.brands.id, so it works for Bob / APC / handler / client via RLS
-   (user_has_brand_access). Editing happens in the handler's own workspace.
+   Paid Collab tab for THIS brand, styled like the handler Workspace drilldown (pc-*
+   via handlerCollab.css). Keyed by public.brands.id, so it works for Bob / APC /
+   handler / client via RLS (user_has_brand_access).
+   - Overview: read-only summary (budgets/briefs + creator list) of the handler data.
+   - Performance: the same editable GMV matrix (monthly/weekly) the handler has, shown
+     to staff who may edit (canEdit = Bob or the assigned APC, brand active). Writes go
+     through store.setCreatorMonthly (SECURITY DEFINER RPC, so APCs can write too).
+   Creator/budget editing still happens in the handler's own workspace.
 ════════════════════════════════════════════════════════════ */
-export default function BrandPaidCollabTab({ brandId, brandName }: Props) {
+export default function BrandPaidCollabTab({ brandId, brandName, canEdit }: Props) {
   const [months, setMonths] = useState<HandlerBrandMonth[]>([]);
   const [creators, setCreators] = useState<HandlerCreator[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  // Overview = the read-only summary below; Performance = the editable GMV matrix
+  // (monthly/weekly), available to staff who may edit (Bob / assigned APC).
+  const [view, setView] = useState<'overview' | 'performance'>('overview');
 
   useEffect(() => {
     let cancelled = false;
@@ -91,22 +99,16 @@ export default function BrandPaidCollabTab({ brandId, brandName }: Props) {
   if (loading) return <div className="text-center py-5"><Spinner animation="border" /></div>;
   if (err) return <Alert variant="danger">{err}</Alert>;
 
-  if (months.length === 0 && creators.length === 0) {
-    return (
-      <div className="pc-app" style={{ minHeight: 0, background: 'transparent' }}>
-        <div className="pc-card"><div className="pc-empty">
-          <div className="pc-empty-icon">👥</div>
-          <h3>No paid collab data for {brandName}</h3>
-          <p>Enable the “Paid Collabs” scope for this brand and assign it to a handler — their workspace data shows here.</p>
-        </div></div>
-      </div>
-    );
-  }
-
   const costPerVideo = totals.delivered > 0 ? totals.allocated / totals.delivered : 0;
 
-  return (
-    <div className="pc-app" style={{ minHeight: 0, background: 'transparent' }}>
+  const overview = (months.length === 0 && creators.length === 0) ? (
+    <div className="pc-card"><div className="pc-empty">
+      <div className="pc-empty-icon">👥</div>
+      <h3>No paid collab data for {brandName}</h3>
+      <p>Enable the “Paid Collabs” scope for this brand and assign it to a handler — their workspace data shows here.</p>
+    </div></div>
+  ) : (
+    <>
       <div className="pc-kpis pc-kpis-5">
         <Kpi label="Budget" color="#1259C3" value={fmt$(totals.budget)} sub={`${months.length} month${months.length === 1 ? '' : 's'}`} />
         <Kpi label="Allocated" color="#8B5CF6" value={fmt$(totals.allocated)} sub={`${creators.length} creator${creators.length === 1 ? '' : 's'}`} />
@@ -150,6 +152,20 @@ export default function BrandPaidCollabTab({ brandId, brandName }: Props) {
           ))}
         </div>
       )}
+    </>
+  );
+
+  return (
+    <div className="pc-app" style={{ minHeight: 0, background: 'transparent' }}>
+      {canEdit && (
+        <div className="pc-seg" style={{ marginBottom: 16 }}>
+          <button type="button" className={`pc-seg-btn ${view === 'overview' ? 'active' : ''}`} onClick={() => setView('overview')}>Overview</button>
+          <button type="button" className={`pc-seg-btn ${view === 'performance' ? 'active' : ''}`} onClick={() => setView('performance')}>Performance</button>
+        </div>
+      )}
+      {canEdit && view === 'performance'
+        ? <BrandPerformancePane brandId={brandId} brandName={brandName} canEdit={canEdit} />
+        : overview}
     </div>
   );
 }
