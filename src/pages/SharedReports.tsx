@@ -87,6 +87,7 @@ export default function SharedReports() {
   // New handler-collab data (current Paid Collab model) for the "New Paid Collab" tab.
   const [pcMonths, setPcMonths] = useState<HandlerBrandMonth[]>([]);
   const [pcHandlerCreators, setPcHandlerCreators] = useState<HandlerCreator[]>([]);
+  const [pcComments, setPcComments] = useState<any[]>([]);
   const [openProgramId, setOpenProgramId] = useState<string | null>(null);
   const [linkMode, setLinkMode] = useState<'brand' | 'general'>('brand');
   const [decisions, setDecisions] = useState<ApprovalDecisionRow[]>([]);
@@ -142,6 +143,7 @@ export default function SharedReports() {
         setPcNotes((data.paid_collab_program_notes ?? []) as ProgramNote[]);
         setPcMonths((data.handler_months ?? []) as HandlerBrandMonth[]);
         setPcHandlerCreators((data.handler_creators ?? []) as HandlerCreator[]);
+        setPcComments((data.paid_collab_comments ?? []) as any[]);
         const mode: 'brand' | 'general' = data.link_mode === 'general' ? 'general' : 'brand';
         setLinkMode(mode);
         // Default landing tab — first enabled section
@@ -401,6 +403,20 @@ export default function SharedReports() {
     setPublicName(authorName);
   };
   const resourceCommentCount = (rid: string) => resourceComments.filter(c => c.resource_id === rid).length;
+
+  // Paid-collab comment (public client) — posts via edge function, appends locally.
+  const addPaidCollabComment = async (
+    brandId: string, targetType: string, targetKey: string,
+    body: string, authorName: string, parentId?: string,
+  ) => {
+    const { data, error } = await supabase.functions.invoke('post-shared-paidcollab-comment', {
+      body: { token, brand_id: brandId, target_type: targetType, target_key: targetKey, author_name: authorName, body, parent_id: parentId ?? null },
+    });
+    if (error) throw error;
+    if ((data as any)?.error) throw new Error((data as any).error);
+    setPcComments(prev => [...prev, (data as any).comment]);
+    setPublicName(authorName);
+  };
 
   // Report detail view
   if (openReport && activeBrand) {
@@ -1072,6 +1088,9 @@ export default function SharedReports() {
                     brand={activeBrand}
                     months={pcMonths}
                     creators={pcHandlerCreators}
+                    comments={pcComments}
+                    publicName={publicName}
+                    onAddComment={addPaidCollabComment}
                   />
                 </Tab.Pane>
               </Tab.Content>

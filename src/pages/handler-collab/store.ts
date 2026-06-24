@@ -246,6 +246,53 @@ export async function saveBrandOrder(handlerId: string, ids: string[]) {
   if (error) throw error;
 }
 
+/* ── paid-collab comments (brand / program / week / creator / insights / kpi) ── */
+export type CommentTargetType = 'brand' | 'program' | 'week' | 'creator' | 'insights' | 'kpi';
+export interface PaidCollabComment {
+  id: string;
+  brand_id: string;
+  target_type: CommentTargetType;
+  target_key: string;
+  author_type: 'client' | 'handler' | 'bob' | 'apc';
+  author_id: string | null;
+  author_name: string;
+  body: string;
+  parent_id: string | null;
+  created_at: string;
+}
+
+// Load every comment for the given brands (RLS scopes to brands the caller can see).
+export async function loadComments(brandIds: string[]): Promise<PaidCollabComment[]> {
+  if (!brandIds.length) return [];
+  const { data, error } = await supabase
+    .from('paid_collab_comments')
+    .select('*')
+    .in('brand_id', brandIds)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return (data || []) as PaidCollabComment[];
+}
+
+// Add a comment as the signed-in handler/staff (RLS enforces brand access).
+export async function addComment(input: {
+  brandId: string; targetType: CommentTargetType; targetKey: string;
+  authorId: string; authorType: 'handler' | 'bob' | 'apc'; authorName: string;
+  body: string; parentId?: string | null;
+}): Promise<PaidCollabComment> {
+  const { data, error } = await supabase.from('paid_collab_comments').insert({
+    brand_id: input.brandId,
+    target_type: input.targetType,
+    target_key: input.targetKey || '',
+    author_type: input.authorType,
+    author_id: input.authorId,
+    author_name: input.authorName,
+    body: input.body.trim().slice(0, 4000),
+    parent_id: input.parentId || null,
+  }).select().single();
+  if (error) throw error;
+  return data as PaidCollabComment;
+}
+
 // Toggle a single video's "Authorised" flag. Uses a SECURITY DEFINER RPC so APCs /
 // team leads with brand access can flip it from the read-only views without broad
 // write access to the creators table (bob / handler can also call it).

@@ -1,4 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import PaidCollabDiscussionDrawer from '../paidcollab/PaidCollabDiscussionDrawer';
+import type { PaidCollabComment } from '../../pages/handler-collab/store';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, LabelList,
   PieChart, Pie, Cell,
@@ -17,11 +19,34 @@ import {
 ════════════════════════════════════════════════════════════ */
 interface BrandLite { id: string; name: string; client: string | null }
 
-export default function SharedHandlerCollabPane({ brand, months, creators }: {
+export default function SharedHandlerCollabPane({ brand, months, creators, comments = [], publicName, onAddComment }: {
   brand: BrandLite; months: HandlerBrandMonth[]; creators: HandlerCreator[];
+  comments?: PaidCollabComment[];
+  publicName?: string;
+  onAddComment?: (brandId: string, targetType: string, targetKey: string, body: string, authorName: string, parentId?: string) => Promise<void>;
 }) {
-  const [section, setSection] = useState<'programs' | 'performance'>('programs');
+  const [section, setSection] = useState<'programs' | 'performance' | 'discussions'>('programs');
   const [openMonth, setOpenMonth] = useState<string | null>(null);
+  // Right-side discussion drawer ({ tt, tk, highlight } | null).
+  const [disc, setDisc] = useState<{ tt: string; tk: string; highlight?: string } | null>(null);
+  const openDisc = (tt: string, tk: string, highlight?: string) => setDisc({ tt, tk, highlight });
+
+  // Comments for this brand + the drawer's onAdd (posts via the public edge fn).
+  const bComments = useMemo(() => comments.filter(c => c.brand_id === brand.id), [comments, brand.id]);
+  const discAdd = async (tt: string, tk: string, body: string, authorName: string, parentId?: string) => {
+    await onAddComment?.(brand.id, tt, tk, body, authorName, parentId);
+  };
+
+  // "New replies" since last visit — handler/staff comments the client hasn't seen.
+  // Capture the seen timestamp once at mount so badges stay stable during the visit.
+  const [seenAt] = useState(() => Number(localStorage.getItem(`ac_pcc_seen_${brand.id}`) || 0));
+  const newReplies = useMemo(() =>
+    bComments.filter(c => c.author_type !== 'client' && new Date(c.created_at).getTime() > seenAt).length,
+  [bComments, seenAt]);
+  useEffect(() => {
+    const t = setTimeout(() => localStorage.setItem(`ac_pcc_seen_${brand.id}`, String(Date.now())), 1500);
+    return () => clearTimeout(t);
+  }, [brand.id, bComments.length]);
 
   const bMonths = useMemo(
     () => months.filter(m => m.brand_id === brand.id).sort((a, b) => String(b.month).localeCompare(String(a.month))),
@@ -72,6 +97,13 @@ export default function SharedHandlerCollabPane({ brand, months, creators }: {
               {products.map((p, i) => <a key={i} className="pc-link-chip pc-chip-orange" href={p.url || undefined} target="_blank" rel="noopener noreferrer">{p.name || `Focus product ${i + 1}`} ↗</a>)}
             </div>
           </div>
+          {onAddComment && (
+            <div className="pc-dd-actions">
+              <button className="pc-disc-btn" style={{ height: 34 }} onClick={() => openDisc('program', openMonth!)}>
+                <i className="bi bi-chat-left-text" />Discussion
+              </button>
+            </div>
+          )}
         </div>
         <div className="pc-kpis pc-kpis-5">
           <Kpi label="Budget" color="#1259C3" value={budget ? fmt$(budget) : '—'} sub={budget ? `${usage}% used` : 'not set'} />
@@ -89,15 +121,42 @@ export default function SharedHandlerCollabPane({ brand, months, creators }: {
             <CreatorStatusGroupsRO creators={mc} />
           </div>
         )}
+        {disc && (
+          <PaidCollabDiscussionDrawer brand={brand} comments={comments} creators={creators} months={months}
+            mode="public" publicName={publicName} initial={disc} onAdd={discAdd} onClose={() => setDisc(null)} />
+        )}
       </div>
     );
   }
 
   return (
     <div className="pc-app" style={{ minHeight: 0, background: 'transparent' }}>
-      <div className="pc-tabs" style={{ marginBottom: 16 }}>
-        <button className={`pc-tab ${section === 'programs' ? 'active' : ''}`} onClick={() => setSection('programs')}>Programs</button>
-        <button className={`pc-tab ${section === 'performance' ? 'active' : ''}`} onClick={() => setSection('performance')}>Performance</button>
+      {newReplies > 0 && (
+        <div className="pc-card" style={{ padding: '10px 16px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10, background: '#FFF6EC', borderColor: '#F0C28A' }}>
+          <i className="bi bi-chat-dots-fill" style={{ color: '#E8862E' }} />
+          <span style={{ fontWeight: 700, color: '#A85B12' }}>{newReplies} new repl{newReplies === 1 ? 'y' : 'ies'}</span>
+          <span style={{ color: '#A85B12' }}>from the team since your last visit.</span>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+        <div className="pc-tabs" style={{ margin: 0 }}>
+          <button className={`pc-tab ${section === 'programs' ? 'active' : ''}`} onClick={() => setSection('programs')}>Programs</button>
+          <button className={`pc-tab ${section === 'performance' ? 'active' : ''}`} onClick={() => setSection('performance')}>Performance</button>
+          {onAddComment && (
+            <button className={`pc-tab ${section === 'discussions' ? 'active' : ''}`} onClick={() => setSection('discussions')}>
+              Discussions
+              {newReplies > 0 && <span className="pc-tab-badge">{newReplies}</span>}
+            </button>
+          )}
+        </div>
+        {onAddComment && (
+          <button className="pc-disc-btn" style={{ marginLeft: 'auto' }} onClick={() => openDisc('brand', '')} title="Open discussion">
+            <i className="bi bi-chat-left-text" />Discussion
+            {newReplies > 0 && <span className="pc-disc-badge">{newReplies}</span>}
+            {newReplies === 0 && bComments.length > 0 && <span className="pcc-count">{bComments.length}</span>}
+          </button>
+        )}
       </div>
 
       {section === 'programs' ? (
@@ -131,9 +190,93 @@ export default function SharedHandlerCollabPane({ brand, months, creators }: {
             ))}
           </div>
         )
+      ) : section === 'discussions' ? (
+        <ShareDiscussions brand={brand} comments={bComments} creators={bCreators} seenAt={seenAt} onOpen={openDisc} />
       ) : (
-        <PerformanceReport brand={brand} creators={bCreators} />
+        <PerformanceReport brand={brand} creators={bCreators} onDiscuss={onAddComment ? openDisc : undefined} />
       )}
+
+      {disc && (
+        <PaidCollabDiscussionDrawer brand={brand} comments={comments} creators={creators} months={months}
+          mode="public" publicName={publicName} initial={disc} onAdd={discAdd} onClose={() => setDisc(null)} />
+      )}
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════
+   Client "all discussions" list — every thread for this brand, grouped/filtered
+   by level. Click a thread to open its drawer (latest comment highlighted).
+════════════════════════════════════════════════════════════ */
+const SD_KPI_LABEL: Record<string, string> = {
+  active_creators: 'Active creators', videos_posted: 'Videos posted', pipeline: 'In pipeline', gmv: 'GMV generated', ad: 'Ad spend',
+};
+const SD_LEVELS = [
+  { id: 'all', label: 'All' }, { id: 'brand', label: 'Brand' }, { id: 'program', label: 'Program' },
+  { id: 'week', label: 'Week' }, { id: 'creator', label: 'Creator' }, { id: 'insights', label: 'Insights' }, { id: 'kpi', label: 'KPI' },
+];
+function sdShortDate(iso: string) {
+  const d = new Date(iso); const s = (Date.now() - d.getTime()) / 1000;
+  if (s < 3600) return `${Math.max(1, Math.floor(s / 60))}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+function ShareDiscussions({ brand, comments, creators, seenAt, onOpen }: {
+  brand: BrandLite; comments: PaidCollabComment[]; creators: HandlerCreator[]; seenAt: number;
+  onOpen: (tt: string, tk: string, highlight?: string) => void;
+}) {
+  const [lvl, setLvl] = useState('all');
+  const threads = useMemo(() => {
+    const map = new Map<string, { tt: string; tk: string; items: PaidCollabComment[] }>();
+    comments.forEach(c => {
+      const k = `${c.target_type}|${c.target_key}`;
+      let t = map.get(k);
+      if (!t) { t = { tt: c.target_type, tk: c.target_key, items: [] }; map.set(k, t); }
+      t.items.push(c);
+    });
+    return [...map.values()].map(t => {
+      const sorted = t.items.slice().sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+      const last = sorted[sorted.length - 1];
+      const newReply = last.author_type !== 'client' && new Date(last.created_at).getTime() > seenAt;
+      return { ...t, count: t.items.length, last, newReply };
+    }).sort((a, b) => (Number(b.newReply) - Number(a.newReply)) || String(b.last.created_at).localeCompare(String(a.last.created_at)));
+  }, [comments, seenAt]);
+  const counts = useMemo(() => { const c: any = { all: threads.length }; threads.forEach(t => { c[t.tt] = (c[t.tt] || 0) + 1; }); return c; }, [threads]);
+  const shown = lvl === 'all' ? threads : threads.filter(t => t.tt === lvl);
+  const tlabel = (t: { tt: string; tk: string }) => t.tt === 'brand' ? 'Whole brand' : t.tt === 'insights' ? 'Insights'
+    : t.tt === 'kpi' ? `KPI · ${SD_KPI_LABEL[t.tk] ?? t.tk}`
+    : t.tt === 'program' ? `Program · ${monthLabel(t.tk)}`
+    : t.tt === 'week' ? `Week · ${prRangeShort(t.tk, prAddDays(t.tk, 6))}`
+    : `Creator · ${creators.find(c => c.id === t.tk)?.name ?? t.tk}`;
+
+  if (threads.length === 0) {
+    return <div className="pc-card"><div className="pc-empty"><div className="pc-empty-icon">💬</div><h3>No discussions yet</h3><p>Leave a comment from the Programs or Performance tab — your conversation with the team shows up here.</p></div></div>;
+  }
+  return (
+    <div>
+      <div className="pc-rd-weeks" style={{ marginBottom: 14 }}>
+        {SD_LEVELS.filter(l => l.id === 'all' || counts[l.id]).map(l => (
+          <button key={l.id} className={`pc-rd-week ${lvl === l.id ? 'active' : ''}`} onClick={() => setLvl(l.id)}>
+            {l.label}{counts[l.id] ? <span className="pc-rd-week-n" style={{ marginLeft: 5 }}>{counts[l.id]}</span> : null}
+          </button>
+        ))}
+      </div>
+      <div className="pc-card" style={{ padding: 6 }}>
+        {shown.map(t => (
+          <button key={`${t.tt}|${t.tk}`} className="pc-disc-row" onClick={() => onOpen(t.tt, t.tk, t.last.id)}>
+            <span className="pc-ava" style={{ background: getGradient(brand.name), width: 34, height: 34, fontSize: 14, borderRadius: 10, flex: '0 0 auto' }}>{initial(brand.name)}</span>
+            <div className="pc-disc-main">
+              <div className="pc-disc-top"><span className="pc-disc-tag">{tlabel(t)}</span></div>
+              <div className="pc-disc-prev"><b>{t.last.author_name}:</b> {t.last.body}</div>
+            </div>
+            <div className="pc-disc-right">
+              {t.newReply && <span className="pc-rd-pill prog">New reply</span>}
+              <span className="pcc-count">{t.count}</span>
+              <span className="pc-disc-time">{sdShortDate(t.last.created_at)}</span>
+            </div>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -153,7 +296,10 @@ const prRangeShort = (s: string, e: string) => { const a = new Date(s + 'T00:00:
 const prRangeLong = (s: string, e: string) => { const f = (k: string) => new Date(k + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); return `${f(s)} – ${f(e)}`; };
 const prMonthShort = (k: string) => { const [y, m] = k.split('-'); return new Date(+y, +m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: '2-digit' }); };
 
-function PerformanceReport({ brand, creators }: { brand: BrandLite; creators: HandlerCreator[] }) {
+function PerformanceReport({ brand, creators, onDiscuss }: {
+  brand: BrandLite; creators: HandlerCreator[];
+  onDiscuss?: (tt: string, tk: string) => void;
+}) {
   const [mode, setMode] = useState<'monthly' | 'weekly'>('monthly');
   const [weekSel, setWeekSel] = useState<string | null>(null);
   const isWeekly = mode === 'weekly';
@@ -344,7 +490,10 @@ function PerformanceReport({ brand, creators }: { brand: BrandLite; creators: Ha
         </div>
 
         <div className="pc-rd-card">
-          <div className="pc-rd-card-h"><span className="pc-rd-card-t">Insights</span></div>
+          <div className="pc-rd-card-h">
+            <span className="pc-rd-card-t">Insights</span>
+            {onDiscuss && <button className="pcc-reply" onClick={() => onDiscuss('insights', '')}><i className="bi bi-chat-left-text" />Discuss</button>}
+          </div>
           {insights.length ? (
             <div className="pc-rd-ins">
               {insights.map((ins, i) => (

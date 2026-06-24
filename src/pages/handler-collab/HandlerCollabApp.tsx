@@ -9,6 +9,7 @@ import { supabase } from '../../lib/supabase';
 import * as store from './store';
 import { useAuth } from '../../auth/AuthContext';
 import { PayChip, PayoutDetail } from '../paid-collab/handlerCollabReadonly';
+import PaidCollabComments from '../../components/paidcollab/PaidCollabComments';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -219,7 +220,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
 
   const [month, setMonth] = useState(initialMonth || thisMonthKey());
   const [tab, setTab] = useState('brands'); // brands | creators | reporting
@@ -229,6 +230,9 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
   // Per-brand weekly anchor (brand_id -> week-1 start date) for the "create next
   // weekly report" flow.
   const [reportAnchors, setReportAnchors] = useState({});
+  // Paid-collab comments + the discussion drawer ({brandId, tt, tk, highlight}|null).
+  const [comments, setComments] = useState([]);
+  const [commentDrawer, setCommentDrawer] = useState(null);
 
   // Custom brand ordering (drag-and-drop), persisted per handler in the database
   // (handler_collab_brand_order) so it follows the account across devices. It's a saved
@@ -295,6 +299,8 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
       if (rw) setReportWeeks(rw);
       const an = await store.loadBrandReportAnchors(ids).catch(() => null);
       if (an) setReportAnchors(an);
+      const cm = await store.loadComments(ids).catch(() => null);
+      if (cm) setComments(cm);
     } catch (e) {
       setErr(e.message || 'Failed to load');
     }
@@ -550,6 +556,36 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
     await reload();
     setMonth(start.slice(0, 7));
   }, [reportWeeks, reportAnchors, user, reload]);
+
+  // Post a comment as the signed-in handler (optimistic).
+  const handlerName = profile?.full_name || profile?.email || user?.email || 'Handler';
+  const addPaidComment = useCallback(async (brandId, tt, tk, body, authorName, parentId) => {
+    if (!user?.id) throw new Error('Not signed in');
+    const row = await store.addComment({
+      brandId, targetType: tt, targetKey: tk || '', authorId: user.id,
+      authorType: profile?.role === 'bob' ? 'bob' : profile?.role === 'apc' ? 'apc' : 'handler',
+      authorName: authorName || handlerName, body, parentId: parentId || null,
+    });
+    setComments(prev => [...prev, row]);
+  }, [user, profile, handlerName]);
+  const openComments = useCallback((brandId, tt = 'brand', tk = '', highlight = null) =>
+    setCommentDrawer({ brandId, tt, tk, highlight }), []);
+  // Threads whose latest message is from the client → the handler still owes a reply.
+  const needsReplyCount = useMemo(() => {
+    const last = {};
+    comments.forEach(c => { const k = `${c.brand_id}|${c.target_type}|${c.target_key}`; if (!last[k] || c.created_at > last[k].created_at) last[k] = c; });
+    return Object.values(last).filter((c) => c.author_type === 'client').length;
+  }, [comments]);
+
+  // Notification click-through: /paid-collab?brand=&tt=&tk=&pcc= opens the thread.
+  const deepLinked = useRef(false);
+  useEffect(() => {
+    if (loading || deepLinked.current) return;
+    deepLinked.current = true;
+    const sp = new URLSearchParams(window.location.search);
+    const b = sp.get('brand');
+    if (b) setCommentDrawer({ brandId: b, tt: sp.get('tt') || 'brand', tk: sp.get('tk') || '', highlight: sp.get('pcc') || null });
+  }, [loading]);
   // notes (per brand, per month) — optimistic + persist
   const saveNotes = useCallback((brandId, notesText) => {
     setBrandMonths(prev => {
@@ -599,8 +635,11 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
         {err && <div className="pc-banner" style={{ background: 'var(--pc-error-bg)', color: 'var(--pc-error-fg)' }}><span>⚠️</span><span>{err}</span></div>}
 
         <div className="pc-tabs">
-          {[{ id: 'brands', label: 'Brands' }, { id: 'creators', label: 'Creators' }, { id: 'performance', label: 'Performance' }, { id: 'reporting', label: 'Internal Reporting' }].map(t => (
-            <button key={t.id} className={`pc-tab ${tab === t.id ? 'active' : ''}`} onClick={() => { setTab(t.id); setDrillId(null); }}>{t.label}</button>
+          {[{ id: 'brands', label: 'Brands' }, { id: 'creators', label: 'Creators' }, { id: 'performance', label: 'Performance' }, { id: 'reporting', label: 'Internal Reporting' }, { id: 'discussions', label: 'Discussions' }].map(t => (
+            <button key={t.id} className={`pc-tab ${tab === t.id ? 'active' : ''}`} onClick={() => { setTab(t.id); setDrillId(null); }}>
+              {t.label}
+              {t.id === 'discussions' && needsReplyCount > 0 && <span className="pc-tab-badge">{needsReplyCount}</span>}
+            </button>
           ))}
         </div>
 
@@ -612,7 +651,9 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
           ) : tab === 'performance' ? (
             <PerformanceView brands={brands} creators={creators} brandById={brandById} month={month} reportWeeks={reportWeeks} reportAnchors={reportAnchors} onCreateWeek={createWeeklyReport} onSaveMonthly={saveCreatorMonthly} />
           ) : tab === 'reporting' ? (
-            <ReportingView brands={brands} brandById={brandById} creators={creators} month={month} />
+            <ReportingView brands={brands} brandById={brandById} creators={creators} month={month} comments={comments} onOpenComments={openComments} />
+          ) : tab === 'discussions' ? (
+            <DiscussionsView comments={comments} brandById={brandById} creators={creators} onOpen={openComments} />
           ) : (
             drillId && drillBrand
               ? <Drilldown
@@ -627,6 +668,8 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
                   patchCreatorLocal={patchCreatorLocal}
                   onSetStatus={setCreatorStatus}
                   onToggleVisible={setCreatorPendingVisible}
+                  commentCount={comments.filter(c => c.brand_id === drillId).length}
+                  onComments={() => openComments(drillId, 'brand', '')}
                 />
               : <BrandLevel
                   rows={brandRows} totals={totals} month={month}
@@ -665,6 +708,207 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
       )}
       {confirmDel && <ConfirmModal message={confirmDel.message} onYes={confirmDel.onYes} onCancel={() => setConfirmDel(null)} />}
       {undo && <UndoToast label={undo.label} onUndo={doUndo} />}
+      {commentDrawer && brandById[commentDrawer.brandId] && (
+        <CommentsDrawer
+          brand={{ id: commentDrawer.brandId, name: brandById[commentDrawer.brandId].name }}
+          comments={comments} creators={creators} brandMonths={brandMonths}
+          currentName={handlerName} initial={commentDrawer}
+          onAdd={addPaidComment} onClose={() => setCommentDrawer(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════
+   Discussions tab — every comment thread across all brands, grouped by level,
+   with a "reply needed" flag (latest message is from the client). Click a thread
+   to open its discussion drawer (latest comment highlighted).
+════════════════════════════════════════════════════════════ */
+const DV_LEVELS = [
+  { id: 'all', label: 'All' }, { id: 'brand', label: 'Brand' }, { id: 'program', label: 'Program' },
+  { id: 'week', label: 'Week' }, { id: 'creator', label: 'Creator' }, { id: 'insights', label: 'Insights' }, { id: 'kpi', label: 'KPI' },
+];
+function dvShortDate(iso) {
+  const d = new Date(iso); const s = (Date.now() - d.getTime()) / 1000;
+  if (s < 3600) return `${Math.max(1, Math.floor(s / 60))}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+function DiscussionsView({ comments, brandById, creators, onOpen }) {
+  const [lvl, setLvl] = useState('all');
+  const threads = useMemo(() => {
+    const map = new Map();
+    comments.forEach(c => {
+      const k = `${c.brand_id}|${c.target_type}|${c.target_key}`;
+      let t = map.get(k);
+      if (!t) { t = { key: k, brand_id: c.brand_id, tt: c.target_type, tk: c.target_key, items: [] }; map.set(k, t); }
+      t.items.push(c);
+    });
+    return [...map.values()].map(t => {
+      const sorted = t.items.slice().sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+      const last = sorted[sorted.length - 1];
+      return { ...t, count: t.items.length, last, needsReply: last.author_type === 'client' };
+    }).sort((a, b) => (Number(b.needsReply) - Number(a.needsReply)) || String(b.last.created_at).localeCompare(String(a.last.created_at)));
+  }, [comments]);
+  const counts = useMemo(() => { const c = { all: threads.length }; threads.forEach(t => { c[t.tt] = (c[t.tt] || 0) + 1; }); return c; }, [threads]);
+  const shown = lvl === 'all' ? threads : threads.filter(t => t.tt === lvl);
+
+  const targetLabel = (t) => t.tt === 'brand' ? 'Whole brand' : t.tt === 'insights' ? 'Insights'
+    : t.tt === 'kpi' ? `KPI · ${CD_KPIS.find(k => k.id === t.tk)?.label ?? t.tk}`
+    : t.tt === 'program' ? `Program · ${monthLabel(t.tk)}`
+    : t.tt === 'week' ? `Week · ${rangeShort(t.tk, addDaysISO(t.tk, 6))}`
+    : `Creator · ${creators.find(c => c.id === t.tk)?.name ?? t.tk}`;
+
+  if (threads.length === 0) {
+    return <div className="pc-card"><div className="pc-empty pc-empty-lg"><div className="pc-empty-icon">💬</div><h3>No discussions yet</h3><p>Comments from clients and your replies show up here, grouped by level. You'll get a notification when a client comments.</p></div></div>;
+  }
+  return (
+    <div>
+      <div className="pc-rd-weeks" style={{ marginBottom: 14 }}>
+        {DV_LEVELS.filter(l => l.id === 'all' || counts[l.id]).map(l => (
+          <button key={l.id} className={`pc-rd-week ${lvl === l.id ? 'active' : ''}`} onClick={() => setLvl(l.id)}>
+            {l.label}{counts[l.id] ? <span className="pc-rd-week-n" style={{ marginLeft: 5 }}>{counts[l.id]}</span> : null}
+          </button>
+        ))}
+      </div>
+      <div className="pc-card" style={{ padding: 6 }}>
+        {shown.map(t => {
+          const name = brandById[t.brand_id]?.name || 'Brand';
+          return (
+            <button key={t.key} className="pc-disc-row" onClick={() => onOpen(t.brand_id, t.tt, t.tk, t.last.id)}>
+              <span className="pc-ava" style={{ background: getGradient(name), width: 34, height: 34, fontSize: 14, borderRadius: 10, flex: '0 0 auto' }}>{initial(name)}</span>
+              <div className="pc-disc-main">
+                <div className="pc-disc-top">
+                  <span className="pc-disc-brand">{name}</span>
+                  <span className="pc-disc-tag">{targetLabel(t)}</span>
+                </div>
+                <div className="pc-disc-prev"><b>{t.last.author_name}:</b> {t.last.body}</div>
+              </div>
+              <div className="pc-disc-right">
+                {t.needsReply && <span className="pc-rd-pill pend">Reply needed</span>}
+                <span className="pcc-count">{t.count}</span>
+                <span className="pc-disc-time">{dvShortDate(t.last.created_at)}</span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════
+   Discussion drawer — handler-side comment threads for one brand at any level
+   (brand / insights / kpi / program / week / creator). Opened from a brand's
+   "Discussion" button or a notification click-through (pre-scoped + highlight).
+════════════════════════════════════════════════════════════ */
+const CD_KPIS = [
+  { id: 'active_creators', label: 'Active creators' }, { id: 'videos_posted', label: 'Videos posted' },
+  { id: 'pipeline', label: 'In pipeline' }, { id: 'pending_payments', label: 'Pending payments' }, { id: 'gmv', label: 'GMV generated' },
+];
+const CD_TYPES = [
+  { id: 'brand', label: 'Brand' }, { id: 'insights', label: 'Insights' }, { id: 'kpi', label: 'KPI' },
+  { id: 'program', label: 'Program' }, { id: 'week', label: 'Week' }, { id: 'creator', label: 'Creator' },
+];
+function CommentsDrawer({ brand, comments, creators, brandMonths, currentName, initial, onAdd, onClose }) {
+  const [tt, setTt] = useState(initial.tt || 'brand');
+  const [tk, setTk] = useState(initial.tk || '');
+  const bComments = useMemo(() => comments.filter(c => c.brand_id === brand.id), [comments, brand.id]);
+  const brandCreators = useMemo(() => creators.filter(c => c.brand_id === brand.id), [creators, brand.id]);
+  const months = useMemo(() => {
+    const set = new Set();
+    brandMonths.filter(m => m.brand_id === brand.id).forEach(m => set.add(m.month));
+    brandCreators.forEach(c => { const k = monthKey(c.onboarded_on); if (k) set.add(k); });
+    return [...set].sort().reverse();
+  }, [brandMonths, brandCreators, brand.id]);
+  const weeks = useMemo(() => {
+    const set = new Set();
+    brandCreators.forEach(c => Object.keys((c.monthly || {}).weeks || {}).forEach(k => set.add(k)));
+    return [...set].sort();
+  }, [brandCreators]);
+
+  const needsKey = tt === 'kpi' || tt === 'program' || tt === 'week' || tt === 'creator';
+  const keyOptions = tt === 'kpi' ? CD_KPIS.map(k => ({ value: k.id, label: k.label }))
+    : tt === 'program' ? months.map(m => ({ value: m, label: monthLabel(m) }))
+    : tt === 'week' ? weeks.map(w => ({ value: w, label: rangeShort(w, addDaysISO(w, 6)) }))
+    : tt === 'creator' ? brandCreators.map(c => ({ value: c.id, label: c.name })) : [];
+
+  function pickType(nt) {
+    setTt(nt);
+    if (nt === 'brand' || nt === 'insights') { setTk(''); return; }
+    const opts = nt === 'kpi' ? CD_KPIS.map(k => k.id)
+      : nt === 'program' ? months : nt === 'week' ? weeks : brandCreators.map(c => c.id);
+    setTk(opts[0] || '');
+  }
+
+  const title = tt === 'brand' ? `Whole brand · ${brand.name}`
+    : tt === 'insights' ? 'Insights'
+    : tt === 'kpi' ? `KPI · ${CD_KPIS.find(k => k.id === tk)?.label ?? ''}`
+    : tt === 'program' ? `Program · ${tk ? monthLabel(tk) : ''}`
+    : tt === 'week' ? `Week · ${tk ? rangeShort(tk, addDaysISO(tk, 6)) : ''}`
+    : `Creator · ${brandCreators.find(c => c.id === tk)?.name ?? ''}`;
+
+  // Existing threads (grouped) for quick navigation.
+  const threads = useMemo(() => {
+    const m = new Map();
+    bComments.forEach(c => { const k = `${c.target_type}|${c.target_key}`; m.set(k, (m.get(k) || 0) + 1); });
+    return [...m.entries()].map(([k, n]) => { const [t, key] = k.split('|'); return { t, key, n }; });
+  }, [bComments]);
+  const threadLabel = (t, key) => t === 'brand' ? 'Brand' : t === 'insights' ? 'Insights'
+    : t === 'kpi' ? `KPI · ${CD_KPIS.find(x => x.id === key)?.label ?? key}`
+    : t === 'program' ? `Program · ${monthLabel(key)}`
+    : t === 'week' ? `Week · ${rangeShort(key, addDaysISO(key, 6))}`
+    : `Creator · ${brandCreators.find(c => c.id === key)?.name ?? key}`;
+
+  return (
+    <div className="pc-drawer-overlay" onClick={onClose}>
+      <aside className="pc-drawer" onClick={e => e.stopPropagation()} style={{ maxWidth: 580 }}>
+        <div className="pc-drawer-head">
+          <div className="pc-drawer-head-l">
+            <span className="pc-ava" style={{ background: getGradient(brand.name), width: 40, height: 40, fontSize: 18, borderRadius: 12 }}>{initial.iconInitial || brand.name[0]?.toUpperCase()}</span>
+            <div>
+              <div className="pc-drawer-title">{brand.name}</div>
+              <div className="pc-drawer-sub">Discussion</div>
+            </div>
+          </div>
+          <button className="pc-iconbtn" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="pc-drawer-body">
+          <div className="pc-rd-weeks" style={{ marginBottom: 10 }}>
+            {CD_TYPES.map(t => (
+              <button key={t.id} className={`pc-rd-week ${tt === t.id ? 'active' : ''}`} onClick={() => pickType(t.id)}>{t.label}</button>
+            ))}
+          </div>
+          {needsKey && (
+            <select className="pcc-input" style={{ marginBottom: 10 }} value={tk} onChange={e => setTk(e.target.value)}>
+              <option value="">Select…</option>
+              {keyOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          )}
+          {(!needsKey || tk) ? (
+            <PaidCollabComments
+              comments={bComments} targetType={tt} targetKey={tk} title={title}
+              mode="authed" currentAuthorName={currentName}
+              onAdd={(body, name, parentId) => onAdd(brand.id, tt, tk, body, name, parentId)}
+              highlightCommentId={initial.highlight} defaultOpen
+            />
+          ) : <div className="pcc-empty" style={{ padding: 12 }}>Pick a {tt} to view its discussion.</div>}
+
+          {threads.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.4px', textTransform: 'uppercase', color: 'var(--pc-text-2)', marginBottom: 8 }}>All threads</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {threads.map(th => (
+                  <button key={`${th.t}|${th.key}`} className="pc-cd-thread" onClick={() => { setTt(th.t); setTk(th.key); }}>
+                    <span>{threadLabel(th.t, th.key)}</span><span className="pcc-count">{th.n}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </aside>
     </div>
   );
 }
@@ -894,7 +1138,7 @@ function BrandRow({ r, onOpen, onEditBudget, onNotes }) {
 /* ════════════════════════════════════════════════════════════
    Drilldown
 ════════════════════════════════════════════════════════════ */
-function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCreator, onDeleteCreator, onEditBudget, onDeleteBrand, onNotes, notesText, patchCreatorLocal, onSetStatus, onToggleVisible }) {
+function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCreator, onDeleteCreator, onEditBudget, onDeleteBrand, onNotes, notesText, patchCreatorLocal, onSetStatus, onToggleVisible, commentCount, onComments }) {
   const [openId, setOpenId] = useState(null);
   const bm = row?.bm || {};
   const products = focusProductList(bm);
@@ -929,6 +1173,12 @@ function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCr
           </div>
         </div>
         <div className="pc-dd-actions">
+          {onComments && (
+            <button className="pc-disc-btn" style={{ height: 34 }} onClick={onComments} title="Open discussion for this brand">
+              <i className="bi bi-chat-left-text" />Discussion
+              {commentCount > 0 && <span className="pc-disc-badge">{commentCount}</span>}
+            </button>
+          )}
           <button className={`pc-btn pc-btn-sm ${notesHas ? 'pc-btn-accentlight' : 'pc-btn-ghost'}`} onClick={onNotes}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 2 }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="8" y1="13" x2="16" y2="13" /><line x1="8" y1="17" x2="13" y2="17" /></svg>
             Notes{notesHas ? ' •' : ''}
@@ -1227,12 +1477,13 @@ const rdDelivered = (c) => Array.isArray(c.video_codes) ? c.video_codes.filter(v
 const rdAgreed = (c) => Number(c.videos_count) || 0;
 const rdUnauthCodes = (c) => (Array.isArray(c.video_codes) ? c.video_codes : []).filter(v => (v?.adCode || '').trim() && !v?.auth).length;
 
-function ReportingView({ brands, brandById, creators, month }) {
+function ReportingView({ brands, brandById, creators, month, comments = [], onOpenComments }) {
   const [mode, setMode] = useState('monthly'); // monthly | weekly
   const [approvalsOpen, setApprovalsOpen] = useState(false);
   const [weekSel, setWeekSel] = useState(null); // null = all weeks of the month
   const [brandSel, setBrandSel] = useState(''); // '' = all brands, else brand_id
   const isWeekly = mode === 'weekly';
+  const brandCommentCount = brandSel ? comments.filter(c => c.brand_id === brandSel).length : 0;
 
   // Everything below is computed over the chosen brand scope (all brands by default).
   const scoped = useMemo(() => brandSel ? creators.filter(c => c.brand_id === brandSel) : creators, [creators, brandSel]);
@@ -1374,6 +1625,12 @@ function ReportingView({ brands, brandById, creators, month }) {
               ))}
             </select>
           </label>
+          {brandSel && onOpenComments && (
+            <button className="pc-disc-btn" onClick={() => onOpenComments(brandSel, 'brand', '')} title="Open discussion for this brand">
+              <i className="bi bi-chat-left-text" />Discussion
+              {brandCommentCount > 0 && <span className="pc-disc-badge">{brandCommentCount}</span>}
+            </button>
+          )}
           <button className={`pc-rd-appr ${approvals.total ? 'has' : ''}`} onClick={() => setApprovalsOpen(true)}
             title="Items that need action">
             <i className="bi bi-clipboard-check" />

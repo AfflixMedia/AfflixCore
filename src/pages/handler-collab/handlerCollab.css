@@ -287,6 +287,27 @@
 .pc-rd-appr.has{ border-color:#F0C28A; color:#A85B12; background:#FFF6EC; }
 .pc-rd-appr-badge{ min-width:20px; height:20px; padding:0 6px; border-radius:999px; background:var(--pc-text-3); color:#fff; font-size:11.5px; font-weight:800; display:inline-flex; align-items:center; justify-content:center; }
 .pc-rd-appr.has .pc-rd-appr-badge{ background:#E8862E; }
+/* discussion-drawer thread list + entry button */
+.pc-cd-thread{ display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; text-align:left; padding:9px 12px; border:1px solid var(--pc-divider); border-radius:10px; background:var(--pc-card-2); color:var(--pc-text); font-size:13px; font-weight:600; cursor:pointer; transition:background .15s; }
+.pc-cd-thread:hover{ background:var(--pc-divider); }
+.pc-disc-btn{ display:inline-flex; align-items:center; gap:7px; height:40px; padding:0 14px; border-radius:var(--pc-pill); border:1px solid var(--pc-divider); background:var(--pc-card); color:var(--pc-text); font-size:13.5px; font-weight:700; cursor:pointer; box-shadow:var(--pc-shadow); transition:background .15s; position:relative; }
+.pc-disc-btn:hover{ background:var(--pc-card-2); }
+.pc-disc-badge{ min-width:19px; height:19px; padding:0 6px; border-radius:999px; background:#0ea5e9; color:#fff; font-size:11px; font-weight:800; display:inline-flex; align-items:center; justify-content:center; }
+/* tab badge (Discussions reply-needed count) */
+.pc-tab-badge{ margin-left:7px; min-width:18px; height:18px; padding:0 5px; border-radius:999px; background:#E8862E; color:#fff; font-size:10.5px; font-weight:800; display:inline-flex; align-items:center; justify-content:center; vertical-align:middle; }
+.pc-tab.active .pc-tab-badge{ background:#fff; color:var(--pc-accent); }
+/* Discussions tab — thread rows */
+.pc-disc-row{ display:flex; align-items:center; gap:12px; width:100%; text-align:left; padding:11px 14px; border:0; border-bottom:1px solid var(--pc-divider); background:transparent; cursor:pointer; transition:background .15s; }
+.pc-disc-row:last-child{ border-bottom:0; }
+.pc-disc-row:hover{ background:var(--pc-card-2); }
+.pc-disc-main{ flex:1; min-width:0; }
+.pc-disc-top{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.pc-disc-brand{ font-weight:800; font-size:13.5px; }
+.pc-disc-tag{ font-size:11px; font-weight:700; color:var(--pc-accent); background:var(--pc-accent-light); border-radius:999px; padding:2px 9px; }
+.pc-disc-prev{ font-size:12.5px; color:var(--pc-text-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
+.pc-disc-prev b{ color:var(--pc-text); font-weight:700; }
+.pc-disc-right{ display:flex; align-items:center; gap:8px; flex:0 0 auto; }
+.pc-disc-time{ font-size:11.5px; color:var(--pc-text-3); min-width:30px; text-align:right; }
 .pc-rd-brand{ display:inline-flex; align-items:center; gap:7px; height:40px; padding:0 10px 0 13px; border-radius:var(--pc-pill); border:1px solid var(--pc-divider); background:var(--pc-card); color:var(--pc-text); box-shadow:var(--pc-shadow); cursor:pointer; }
 .pc-rd-brand > i{ color:var(--pc-text-2); font-size:14px; }
 .pc-rd-brand select{ border:0; background:transparent; outline:none; font-size:13.5px; font-weight:700; color:var(--pc-text); cursor:pointer; max-width:170px; padding-right:4px; }
