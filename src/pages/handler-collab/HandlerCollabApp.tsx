@@ -1,6 +1,10 @@
 // @ts-nocheck
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import {
+  AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
+  ResponsiveContainer, PieChart, Pie, Cell, LabelList,
+} from 'recharts';
 import { supabase } from '../../lib/supabase';
 import * as store from './store';
 import { useAuth } from '../../auth/AuthContext';
@@ -31,6 +35,7 @@ const AVATAR_GRADIENTS = [
 
 /* ── helpers ── */
 function fmt$(n) { return `$${Math.round(n || 0).toLocaleString()}`; }
+function fmtNum(n) { return Math.round(n || 0).toLocaleString(); }
 function getGradient(name) {
   if (!name) return AVATAR_GRADIENTS[0];
   return AVATAR_GRADIENTS[name.charCodeAt(0) % AVATAR_GRADIENTS.length];
@@ -607,7 +612,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
           ) : tab === 'performance' ? (
             <PerformanceView brands={brands} creators={creators} brandById={brandById} month={month} reportWeeks={reportWeeks} reportAnchors={reportAnchors} onCreateWeek={createWeeklyReport} onSaveMonthly={saveCreatorMonthly} />
           ) : tab === 'reporting' ? (
-            <ReportingView />
+            <ReportingView brands={brands} brandById={brandById} creators={creators} month={month} />
           ) : (
             drillId && drillBrand
               ? <Drilldown
@@ -1209,14 +1214,353 @@ function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, onToggleVisible, select
   );
 }
 
-function ReportingView() {
+/* ════════════════════════════════════════════════════════════
+   Internal Reporting — data-dense dashboard (KPIs + charts + insights)
+   across all of the handler's brands, with a Monthly / Weekly lens.
+════════════════════════════════════════════════════════════ */
+const RD_STATUS = {
+  videos_in_progress: { label: 'In progress', cls: 'prog', color: '#1259C3' },
+  pending:            { label: 'Pending pay',  cls: 'pend', color: '#E8862E' },
+  paid:               { label: 'Paid',         cls: 'paid', color: '#198754' },
+};
+const rdDelivered = (c) => Array.isArray(c.video_codes) ? c.video_codes.filter(v => v?.video && String(v.video).trim()).length : 0;
+const rdAgreed = (c) => Number(c.videos_count) || 0;
+const rdUnauthCodes = (c) => (Array.isArray(c.video_codes) ? c.video_codes : []).filter(v => (v?.adCode || '').trim() && !v?.auth).length;
+
+function ReportingView({ brands, brandById, creators, month }) {
+  const [mode, setMode] = useState('monthly'); // monthly | weekly
+  const [approvalsOpen, setApprovalsOpen] = useState(false);
+  const [weekSel, setWeekSel] = useState(null); // null = all weeks of the month
+  const [brandSel, setBrandSel] = useState(''); // '' = all brands, else brand_id
+  const isWeekly = mode === 'weekly';
+
+  // Everything below is computed over the chosen brand scope (all brands by default).
+  const scoped = useMemo(() => brandSel ? creators.filter(c => c.brand_id === brandSel) : creators, [creators, brandSel]);
+  const selBrandName = brandSel ? (brandById[brandSel]?.name || 'Brand') : null;
+
+  // Distinct week-starts that have data in the selected month (within the brand scope).
+  const monthWeekKeys = useMemo(() => {
+    const set = new Set();
+    scoped.forEach(c => { const w = (c.monthly || {}).weeks || {}; Object.keys(w).forEach(k => { if (k.slice(0, 7) === month) set.add(k); }); });
+    return [...set].sort();
+  }, [scoped, month]);
+  // Selected week is only honoured if it exists in this month (auto-resets on month change).
+  const activeWeek = isWeekly && weekSel && monthWeekKeys.includes(weekSel) ? weekSel : null;
+
+  const periodGmv = (c) => {
+    const mm = c.monthly || {};
+    if (isWeekly) {
+      const w = mm.weeks || {};
+      if (activeWeek) return Number(w[activeWeek]?.gmv) || 0;
+      return Object.keys(w).filter(k => k.slice(0, 7) === month).reduce((t, k) => t + (Number(w[k]?.gmv) || 0), 0);
+    }
+    return Number(mm[month]?.gmv) || 0;
+  };
+  const periodAd = (c) => {
+    const mm = c.monthly || {};
+    if (isWeekly) {
+      const w = mm.weeks || {};
+      if (activeWeek) return Number(w[activeWeek]?.adSpent) || 0;
+      return Object.keys(w).filter(k => k.slice(0, 7) === month).reduce((t, k) => t + (Number(w[k]?.adSpent) || 0), 0);
+    }
+    return Number(mm[month]?.adSpent) || 0;
+  };
+
+  const kpis = useMemo(() => {
+    const active = scoped.filter(c => c.payment_status !== 'paid').length;
+    const posted = scoped.reduce((t, c) => t + rdDelivered(c), 0);
+    const pipeline = scoped.reduce((t, c) => t + Math.max(0, rdAgreed(c) - rdDelivered(c)), 0);
+    const pendingList = scoped.filter(c => c.payment_status === 'pending');
+    const pendingAmt = pendingList.reduce((t, c) => t + (Number(c.amount) || 0), 0);
+    const gmv = scoped.reduce((t, c) => t + periodGmv(c), 0);
+    const ad = scoped.reduce((t, c) => t + periodAd(c), 0);
+    return { active, posted, pipeline, pendingCount: pendingList.length, pendingAmt, gmv, ad, roas: ad > 0 ? gmv / ad : 0 };
+  }, [scoped, month, isWeekly, activeWeek]);
+
+  const trend = useMemo(() => {
+    if (isWeekly) {
+      const set = new Set();
+      scoped.forEach(c => { const w = (c.monthly || {}).weeks || {}; Object.keys(w).forEach(k => { if (k.slice(0, 7) === month) set.add(k); }); });
+      return [...set].sort().map(k => {
+        let gmv = 0, ad = 0;
+        scoped.forEach(c => { const cell = ((c.monthly || {}).weeks || {})[k]; if (cell) { gmv += Number(cell.gmv) || 0; ad += Number(cell.adSpent) || 0; } });
+        return { label: rangeShort(k, addDaysISO(k, 6)), gmv, ad };
+      });
+    }
+    const out = [];
+    for (let i = 5; i >= 0; i--) {
+      const mk = addMonth(month, -i);
+      let gmv = 0, ad = 0;
+      scoped.forEach(c => { const cell = (c.monthly || {})[mk]; if (cell) { gmv += Number(cell.gmv) || 0; ad += Number(cell.adSpent) || 0; } });
+      out.push({ label: monthShort(mk), gmv, ad });
+    }
+    return out;
+  }, [scoped, month, isWeekly]);
+
+  const topCreators = useMemo(() =>
+    scoped.map(c => ({ name: c.name || '—', gmv: periodGmv(c) }))
+      .filter(x => x.gmv > 0).sort((a, b) => b.gmv - a.gmv).slice(0, 6)
+      .map(x => ({ name: x.name.length > 16 ? x.name.slice(0, 16) + '…' : x.name, gmv: x.gmv })),
+  [scoped, month, isWeekly, activeWeek]);
+
+  const payMix = useMemo(() => {
+    const m = { videos_in_progress: 0, pending: 0, paid: 0 };
+    scoped.forEach(c => { m[c.payment_status] = (m[c.payment_status] || 0) + 1; });
+    return Object.keys(RD_STATUS).map(k => ({ name: RD_STATUS[k].label, value: m[k] || 0, color: RD_STATUS[k].color })).filter(s => s.value > 0);
+  }, [scoped]);
+
+  const creatorRows = useMemo(() =>
+    scoped.map(c => ({ c, del: rdDelivered(c), ag: rdAgreed(c), gmv: periodGmv(c) }))
+      .sort((a, b) => b.gmv - a.gmv || b.del - a.del).slice(0, 12),
+  [scoped, month, isWeekly, activeWeek]);
+
+  const approvals = useMemo(() => {
+    const pays = scoped.filter(c => c.payment_status === 'pending').map(c => ({ c, amount: Number(c.amount) || 0 }));
+    const auths = scoped.map(c => ({ c, n: rdUnauthCodes(c) })).filter(x => x.n > 0);
+    return { pays, auths, total: pays.length + auths.length };
+  }, [scoped]);
+
+  const insights = useMemo(() => {
+    const list = [];
+    const top = [...scoped].map(c => ({ c, gmv: periodGmv(c) })).sort((a, b) => b.gmv - a.gmv)[0];
+    if (top && top.gmv > 0) list.push({ tone: 'good', icon: 'bi-trophy-fill', text: <><b>{top.c.name}</b> leads with <b>{fmt$(top.gmv)}</b> GMV {isWeekly ? 'this month (weekly)' : `in ${monthLabel(month)}`}.</> });
+    if (kpis.ad > 0) list.push({ tone: kpis.roas >= 1 ? 'good' : 'warn', icon: 'bi-graph-up-arrow', text: <>Blended ROAS <b>{kpis.roas.toFixed(2)}x</b> on {fmt$(kpis.ad)} ad spend.</> });
+    if (kpis.pendingCount > 0) list.push({ tone: 'warn', icon: 'bi-cash-stack', text: <><b>{fmt$(kpis.pendingAmt)}</b> pending across <b>{kpis.pendingCount}</b> creator{kpis.pendingCount === 1 ? '' : 's'} — awaiting payout.</> });
+    if (kpis.pipeline > 0) list.push({ tone: 'info', icon: 'bi-hourglass-split', text: <><b>{kpis.pipeline}</b> video{kpis.pipeline === 1 ? '' : 's'} still in pipeline across <b>{kpis.active}</b> active creator{kpis.active === 1 ? '' : 's'}.</> });
+    if (!isWeekly) {
+      const cur = trend[trend.length - 1]?.gmv || 0;
+      const prev = trend[trend.length - 2]?.gmv || 0;
+      if (prev > 0) { const pct = Math.round(((cur - prev) / prev) * 100); list.push({ tone: pct >= 0 ? 'good' : 'warn', icon: pct >= 0 ? 'bi-arrow-up-right' : 'bi-arrow-down-right', text: <>GMV is <b>{pct >= 0 ? 'up' : 'down'} {Math.abs(pct)}%</b> vs the previous month.</> }); }
+    }
+    if (approvals.auths.length > 0) { const n = approvals.auths.reduce((t, x) => t + x.n, 0); list.push({ tone: 'warn', icon: 'bi-shield-exclamation', text: <><b>{n}</b> ad code{n === 1 ? '' : 's'} awaiting authorisation.</> }); }
+    return list.slice(0, 5);
+  }, [scoped, kpis, trend, approvals, month, isWeekly, activeWeek]);
+
+  const moneyTip = (v) => fmt$(Number(v) || 0);
+
+  if (!creators.length) {
+    return (
+      <div className="pc-card"><div className="pc-empty pc-empty-lg">
+        <div className="pc-empty-icon">📊</div>
+        <h3>Nothing to report yet</h3>
+        <p>Onboard creators and log their GMV in the Performance tab — your reporting dashboard builds itself from there.</p>
+      </div></div>
+    );
+  }
+
   return (
-    <div className="pc-card"><div className="pc-empty pc-empty-lg">
-      <div className="pc-empty-icon">📊</div>
-      <h3>Reporting</h3>
-      <p>This section is under process right now.</p>
-      <span className="pc-soon-pill">Coming soon</span>
-    </div></div>
+    <div className="pc-rd">
+      {/* header */}
+      <div className="pc-rd-top">
+        <div>
+          <h2 className="pc-rd-title">Internal Reporting</h2>
+          <div className="pc-rd-sub">
+            {isWeekly
+              ? <>Weekly view · {activeWeek ? <b>{rangeShort(activeWeek, addDaysISO(activeWeek, 6))}</b> : 'all weeks'} · {monthLabel(month)} · {selBrandName || `${brands.length} brand${brands.length === 1 ? '' : 's'}`}</>
+              : <>Monthly view · {monthLabel(month)} · {selBrandName || `${brands.length} brand${brands.length === 1 ? '' : 's'}`}</>}
+          </div>
+        </div>
+        <div className="pc-rd-actions">
+          <label className="pc-rd-brand">
+            <i className="bi bi-shop" />
+            <select value={brandSel} onChange={e => { setBrandSel(e.target.value); setWeekSel(null); }}>
+              <option value="">All brands</option>
+              {[...brands].sort((a, b) => a.name.localeCompare(b.name)).map(b => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+          </label>
+          <button className={`pc-rd-appr ${approvals.total ? 'has' : ''}`} onClick={() => setApprovalsOpen(true)}
+            title="Items that need action">
+            <i className="bi bi-clipboard-check" />
+            Approvals needed
+            <span className="pc-rd-appr-badge">{approvals.total}</span>
+          </button>
+          <PerfModeToggle mode={mode} setMode={setMode} />
+        </div>
+      </div>
+
+      {/* week selector (weekly mode) — which week's stats am I viewing */}
+      {isWeekly && (
+        <div className="pc-rd-weeks">
+          <span className="pc-rd-weeks-l"><i className="bi bi-calendar3" /> Week</span>
+          <button className={`pc-rd-week ${!activeWeek ? 'active' : ''}`} onClick={() => setWeekSel(null)}>All weeks</button>
+          {monthWeekKeys.length === 0 ? (
+            <span className="pc-rd-weeks-none">No weekly data in {monthLabel(month)} yet</span>
+          ) : monthWeekKeys.map((k, i) => (
+            <button key={k} className={`pc-rd-week ${activeWeek === k ? 'active' : ''}`} onClick={() => setWeekSel(k)}
+              title={rangeLong(k, addDaysISO(k, 6))}>
+              <span className="pc-rd-week-n">W{i + 1}</span>{rangeShort(k, addDaysISO(k, 6))}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* KPI tiles */}
+      <div className="pc-rd-kpis">
+        <RKpi icon="bi-people-fill"      color="#6610F2" label="Active creators"   value={fmtNum(kpis.active)}     sub={`${scoped.length} total`} />
+        <RKpi icon="bi-collection-play-fill" color="#198754" label="Videos posted" value={fmtNum(kpis.posted)}     sub="delivered" />
+        <RKpi icon="bi-hourglass-split"  color="#0DCAF0" label="In pipeline"      value={fmtNum(kpis.pipeline)}  sub="to deliver" />
+        <RKpi icon="bi-cash-stack"       color="#E8862E" label="Pending payments" value={fmt$(kpis.pendingAmt)}  sub={`${kpis.pendingCount} creator${kpis.pendingCount === 1 ? '' : 's'}`} />
+        <RKpi icon="bi-graph-up-arrow"   color="#1259C3" label="GMV generated"    value={fmt$(kpis.gmv)}        sub={kpis.ad > 0 ? `${kpis.roas.toFixed(2)}x ROAS` : (isWeekly ? (activeWeek ? rangeShort(activeWeek, addDaysISO(activeWeek, 6)) : 'all weeks') : monthLabel(month))} />
+      </div>
+
+      {/* charts */}
+      <div className="pc-rd-charts">
+        <div className="pc-rd-card">
+          <div className="pc-rd-card-h">
+            <span className="pc-rd-card-t">GMV vs Ad spend</span>
+            <span className="pc-rd-card-s">{isWeekly ? `weeks of ${monthLabel(month)}` : 'last 6 months'}</span>
+          </div>
+          {trend.some(t => t.gmv || t.ad) ? (
+            <div style={{ height: 250 }}>
+              <ResponsiveContainer>
+                <AreaChart data={trend} margin={{ top: 8, right: 12, left: -10, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="rdGmv" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#1259C3" stopOpacity={0.45} /><stop offset="100%" stopColor="#1259C3" stopOpacity={0} /></linearGradient>
+                    <linearGradient id="rdAd" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#E8862E" stopOpacity={0.4} /><stop offset="100%" stopColor="#E8862E" stopOpacity={0} /></linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#eceef1" vertical={false} />
+                  <XAxis dataKey="label" stroke="#8b93a1" fontSize={11} tickLine={false} axisLine={false} />
+                  <YAxis stroke="#8b93a1" fontSize={11} tickLine={false} axisLine={false} width={48} tickFormatter={(v) => v >= 1000 ? `${Math.round(v / 1000)}k` : v} />
+                  <Tooltip formatter={moneyTip} contentStyle={{ borderRadius: 10, border: '1px solid #e9ecef', fontSize: 12 }} />
+                  <Area type="monotone" dataKey="gmv" name="GMV" stroke="#1259C3" strokeWidth={2.5} fill="url(#rdGmv)" dot={{ r: 2 }} />
+                  <Area type="monotone" dataKey="ad" name="Ad spend" stroke="#E8862E" strokeWidth={2.5} fill="url(#rdAd)" dot={{ r: 2 }} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          ) : <div className="pc-rd-chart-empty">No GMV logged for this period yet.</div>}
+          <div className="pc-rd-legend"><span className="pc-rd-leg"><i style={{ background: '#1259C3' }} />GMV</span><span className="pc-rd-leg"><i style={{ background: '#E8862E' }} />Ad spend</span></div>
+        </div>
+
+        <div className="pc-rd-card">
+          <div className="pc-rd-card-h"><span className="pc-rd-card-t">Creator payment mix</span></div>
+          {payMix.length ? (
+            <div style={{ height: 250 }}>
+              <ResponsiveContainer>
+                <PieChart>
+                  <Pie data={payMix} dataKey="value" nameKey="name" innerRadius={58} outerRadius={88} paddingAngle={2} stroke="none">
+                    {payMix.map((s, i) => <Cell key={i} fill={s.color} />)}
+                  </Pie>
+                  <Tooltip contentStyle={{ borderRadius: 10, border: '1px solid #e9ecef', fontSize: 12 }} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          ) : <div className="pc-rd-chart-empty">No creators yet.</div>}
+          <div className="pc-rd-legend">
+            {payMix.map((s, i) => <span className="pc-rd-leg" key={i}><i style={{ background: s.color }} />{s.name} · {s.value}</span>)}
+          </div>
+        </div>
+      </div>
+
+      {/* lower: creators list + insights */}
+      <div className="pc-rd-lower">
+        <div className="pc-rd-card">
+          <div className="pc-rd-card-h">
+            <span className="pc-rd-card-t">Creators &amp; videos</span>
+            <span className="pc-rd-card-s">top {creatorRows.length} by GMV</span>
+          </div>
+          <div className="pc-rd-clist">
+            <div className="pc-rd-crow pc-rd-crh">
+              <span>Creator</span><span>Videos</span><span className="pc-rd-r">GMV</span><span className="pc-rd-r">Status</span>
+            </div>
+            {creatorRows.map(({ c, del, ag, gmv }) => {
+              const pct = ag > 0 ? Math.min(100, Math.round((del / ag) * 100)) : (del > 0 ? 100 : 0);
+              const st = RD_STATUS[c.payment_status] || RD_STATUS.videos_in_progress;
+              const b = brandById[c.brand_id];
+              return (
+                <div className="pc-rd-crow" key={c.id}>
+                  <span className="pc-rd-cname">
+                    <span className="pc-rd-ava" style={{ background: getGradient(c.name) }}>{initial(c.name)}</span>
+                    <span style={{ minWidth: 0 }}>
+                      <span className="pc-rd-cn">{c.name}</span>
+                      <span className="pc-rd-cb">{b?.name || '—'}</span>
+                    </span>
+                  </span>
+                  <span className="pc-rd-vid">
+                    <span className="pc-rd-vid-top">{del}<i>/{ag || del || 0}</i></span>
+                    <span className="pc-rd-track"><span className="pc-rd-fill" style={{ width: pct + '%', background: st.color }} /></span>
+                  </span>
+                  <span className="pc-rd-r pc-rd-gmv">{gmv > 0 ? fmt$(gmv) : '—'}</span>
+                  <span className="pc-rd-r"><span className={`pc-rd-pill ${st.cls}`}>{st.label}</span></span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="pc-rd-card">
+          <div className="pc-rd-card-h"><span className="pc-rd-card-t">Insights</span></div>
+          {insights.length ? (
+            <div className="pc-rd-ins">
+              {insights.map((ins, i) => (
+                <div className={`pc-rd-in ${ins.tone}`} key={i}>
+                  <span className="pc-rd-in-ic"><i className={`bi ${ins.icon}`} /></span>
+                  <span className="pc-rd-in-txt">{ins.text}</span>
+                </div>
+              ))}
+            </div>
+          ) : <div className="pc-rd-chart-empty">No insights yet.</div>}
+        </div>
+      </div>
+
+      {approvalsOpen && (
+        <div className="pc-overlay" onClick={() => setApprovalsOpen(false)}>
+          <div className="pc-modal pc-appr-modal" onClick={e => e.stopPropagation()}>
+            <div className="pc-appr-head">
+              <h3>Approvals needed</h3>
+              <button className="pc-iconbtn" onClick={() => setApprovalsOpen(false)} aria-label="Close">✕</button>
+            </div>
+            {approvals.total === 0 ? (
+              <div className="pc-empty"><div className="pc-empty-icon">✅</div><h3>All clear</h3><p>Nothing needs your action right now.</p></div>
+            ) : (
+              <div className="pc-appr-list">
+                {approvals.pays.length > 0 && <div className="pc-appr-group">Payments to release ({approvals.pays.length})</div>}
+                {approvals.pays.map(({ c, amount }) => (
+                  <div className="pc-appr-item" key={'p' + c.id}>
+                    <span className="pc-rd-ava" style={{ background: getGradient(c.name) }}>{initial(c.name)}</span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span className="pc-rd-cn">{c.name}</span>
+                      <span className="pc-rd-cb">{brandById[c.brand_id]?.name || '—'}</span>
+                    </span>
+                    <span className="pc-appr-amt">{fmt$(amount)}</span>
+                    <span className="pc-rd-pill pend">Pay</span>
+                  </div>
+                ))}
+                {approvals.auths.length > 0 && <div className="pc-appr-group">Ad codes to authorise ({approvals.auths.length})</div>}
+                {approvals.auths.map(({ c, n }) => (
+                  <div className="pc-appr-item" key={'a' + c.id}>
+                    <span className="pc-rd-ava" style={{ background: getGradient(c.name) }}>{initial(c.name)}</span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span className="pc-rd-cn">{c.name}</span>
+                      <span className="pc-rd-cb">{brandById[c.brand_id]?.name || '—'}</span>
+                    </span>
+                    <span className="pc-appr-amt">{n} code{n === 1 ? '' : 's'}</span>
+                    <span className="pc-rd-pill prog">Authorise</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="pc-modal-actions" style={{ marginTop: 14 }}>
+              <button className="pc-btn pc-btn-primary" onClick={() => setApprovalsOpen(false)}>Done</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RKpi({ icon, color, label, value, sub }) {
+  return (
+    <div className="pc-rk" style={{ ['--rk']: color }}>
+      <span className="pc-rk-ic" style={{ background: `${color}1a`, color }}><i className={`bi ${icon}`} /></span>
+      <div className="pc-rk-body">
+        <div className="pc-rk-label">{label}</div>
+        <div className="pc-rk-value">{value}</div>
+        {sub && <div className="pc-rk-sub">{sub}</div>}
+      </div>
+    </div>
   );
 }
 
@@ -1351,9 +1695,9 @@ function BrandMatrix({ brand, creators, mode, setMode, month, brandReportWeeks, 
     if (isWeekly) {
       return (brandReportWeeks || [])
         .filter(w => String(w.start).slice(0, 7) === month)
-        .map(w => ({ key: w.start, label: rangeShort(w.start, w.end), title: rangeLong(w.start, w.end) }));
+        .map(w => ({ key: w.start, end: w.end, label: rangeShort(w.start, w.end), title: rangeLong(w.start, w.end) }));
     }
-    return months.map(m => ({ key: m, label: monthShort(m), title: monthShort(m) }));
+    return months.map(m => ({ key: m, end: null, label: monthShort(m), title: monthShort(m) }));
   }, [isWeekly, brandReportWeeks, month, months]);
   const weeklyEmpty = isWeekly && periods.length === 0;
   const periodNoun = isWeekly ? 'week' : 'month';
@@ -1403,6 +1747,14 @@ function BrandMatrix({ brand, creators, mode, setMode, month, brandReportWeeks, 
     ? ((c.monthly || {}).weeks || {})[key]?.[field]
     : (c.monthly || {})[key]?.[field];
   const commitCell = (c, key, field, v) => isWeekly ? commitWeek(c, key, field, v) : commitMonth(c, key, field, v);
+  // A period is locked (read-only) if it ends before the creator was onboarded —
+  // i.e. only the onboarding period and everything after it is editable.
+  const isLocked = (c, p) => {
+    const onb = c.onboarded_on;
+    if (!onb) return false;
+    if (isWeekly) return (p.end || addDaysISO(p.key, 6)) < onb;  // whole week before onboarding
+    return p.key < monthKey(onb);                                 // month before onboarding month
+  };
 
   function commitL30(c, raw) {
     const num = raw === '' ? undefined : (Number(raw) || 0);
@@ -1491,12 +1843,15 @@ function BrandMatrix({ brand, creators, mode, setMode, month, brandReportWeeks, 
                       <div className="pc-mx-name" title={c.name}>{c.name}</div>
                       <div className="pc-mx-user">{tiktokAccounts(c.tiktok_handle)[0]?.handle || '—'}</div>
                       <MatrixCell value={mm.l30} l30 onCommit={v => commitL30(c, v)} />
-                      {periods.map(p => (
-                        <React.Fragment key={p.key}>
-                          <MatrixCell value={readCell(c, p.key, 'gmv')} onCommit={v => commitCell(c, p.key, 'gmv', v)} />
-                          <MatrixCell value={readCell(c, p.key, 'adSpent')} ad onCommit={v => commitCell(c, p.key, 'adSpent', v)} />
-                        </React.Fragment>
-                      ))}
+                      {periods.map(p => {
+                        const locked = isLocked(c, p);
+                        return (
+                          <React.Fragment key={p.key}>
+                            <MatrixCell value={readCell(c, p.key, 'gmv')} locked={locked} onCommit={v => commitCell(c, p.key, 'gmv', v)} />
+                            <MatrixCell value={readCell(c, p.key, 'adSpent')} ad locked={locked} onCommit={v => commitCell(c, p.key, 'adSpent', v)} />
+                          </React.Fragment>
+                        );
+                      })}
                       <div className="pc-mx-num strong">{videosByName[(c.name || '').trim().toLowerCase()] || 0}</div>
                       <div className="pc-mx-num strong pc-green">{fmt$(sumFn(c, 'gmv'))}</div>
                       <div className="pc-mx-num strong pc-red">{fmt$(sumFn(c, 'adSpent'))}</div>
@@ -1532,9 +1887,21 @@ function FirstReportPanel({ brand, onCreate }) {
   );
 }
 
-function MatrixCell({ value, onCommit, ad, l30 }) {
+function MatrixCell({ value, onCommit, ad, l30, locked }) {
   const [v, setV] = useState(value == null ? '' : String(value));
   useEffect(() => { setV(value == null ? '' : String(value)); }, [value]);
+  // Periods before the creator's onboarding are read-only — show the value (if any),
+  // otherwise a muted lock, and never accept input.
+  if (locked) {
+    return (
+      <div className={`pc-mx-input pc-mx-locked ${ad ? 'ad' : ''}`}
+        title="Before this creator was onboarded" aria-disabled="true" onClick={e => e.stopPropagation()}>
+        {value == null || value === '' ? (
+          <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+        ) : String(value)}
+      </div>
+    );
+  }
   return (
     <input className={`pc-mx-input ${ad ? 'ad' : ''} ${l30 ? 'l30' : ''}`} type="number" inputMode="numeric" placeholder="–"
       value={v} onChange={e => setV(e.target.value)} onBlur={() => onCommit(v)} onClick={e => e.stopPropagation()} />
