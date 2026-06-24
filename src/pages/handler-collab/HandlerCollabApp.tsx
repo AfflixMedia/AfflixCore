@@ -87,6 +87,25 @@ function monthShort(key) {
   const [y, m] = key.split('-');
   return `${MONTHS[parseInt(m, 10) - 1] || '?'} '${String(y).slice(2)}`;
 }
+
+/* ── week date helpers (all YYYY-MM-DD strings, local-time) ── */
+function isoDate(x) {
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+}
+function addDaysISO(key, n) { const d = new Date(key + 'T00:00:00'); d.setDate(d.getDate() + n); return isoDate(d); }
+// Compact range for a header: "Jun 9–15" (same month) or "Jun 29 – Jul 5".
+function rangeShort(startISO, endISO) {
+  const s = new Date(startISO + 'T00:00:00'), e = new Date(endISO + 'T00:00:00');
+  const sMon = s.toLocaleDateString('en-US', { month: 'short' });
+  const eMon = e.toLocaleDateString('en-US', { month: 'short' });
+  return sMon === eMon ? `${sMon} ${s.getDate()}–${e.getDate()}` : `${sMon} ${s.getDate()} – ${eMon} ${e.getDate()}`;
+}
+// Full range for the tooltip: "Jun 9 – Jun 15".
+function rangeLong(startISO, endISO) {
+  const f = (k) => new Date(k + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return `${f(startISO)} – ${f(endISO)}`;
+}
+
 function todayISO() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -199,6 +218,12 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
 
   const [month, setMonth] = useState(initialMonth || thisMonthKey());
   const [tab, setTab] = useState('brands'); // brands | creators | reporting
+  // Per-brand weekly-report weeks (brand_id -> [{ start, end }]). The weekly
+  // Performance view shows exactly these weeks as columns.
+  const [reportWeeks, setReportWeeks] = useState({});
+  // Per-brand weekly anchor (brand_id -> week-1 start date) for the "create next
+  // weekly report" flow.
+  const [reportAnchors, setReportAnchors] = useState({});
 
   // Custom brand ordering (drag-and-drop), persisted per handler in the database
   // (handler_collab_brand_order) so it follows the account across devices. It's a saved
@@ -259,6 +284,12 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
       // Saved drag order (per handler, cross-device). Keep current order on a fetch error.
       const order = await store.loadBrandOrder().catch(() => null);
       if (order) setBrandOrder(order);
+      // Per-brand weekly-report weeks + anchors (for the weekly Performance view). Best-effort.
+      const ids = data.brands.map(b => b.id);
+      const rw = await store.loadBrandReportWeeks(ids).catch(() => null);
+      if (rw) setReportWeeks(rw);
+      const an = await store.loadBrandReportAnchors(ids).catch(() => null);
+      if (an) setReportAnchors(an);
     } catch (e) {
       setErr(e.message || 'Failed to load');
     }
@@ -485,6 +516,35 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
     patchCreatorLocal(id, { monthly });
     store.updateCreator(id, { monthly }).catch(() => reload());
   }, [patchCreatorLocal, reload]);
+
+  // Create the next weekly report for a brand (mirrors the APC/Bob flow). The next
+  // week auto-continues from the brand's anchor + existing reports; on the very
+  // first report `firstAnchor` (a date) seeds the brand's weekly anchor. After
+  // creating, jump the workspace to that week's month so the new column shows.
+  const createWeeklyReport = useCallback(async (brandId, firstAnchor) => {
+    if (!user?.id) return;
+    const existingArr = (reportWeeks[brandId] || []).map(w => w.start);
+    const existing = new Set(existingArr);
+    let anchor = reportAnchors[brandId]
+      || (existingArr.length ? existingArr.slice().sort()[0] : null)
+      || firstAnchor || null;
+    if (!anchor) { alert('Pick an anchor (week-1 start) date first.'); return; }
+    // First report ever → persist the anchor so the brand's weekly reports use it too.
+    if (firstAnchor && !reportAnchors[brandId] && existingArr.length === 0) {
+      try { await store.setBrandWeeklyAnchor(brandId, firstAnchor); }
+      catch (e) { alert(`Couldn't set anchor: ${e.message}`); return; }
+      setReportAnchors(prev => ({ ...prev, [brandId]: firstAnchor }));
+      anchor = firstAnchor;
+    }
+    // Walk from the anchor to the first un-created week (fills gaps), like AfflixCore.
+    let start = anchor, wn = 1;
+    while (existing.has(start)) { start = addDaysISO(start, 7); wn++; }
+    const end = addDaysISO(start, 6);
+    try { await store.createWeeklyReport(brandId, user.id, start, end, wn); }
+    catch (e) { alert(`Couldn't create weekly report: ${e.message}`); return; }
+    await reload();
+    setMonth(start.slice(0, 7));
+  }, [reportWeeks, reportAnchors, user, reload]);
   // notes (per brand, per month) — optimistic + persist
   const saveNotes = useCallback((brandId, notesText) => {
     setBrandMonths(prev => {
@@ -534,7 +594,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
         {err && <div className="pc-banner" style={{ background: 'var(--pc-error-bg)', color: 'var(--pc-error-fg)' }}><span>⚠️</span><span>{err}</span></div>}
 
         <div className="pc-tabs">
-          {[{ id: 'brands', label: 'Brands' }, { id: 'creators', label: 'Creators' }, { id: 'performance', label: 'Performance' }, { id: 'reporting', label: 'Reporting' }].map(t => (
+          {[{ id: 'brands', label: 'Brands' }, { id: 'creators', label: 'Creators' }, { id: 'performance', label: 'Performance' }, { id: 'reporting', label: 'Internal Reporting' }].map(t => (
             <button key={t.id} className={`pc-tab ${tab === t.id ? 'active' : ''}`} onClick={() => { setTab(t.id); setDrillId(null); }}>{t.label}</button>
           ))}
         </div>
@@ -545,7 +605,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
               onEdit={(c) => setCreatorEditor({ mode: 'edit', brandId: c.brand_id, creator: c })}
               onSetStatus={setCreatorStatus} onToggleVisible={setCreatorPendingVisible} />
           ) : tab === 'performance' ? (
-            <PerformanceView brands={brands} creators={creators} brandById={brandById} onSaveMonthly={saveCreatorMonthly} />
+            <PerformanceView brands={brands} creators={creators} brandById={brandById} month={month} reportWeeks={reportWeeks} reportAnchors={reportAnchors} onCreateWeek={createWeeklyReport} onSaveMonthly={saveCreatorMonthly} />
           ) : tab === 'reporting' ? (
             <ReportingView />
           ) : (
@@ -1169,27 +1229,52 @@ function sumMonthly(c, field) {
   Object.keys(m).forEach(k => { if (/^\d{4}-\d{2}$/.test(k)) t += Number(m[k]?.[field]) || 0; });
   return t;
 }
+// Weekly entries live in a nested `monthly.weeks` map (key = week-start YYYY-MM-DD)
+// so they never collide with the YYYY-MM monthly keys or the top-level `l30` value.
+function sumWeekly(c, field) {
+  const w = (c.monthly || {}).weeks || {};
+  let t = 0;
+  Object.keys(w).forEach(k => { t += Number(w[k]?.[field]) || 0; });
+  return t;
+}
 
-function PerformanceView({ brands, creators, brandById, onSaveMonthly }) {
+// Monthly | Weekly segmented toggle, shared by the brand list and the matrix.
+function PerfModeToggle({ mode, setMode }) {
+  return (
+    <div className="pc-seg" role="tablist" aria-label="Performance period">
+      <button type="button" role="tab" aria-selected={mode === 'monthly'}
+        className={`pc-seg-btn ${mode === 'monthly' ? 'active' : ''}`} onClick={() => setMode('monthly')}>Monthly</button>
+      <button type="button" role="tab" aria-selected={mode === 'weekly'}
+        className={`pc-seg-btn ${mode === 'weekly' ? 'active' : ''}`} onClick={() => setMode('weekly')}>Weekly</button>
+    </div>
+  );
+}
+
+function PerformanceView({ brands, creators, brandById, month, reportWeeks, reportAnchors, onCreateWeek, onSaveMonthly }) {
   const [bId, setBId] = useState(null);
+  // Period granularity for GMV / Ad tracking — persisted across the drilldown.
+  const [mode, setMode] = useState('monthly'); // 'monthly' | 'weekly'
   const byBrand = useMemo(() => {
     const m = {};
     creators.forEach(c => { (m[c.brand_id] = m[c.brand_id] || []).push(c); });
     return m;
   }, [creators]);
   if (bId && brandById[bId]) {
-    return <BrandMatrix brand={brandById[bId]} creators={byBrand[bId] || []} onBack={() => setBId(null)} onSaveMonthly={onSaveMonthly} />;
+    return <BrandMatrix brand={brandById[bId]} creators={byBrand[bId] || []} mode={mode} setMode={setMode}
+      month={month} brandReportWeeks={(reportWeeks || {})[bId] || []} brandAnchor={(reportAnchors || {})[bId] || null}
+      onCreateWeek={onCreateWeek} onBack={() => setBId(null)} onSaveMonthly={onSaveMonthly} />;
   }
-  return <PerfBrandList brands={brands} byBrand={byBrand} onOpen={setBId} />;
+  return <PerfBrandList brands={brands} byBrand={byBrand} mode={mode} setMode={setMode} onOpen={setBId} />;
 }
 
-function PerfBrandList({ brands, byBrand, onOpen }) {
+function PerfBrandList({ brands, byBrand, mode, setMode, onOpen }) {
   const [q, setQ] = useState('');
+  const sumFn = mode === 'weekly' ? sumWeekly : sumMonthly;
   let rows = brands.map(b => {
     const cs = byBrand[b.id] || [];
     const names = new Set(cs.map(c => (c.name || '').trim().toLowerCase()).filter(Boolean));
     let gmv = 0, ad = 0, l30 = 0;
-    cs.forEach(c => { gmv += sumMonthly(c, 'gmv'); ad += sumMonthly(c, 'adSpent'); l30 += Number((c.monthly || {}).l30) || 0; });
+    cs.forEach(c => { gmv += sumFn(c, 'gmv'); ad += sumFn(c, 'adSpent'); l30 += Number((c.monthly || {}).l30) || 0; });
     return { id: b.id, name: b.name, creators: names.size, gmv, ad, l30 };
   }).filter(r => r.creators > 0 || r.gmv > 0);
   if (q.trim()) rows = rows.filter(r => r.name.toLowerCase().includes(q.trim().toLowerCase()));
@@ -1198,7 +1283,8 @@ function PerfBrandList({ brands, byBrand, onOpen }) {
     <>
       <div className="pc-toolbar">
         <input className="pc-search" placeholder="Search brands…" value={q} onChange={e => setQ(e.target.value)} />
-        <span className="pc-count-pill">{rows.length} brand{rows.length === 1 ? '' : 's'} · GMV tracking</span>
+        <PerfModeToggle mode={mode} setMode={setMode} />
+        <span className="pc-count-pill">{rows.length} brand{rows.length === 1 ? '' : 's'} · {mode === 'weekly' ? 'weekly' : 'monthly'} GMV</span>
       </div>
       {rows.length === 0 ? (
         <div className="pc-card"><div className="pc-empty"><div className="pc-empty-icon">📈</div><h3>No brands yet</h3><p>Onboard creators under a brand to track GMV here.</p></div></div>
@@ -1241,7 +1327,9 @@ function PerfBrandList({ brands, byBrand, onOpen }) {
   );
 }
 
-function BrandMatrix({ brand, creators, onBack, onSaveMonthly }) {
+function BrandMatrix({ brand, creators, mode, setMode, month, brandReportWeeks, brandAnchor, onCreateWeek, onBack, onSaveMonthly }) {
+  const isWeekly = mode === 'weekly';
+  const [creating, setCreating] = useState(false);
   const canon = useMemo(() => {
     const m = {};
     creators.forEach(c => {
@@ -1255,9 +1343,42 @@ function BrandMatrix({ brand, creators, onBack, onSaveMonthly }) {
     return ms[0] || thisMonthKey();
   }, [creators]);
   const months = useMemo(() => monthRange(start, addMonth(thisMonthKey(), -1)), [start]);
-  const tpl = `160px 110px 88px ${months.map(() => '74px 74px').join(' ')} 84px 96px 96px`;
+  // Build normalized period columns: { key, label, title }. Monthly = every month
+  // since onboarding; weekly = ONLY the weeks that exist in this brand's weekly
+  // reports (week_start..week_end), filtered to the selected month (a report belongs
+  // to the month of its week_start, matching the reporting system).
+  const periods = useMemo(() => {
+    if (isWeekly) {
+      return (brandReportWeeks || [])
+        .filter(w => String(w.start).slice(0, 7) === month)
+        .map(w => ({ key: w.start, label: rangeShort(w.start, w.end), title: rangeLong(w.start, w.end) }));
+    }
+    return months.map(m => ({ key: m, label: monthShort(m), title: monthShort(m) }));
+  }, [isWeekly, brandReportWeeks, month, months]);
+  const weeklyEmpty = isWeekly && periods.length === 0;
+  const periodNoun = isWeekly ? 'week' : 'month';
 
-  function commit(c, m, field, raw) {
+  // "Create next weekly report" — anchor + existing weeks define the next window.
+  const effectiveAnchor = brandAnchor
+    || ((brandReportWeeks || []).length ? brandReportWeeks.map(w => w.start).slice().sort()[0] : null);
+  const nextWindow = useMemo(() => {
+    if (!effectiveAnchor) return null;
+    const existing = new Set((brandReportWeeks || []).map(w => w.start));
+    let start = effectiveAnchor, wn = 1;
+    while (existing.has(start)) { start = addDaysISO(start, 7); wn++; }
+    return { start, end: addDaysISO(start, 6), week_number: wn };
+  }, [effectiveAnchor, brandReportWeeks]);
+  const firstTime = isWeekly && (brandReportWeeks || []).length === 0 && !effectiveAnchor;
+  async function createNext() {
+    setCreating(true);
+    try { await onCreateWeek(brand.id); } finally { setCreating(false); }
+  }
+  // Weekly headers show a start–end range, so give those columns a touch more width.
+  const colW = isWeekly ? '84px' : '74px';
+  const tpl = `160px 110px 88px ${periods.map(() => `${colW} ${colW}`).join(' ')} 84px 96px 96px`;
+
+  // ── monthly cell read/write (YYYY-MM keys on the jsonb root) ──
+  function commitMonth(c, m, field, raw) {
     const num = raw === '' ? undefined : (Number(raw) || 0);
     const cur = c.monthly || {};
     const cell = { ...(cur[m] || {}) };
@@ -1266,6 +1387,23 @@ function BrandMatrix({ brand, creators, onBack, onSaveMonthly }) {
     if (cell.gmv == null && cell.adSpent == null) delete next[m];
     onSaveMonthly(c.id, next);
   }
+  // ── weekly cell read/write (nested under monthly.weeks, keyed by cadence week-start) ──
+  function commitWeek(c, wk, field, raw) {
+    const num = raw === '' ? undefined : (Number(raw) || 0);
+    const cur = c.monthly || {};
+    const wks = { ...(cur.weeks || {}) };
+    const cell = { ...(wks[wk] || {}) };
+    if (!num) delete cell[field]; else cell[field] = num;
+    if (cell.gmv == null && cell.adSpent == null) delete wks[wk]; else wks[wk] = cell;
+    const next = { ...cur, weeks: wks };
+    if (Object.keys(wks).length === 0) delete next.weeks;
+    onSaveMonthly(c.id, next);
+  }
+  const readCell = (c, key, field) => isWeekly
+    ? ((c.monthly || {}).weeks || {})[key]?.[field]
+    : (c.monthly || {})[key]?.[field];
+  const commitCell = (c, key, field, v) => isWeekly ? commitWeek(c, key, field, v) : commitMonth(c, key, field, v);
+
   function commitL30(c, raw) {
     const num = raw === '' ? undefined : (Number(raw) || 0);
     const next = { ...(c.monthly || {}) };
@@ -1273,8 +1411,13 @@ function BrandMatrix({ brand, creators, onBack, onSaveMonthly }) {
     onSaveMonthly(c.id, next);
   }
 
+  // Totals: monthly sums every month; weekly sums only the visible month's weeks.
+  const weekKeys = periods.map(p => p.key);
+  const sumFn = isWeekly
+    ? (c, field) => { const w = (c.monthly || {}).weeks || {}; return weekKeys.reduce((t, k) => t + (Number(w[k]?.[field]) || 0), 0); }
+    : (c, field) => sumMonthly(c, field);
   let grandGmv = 0, grandAd = 0;
-  canon.forEach(c => { grandGmv += sumMonthly(c, 'gmv'); grandAd += sumMonthly(c, 'adSpent'); });
+  canon.forEach(c => { grandGmv += sumFn(c, 'gmv'); grandAd += sumFn(c, 'adSpent'); });
   const roas = grandAd > 0 ? (grandGmv / grandAd) : 0;
   // total videos a creator has made for THIS brand (delivered video_codes, across all their deals)
   const videosByName = {};
@@ -1292,10 +1435,29 @@ function BrandMatrix({ brand, creators, onBack, onSaveMonthly }) {
         <span className="pc-ava" style={{ background: getGradient(brand.name) }}>{initial(brand.name)}</span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <h2 className="pc-dd-title">{brand.name}</h2>
-          <div className="pc-dd-sub">Performance · {canon.length} creator{canon.length === 1 ? '' : 's'} · {months.length} month{months.length === 1 ? '' : 's'} tracked</div>
+          <div className="pc-dd-sub">Performance · {canon.length} creator{canon.length === 1 ? '' : 's'}{isWeekly
+            ? ` · ${monthLabel(month)} · ${periods.length} weekly report${periods.length === 1 ? '' : 's'}`
+            : ` · ${periods.length} ${periodNoun}${periods.length === 1 ? '' : 's'} tracked`}</div>
+        </div>
+        <div className="pc-dd-actions">
+          {isWeekly && nextWindow && (
+            <button className="pc-btn pc-btn-primary pc-btn-sm" disabled={creating} onClick={createNext}
+              title={`Create the next weekly report (${rangeLong(nextWindow.start, nextWindow.end)})`}>
+              {creating ? 'Creating…' : `+ Week ${nextWindow.week_number} · ${rangeShort(nextWindow.start, nextWindow.end)}`}
+            </button>
+          )}
+          <PerfModeToggle mode={mode} setMode={setMode} />
         </div>
       </div>
-      {canon.length === 0 ? (
+      {firstTime ? (
+        <FirstReportPanel brand={brand} onCreate={(date) => onCreateWeek(brand.id, date)} />
+      ) : weeklyEmpty ? (
+        <div className="pc-card"><div className="pc-empty"><div className="pc-empty-icon">📅</div>
+          <h3>No weekly reports for {monthLabel(month)}</h3>
+          <p>Weekly performance columns mirror this brand's weekly reports.{nextWindow ? ` The next report is ${rangeLong(nextWindow.start, nextWindow.end)} — create it to start logging.` : ''}</p>
+          {nextWindow && <button className="pc-btn pc-btn-primary" disabled={creating} onClick={createNext} style={{ marginTop: 6 }}>{creating ? 'Creating…' : `+ Create Week ${nextWindow.week_number} (${rangeShort(nextWindow.start, nextWindow.end)})`}</button>}
+        </div></div>
+      ) : canon.length === 0 ? (
         <div className="pc-card"><div className="pc-empty"><div className="pc-empty-icon">👤</div><h3>No creators for this brand</h3></div></div>
       ) : (
         <>
@@ -1312,9 +1474,9 @@ function BrandMatrix({ brand, creators, onBack, onSaveMonthly }) {
                   <div className="pc-mxh">Name</div>
                   <div className="pc-mxh">Username</div>
                   <div className="pc-mxh pc-mxh-c pc-mx-l30h">L30 GMV</div>
-                  {months.map(m => (
-                    <div key={m} className="pc-mxh-month" style={{ gridColumn: 'span 2' }}>
-                      <span className="pc-mxh-mname">{monthShort(m)}</span>
+                  {periods.map(p => (
+                    <div key={p.key} className="pc-mxh-month" style={{ gridColumn: 'span 2' }} title={p.title}>
+                      <span className="pc-mxh-mname">{p.label}</span>
                       <span className="pc-mxh-sub"><span>GMV</span><span>Ad</span></span>
                     </div>
                   ))}
@@ -1329,15 +1491,15 @@ function BrandMatrix({ brand, creators, onBack, onSaveMonthly }) {
                       <div className="pc-mx-name" title={c.name}>{c.name}</div>
                       <div className="pc-mx-user">{tiktokAccounts(c.tiktok_handle)[0]?.handle || '—'}</div>
                       <MatrixCell value={mm.l30} l30 onCommit={v => commitL30(c, v)} />
-                      {months.map(m => (
-                        <React.Fragment key={m}>
-                          <MatrixCell value={(mm[m] || {}).gmv} onCommit={v => commit(c, m, 'gmv', v)} />
-                          <MatrixCell value={(mm[m] || {}).adSpent} ad onCommit={v => commit(c, m, 'adSpent', v)} />
+                      {periods.map(p => (
+                        <React.Fragment key={p.key}>
+                          <MatrixCell value={readCell(c, p.key, 'gmv')} onCommit={v => commitCell(c, p.key, 'gmv', v)} />
+                          <MatrixCell value={readCell(c, p.key, 'adSpent')} ad onCommit={v => commitCell(c, p.key, 'adSpent', v)} />
                         </React.Fragment>
                       ))}
                       <div className="pc-mx-num strong">{videosByName[(c.name || '').trim().toLowerCase()] || 0}</div>
-                      <div className="pc-mx-num strong pc-green">{fmt$(sumMonthly(c, 'gmv'))}</div>
-                      <div className="pc-mx-num strong pc-red">{fmt$(sumMonthly(c, 'adSpent'))}</div>
+                      <div className="pc-mx-num strong pc-green">{fmt$(sumFn(c, 'gmv'))}</div>
+                      <div className="pc-mx-num strong pc-red">{fmt$(sumFn(c, 'adSpent'))}</div>
                     </div>
                   );
                 })}
@@ -1347,6 +1509,26 @@ function BrandMatrix({ brand, creators, onBack, onSaveMonthly }) {
         </>
       )}
     </>
+  );
+}
+
+// First-time weekly setup: the brand has no weekly reports/anchor yet. Pick week-1's
+// start date → creates the first weekly report and seeds the brand's weekly anchor.
+function FirstReportPanel({ brand, onCreate }) {
+  const [d, setD] = useState('');
+  const [busy, setBusy] = useState(false);
+  async function go() { if (!d) return; setBusy(true); try { await onCreate(d); } finally { setBusy(false); } }
+  return (
+    <div className="pc-card"><div className="pc-empty">
+      <div className="pc-empty-icon">📅</div>
+      <h3>No weekly reports yet</h3>
+      <p>Pick the start date of <b>week 1</b> for <b>{brand.name}</b>. New weeks then auto-continue from here, and this date becomes the brand's weekly-report anchor.</p>
+      <div className="pc-anchor-row">
+        <input type="date" className="pc-input" value={d} onChange={e => setD(e.target.value)} />
+        <button className="pc-btn pc-btn-primary" disabled={!d || busy} onClick={go}>{busy ? 'Creating…' : 'Create first weekly report'}</button>
+      </div>
+      {d && <div className="pc-anchor-hint">Week 1: <b>{rangeLong(d, addDaysISO(d, 6))}</b></div>}
+    </div></div>
   );
 }
 

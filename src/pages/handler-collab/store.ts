@@ -106,6 +106,71 @@ export async function loadAll() {
 // Brands are managed in public.brands by Bob (with the "Paid Collabs" scope) and
 // assigned to handlers via paid_collab_handler_brands — handlers no longer create them.
 
+/* ── brand weekly-report dates ──
+   Weekly Performance columns are EXACTLY the weeks that exist in the brand's
+   weekly_reports — each report's start/end date becomes one column. Read-only;
+   RLS scopes this to the handler's assigned brands. Returns
+   brand_id -> [{ start, end }] sorted ascending by start; brands with no weekly
+   reports are omitted. */
+export interface ReportWeek { start: string; end: string }
+export async function loadBrandReportWeeks(brandIds: string[]): Promise<Record<string, ReportWeek[]>> {
+  if (!brandIds.length) return {};
+  const { data, error } = await supabase
+    .from('weekly_reports')
+    .select('brand_id, week_start, week_end')
+    .in('brand_id', brandIds)
+    .order('week_start', { ascending: true });
+  if (error) throw error;
+  const m: Record<string, ReportWeek[]> = {};
+  (data || []).forEach((r: any) => {
+    (m[r.brand_id] = m[r.brand_id] || []).push({ start: r.week_start, end: r.week_end });
+  });
+  return m;
+}
+
+// Per-brand weekly anchor (brand_report_settings.weekly_anchor) — week-1 start date
+// that fixes the weekly cadence. Shared with the APC/Bob weekly-report flow.
+export async function loadBrandReportAnchors(brandIds: string[]): Promise<Record<string, string>> {
+  if (!brandIds.length) return {};
+  const { data, error } = await supabase
+    .from('brand_report_settings')
+    .select('brand_id, weekly_anchor')
+    .in('brand_id', brandIds);
+  if (error) throw error;
+  const m: Record<string, string> = {};
+  (data || []).forEach((r: any) => { if (r.weekly_anchor) m[r.brand_id] = r.weekly_anchor; });
+  return m;
+}
+
+export async function setBrandWeeklyAnchor(brandId: string, anchor: string) {
+  const { error } = await supabase
+    .from('brand_report_settings')
+    .upsert({ brand_id: brandId, weekly_anchor: anchor }, { onConflict: 'brand_id' });
+  if (error) throw error;
+}
+
+// Create a draft weekly report (same shape the APC/Bob flow inserts). The caller
+// computes the next week_start/week_end/week_number from the brand's anchor +
+// existing reports. Returns the inserted row's id + dates.
+export async function createWeeklyReport(
+  brandId: string, userId: string, weekStart: string, weekEnd: string, weekNumber: number,
+): Promise<{ id: string; start: string; end: string }> {
+  const { data, error } = await supabase
+    .from('weekly_reports')
+    .insert({
+      brand_id: brandId,
+      created_by: userId,
+      week_start: weekStart,
+      week_end: weekEnd,
+      week_number: weekNumber,
+      status: 'draft',
+    })
+    .select('id, week_start, week_end')
+    .single();
+  if (error) throw error;
+  return { id: (data as any).id, start: (data as any).week_start, end: (data as any).week_end };
+}
+
 /* ── brand-month (budget + links) ── */
 export async function upsertBrandMonth(brandId: string, month: string, patch: Partial<HandlerBrandMonth>) {
   const fields: Record<string, any> = {

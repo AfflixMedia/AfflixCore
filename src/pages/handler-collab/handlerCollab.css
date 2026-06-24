@@ -262,6 +262,18 @@
 .pc-tab.active{ background:var(--pc-accent); color:#fff; border-color:transparent; box-shadow:0 5px 16px rgba(18,89,195,.26); }
 .pc-tab:active{ transform:scale(.97); }
 
+/* ── Monthly / Weekly segmented toggle (Performance period) ── */
+.pc-seg{ display:inline-flex; flex:0 0 auto; gap:2px; padding:3px; border-radius:var(--pc-pill); border:1px solid var(--pc-divider); background:var(--pc-card-2); box-shadow:var(--pc-shadow); }
+.pc-seg-btn{ height:36px; padding:0 18px; border:0; border-radius:var(--pc-pill); background:transparent; color:var(--pc-text-2); font-size:13px; font-weight:700; cursor:pointer; transition:all .16s var(--pc-ease); }
+.pc-seg-btn:hover{ color:var(--pc-text); }
+.pc-seg-btn.active{ background:var(--pc-accent); color:#fff; box-shadow:0 3px 10px rgba(18,89,195,.24); }
+.pc-seg-btn:active{ transform:scale(.97); }
+
+/* ── First-time weekly setup (pick week-1 / anchor date) ── */
+.pc-anchor-row{ display:inline-flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:center; margin-top:8px; }
+.pc-anchor-row .pc-input{ width:auto; min-width:170px; height:42px; border:1.5px solid var(--pc-divider); background:var(--pc-card-2); }
+.pc-anchor-hint{ margin-top:12px; font-size:13px; color:var(--pc-text-2); }
+
 /* ── Creators tab table (compact, month-grouped) ── */
 .pc-cv-head, .pc-cv-row{ display:grid; grid-template-columns:34px 0.32fr .9fr 1.12fr .98fr 1.05fr .8fr .72fr .76fr .58fr 1.18fr; align-items:center; gap:12px; text-align:center; }
 .pc-cv-check{ display:flex; align-items:center; justify-content:center; }
@@ -319,7 +331,7 @@
   margin:0 1px;
   position:relative;
 }
-.pc-mxh-mname{ flex:1; display:flex; align-items:center; justify-content:center; font-size:11.5px; font-weight:800; text-transform:uppercase; letter-spacing:.4px; color:var(--pc-accent); }
+.pc-mxh-mname{ flex:1; display:flex; align-items:center; justify-content:center; font-size:11.5px; font-weight:800; text-transform:uppercase; letter-spacing:.4px; color:var(--pc-accent); white-space:nowrap; }
 .pc-mxh-sub{ display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:2px 4px 0; }
 .pc-mxh-sub > span{
   text-align:center; font-size:9.5px; font-weight:800;
