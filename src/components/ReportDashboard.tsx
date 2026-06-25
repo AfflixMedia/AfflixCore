@@ -732,8 +732,8 @@ export function CustomSectionView({ section, prevSection, paidCollab, onOpenPaid
                     <div className="bm-tile-label">{f.label}</div>
                     <div className="bm-tile-value" style={{ fontSize: '1.35rem' }}>{cur.toLocaleString()}</div>
                     {pct !== null ? (
-                      <div className={`bm-tile-sub fw-semibold ${pct >= 0 ? 'text-success' : 'text-danger'}`}>
-                        {pct >= 0 ? '▲' : '▼'} {Math.abs(pct).toFixed(1)}% vs previous
+                      <div className={`bm-tile-sub fw-semibold ${pct >= 0 ? 'text-success' : 'text-danger'}`} title={`${Math.abs(pct).toFixed(1)}%`}>
+                        {pct >= 0 ? '▲' : '▼'} {fmtPct(Math.abs(pct))}% vs previous
                       </div>
                     ) : prev !== null && prev === 0 && cur > 0 ? (
                       <div className="bm-tile-sub text-success fw-semibold">▲ New this period</div>
@@ -851,6 +851,13 @@ function MiniStat({ label, cur, prev, money, dec, suffix, invert }: {
   );
 }
 
+/** Format a percentage, abbreviating 1000%+ as "1k" / "1.1k" / "3.2k" (sign preserved, no leading +). */
+function fmtPct(pct: number): string {
+  const a = Math.abs(pct);
+  const body = a >= 1000 ? `${(a / 1000).toFixed(1).replace(/\.0$/, '')}k` : a.toFixed(1);
+  return pct < 0 ? `-${body}` : body;
+}
+
 function Delta({ cur, prev, money, dec, invert }: { cur: number; prev?: number; money?: boolean; dec?: boolean; invert?: boolean; }) {
   if (prev == null) return <small className="text-muted">—</small>;
   if (prev === 0 && cur === 0) return <small className="text-muted">no change</small>;
@@ -863,8 +870,8 @@ function Delta({ cur, prev, money, dec, invert }: { cur: number; prev?: number; 
   const icon = up ? 'bi-arrow-up-right' : 'bi-arrow-down-right';
   const fmt = (n: number) => money ? `$${Math.abs(n).toLocaleString()}` : dec ? Math.abs(n).toFixed(2) : Math.abs(n).toLocaleString();
   return (
-    <small className={color}>
-      <i className={`bi ${icon}`} /> {fmt(diff)} ({pct >= 0 ? '+' : ''}{pct.toFixed(1)}%)
+    <small className={color} title={`${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`}>
+      <i className={`bi ${icon}`} /> {fmt(diff)} ({pct >= 0 ? '+' : ''}{fmtPct(pct)}%)
     </small>
   );
 }
