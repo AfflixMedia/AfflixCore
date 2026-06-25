@@ -150,7 +150,7 @@ export default function SharedReports() {
         if (ir) setActiveTab('reporting');
         else if (im) setActiveTab('monthly');
         else if (ix) setActiveTab('resources');
-        else if (ipc) setActiveTab('paid-collab');
+        else if (ipc) setActiveTab('new-paid-collab');
         if (data.brands?.length > 0) setActiveBrandId(data.brands[0].id);
 
         // Brand-mode entry flow: approvals popup first (if any pending across
@@ -795,16 +795,8 @@ export default function SharedReports() {
                 )}
                 {includePaidCollab && (
                   <Nav.Item>
-                    <Nav.Link eventKey="paid-collab" className="d-flex align-items-center gap-2 px-3">
-                      <i className="bi bi-people" /> Paid Collab
-                      <Badge bg="secondary">{pcPrograms.filter(p => p.brand_id === activeBrandId).length}</Badge>
-                    </Nav.Link>
-                  </Nav.Item>
-                )}
-                {includePaidCollab && (
-                  <Nav.Item>
                     <Nav.Link eventKey="new-paid-collab" className="d-flex align-items-center gap-2 px-3">
-                      <i className="bi bi-people-fill" /> New Paid Collab
+                      <i className="bi bi-people" /> Paid Collab
                       <Badge bg="secondary">{pcMonths.filter(m => m.brand_id === activeBrandId).length}</Badge>
                     </Nav.Link>
                   </Nav.Item>
@@ -1063,26 +1055,6 @@ export default function SharedReports() {
                   )}
                 </Tab.Pane>
 
-                <Tab.Pane eventKey="paid-collab">
-                  <SharedPaidCollabPane
-                    token={token!}
-                    activeBrand={activeBrand}
-                    programs={pcPrograms}
-                    creators={pcCreators}
-                    videos={pcVideos}
-                    products={pcProducts}
-                    programProducts={pcProgramProducts}
-                    threads={pcThreads}
-                    performance={pcPerformance}
-                    notes={pcNotes}
-                    publicName={publicName}
-                    openProgramId={openProgramId}
-                    setOpenProgramId={setOpenProgramId}
-                    onThreadAdded={(c) => setPcThreads(prev => [...prev, c])}
-                    onNameChange={(n) => { setPublicName(n); localStorage.setItem('ac_public_name', n); }}
-                  />
-                </Tab.Pane>
-
                 <Tab.Pane eventKey="new-paid-collab">
                   <SharedHandlerCollabPane
                     brand={activeBrand}
@@ -1259,9 +1231,12 @@ function MonthQuickPicks({ month, setMonth, monthsWithData }: {
   );
 }
 
-// SharedPaidCollabPane — read-only paid collab tab on the client share view.
-// Lists programs for the active brand, and lets the client drill into a
-// single program to see creators / videos / notes + a comment thread.
+// [LEGACY — UNUSED] SharedPaidCollabPane — the OLD "Paid Collab" share tab.
+// Renders the legacy `paid_creator_*` model (programs → creators → videos +
+// comment thread). The old "Paid Collab" tab was removed from the share view;
+// the link now shows only the current handler-collab "Paid Collab" tab
+// (SharedHandlerCollabPane). This component is no longer mounted anywhere —
+// kept here for reference / in case the legacy view is ever re-enabled.
 // =====================================================================
 
 interface SharedPCPProps {
