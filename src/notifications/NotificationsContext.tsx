@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, ReactNode, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/AuthContext';
 
@@ -44,6 +44,26 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { load(); }, [load]);
 
+  // Whether this browser has an active web-push subscription. When it does, the
+  // service worker (sw.js `push`) already shows the OS notification once per
+  // browser — so we must NOT also fire a foreground `new Notification()` here,
+  // or the user sees duplicates (one per open tab + the push). The foreground
+  // notification is only a fallback for when push isn't set up.
+  const hasPushSub = useRef(false);
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        if (!import.meta.env.VITE_VAPID_PUBLIC_KEY) return;
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (active) hasPushSub.current = !!sub;
+      } catch { /* ignore — fall back to foreground notification */ }
+    })();
+    return () => { active = false; };
+  }, [user]);
+
   // Realtime subscription
   useEffect(() => {
     if (!user) return;
@@ -52,8 +72,9 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
         (p) => {
           const n = p.new as Notification;
           setNotifications(prev => [n, ...prev].slice(0, PAGE_SIZE));
-          // Try OS-level browser notification too if granted
-          if ('Notification' in window && Notification.permission === 'granted') {
+          // Foreground OS notification — only when web push ISN'T delivering one
+          // (otherwise the service-worker push + this would duplicate).
+          if (!hasPushSub.current && 'Notification' in window && Notification.permission === 'granted') {
             try {
               const ni = new Notification(n.title, { body: n.body ?? undefined, tag: n.id, icon: '/icon-192.png' });
               ni.onclick = () => { window.focus(); if (n.link) window.location.assign(n.link); };
