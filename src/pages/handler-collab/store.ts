@@ -59,6 +59,10 @@ export interface HandlerCreator {
   // When payment_status === 'pending', clients/Bob only see the "Payment Pending"
   // label once the handler flips this on (see handlerCollabReadonly.clientStatus).
   pending_visible_to_client: boolean;
+  // Set when the share-link client marks this creator's payment as done (PayPal).
+  // Soft flag only — the handler finalizes payment_status. Null = not confirmed.
+  client_paid_confirmed_at?: string | null;
+  client_paid_confirmed_name?: string | null;
   onboarded_on: string | null;
   completed_on: string | null;
   video_codes: VideoCode[];

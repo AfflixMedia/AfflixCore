@@ -418,6 +418,19 @@ export default function SharedReports() {
     setPublicName(authorName);
   };
 
+  // Client flags that they processed a creator's payment (PayPal). Soft flag +
+  // notifies the team; does NOT change the real payment_status.
+  const confirmPaidCollabPayment = async (creatorId: string, confirmed: boolean) => {
+    const brandId = pcHandlerCreators.find(c => c.id === creatorId)?.brand_id;
+    const { data, error } = await supabase.functions.invoke('post-shared-paidcollab-paid', {
+      body: { token, brand_id: brandId, creator_id: creatorId, confirmed, author_name: publicName || null },
+    });
+    if (error) throw error;
+    if ((data as any)?.error) throw new Error((data as any).error);
+    const updated = (data as any).creator as HandlerCreator;
+    setPcHandlerCreators(prev => prev.map(c => (c.id === creatorId ? { ...c, ...updated } : c)));
+  };
+
   // Report detail view
   if (openReport && activeBrand) {
     // Reports for this brand are sorted desc by week_start (newest first).
@@ -1063,6 +1076,7 @@ export default function SharedReports() {
                     comments={pcComments}
                     publicName={publicName}
                     onAddComment={addPaidCollabComment}
+                    onConfirmPaid={confirmPaidCollabPayment}
                   />
                 </Tab.Pane>
               </Tab.Content>

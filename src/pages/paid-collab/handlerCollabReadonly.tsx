@@ -140,12 +140,22 @@ function PayoutRO({ paypal, zelle }: { paypal?: string | null; zelle?: string | 
   );
 }
 
-export function CreatorRowRO({ c, idx, onToggleAuth }: {
+export function CreatorRowRO({ c, idx, onToggleAuth, onConfirmPaid }: {
   c: HandlerCreator; idx: number;
   // When provided, the "Authorised" cell becomes a clickable checkbox (APC/Bob).
   onToggleAuth?: (videoIndex: number, auth: boolean) => void;
+  // When provided (client share view) and the creator is payment-pending, the
+  // expanded panel shows a "process payment & mark as paid" toggle for the client.
+  onConfirmPaid?: (confirmed: boolean) => Promise<void> | void;
 }) {
   const [open, setOpen] = useState(false);
+  const [paidBusy, setPaidBusy] = useState(false);
+  const clientConfirmed = !!c.client_paid_confirmed_at;
+  const handleConfirmPaid = async (next: boolean) => {
+    if (!onConfirmPaid || paidBusy) return;
+    setPaidBusy(true);
+    try { await onConfirmPaid(next); } finally { setPaidBusy(false); }
+  };
   const [copiedIdx, setCopiedIdx] = useState(-1);
   const copyCode = (i: number, code: string) => { copyText(code); setCopiedIdx(i); setTimeout(() => setCopiedIdx(x => (x === i ? -1 : x)), 1400); };
   const accounts = tiktokAccounts(c.tiktok_handle);
@@ -221,6 +231,51 @@ export function CreatorRowRO({ c, idx, onToggleAuth }: {
                 {c.zelle && <PayoutDetail kind="zl" value={c.zelle} />}
               </div>
             )}
+            {/* Client "process payment & mark as done" panel — only on the client
+                share view (onConfirmPaid set) while the deal is payment-pending. */}
+            {onConfirmPaid && clientStatus(c) === 'pending' && (
+              <div className={`pc-paynudge ${clientConfirmed ? 'done' : ''}`}>
+                <div className="pc-paynudge-ic">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    {clientConfirmed ? <path d="M20 6 9 17l-5-5" /> : <><circle cx="12" cy="12" r="9" /><path d="M12 8v4M12 16h.01" /></>}
+                  </svg>
+                </div>
+                <div className="pc-paynudge-body">
+                  <div className="pc-paynudge-title">
+                    {clientConfirmed ? 'Payment marked as done' : 'Action needed — process this payment'}
+                  </div>
+                  <div className="pc-paynudge-text">
+                    {clientConfirmed
+                      ? <>Thanks{c.client_paid_confirmed_name ? `, ${c.client_paid_confirmed_name}` : ''} — the team has been notified and will verify, then finalize the status.</>
+                      : <>Please process the payment via PayPal{c.paypal ? <> (<b>{c.paypal}</b>)</> : ''}, then mark it as done below. The team will cross-check and finalize.</>}
+                  </div>
+                </div>
+                <button type="button"
+                  className={`pc-paynudge-btn ${clientConfirmed ? 'on' : ''}`}
+                  aria-pressed={clientConfirmed}
+                  disabled={paidBusy}
+                  onClick={e => { e.stopPropagation(); handleConfirmPaid(!clientConfirmed); }}
+                  title={clientConfirmed ? 'Undo — mark as not paid' : 'Mark this payment as done'}>
+                  <span className="pc-paynudge-knob" />
+                  <span className="pc-paynudge-btn-txt">{paidBusy ? 'Saving…' : clientConfirmed ? 'Marked as paid' : 'Mark as paid'}</span>
+                </button>
+              </div>
+            )}
+            {/* Read-only badge so handler / Bob / APC views can see the client's claim. */}
+            {!onConfirmPaid && clientConfirmed && (
+              <div className="pc-paynudge done compact">
+                <div className="pc-paynudge-ic">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                </div>
+                <div className="pc-paynudge-body">
+                  <div className="pc-paynudge-title">Client marked this payment as done</div>
+                  <div className="pc-paynudge-text">
+                    {c.client_paid_confirmed_name ? <><b>{c.client_paid_confirmed_name}</b> · </> : null}
+                    Cross-check, then set the status to Payment Sent.
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="pc-vx-collabels"><span /><span>Video</span><span>Ad code</span><span className="pc-vx-cl-auth">Authorised</span><span /></div>
             <div className="pc-vx-list">
               {codes.length === 0 ? (
@@ -291,9 +346,10 @@ const statusGroupKey = (c: HandlerCreator) => { const s = clientStatus(c); retur
 // Progress → Payment Sent), each introduced by a labelled divider — mirrors the
 // handler Workspace drilldown. `creators` should be pre-sorted; order is preserved
 // within each group and the # index runs continuously top-to-bottom.
-export function CreatorStatusGroupsRO({ creators, onToggleAuth }: {
+export function CreatorStatusGroupsRO({ creators, onToggleAuth, onConfirmPaid }: {
   creators: HandlerCreator[];
   onToggleAuth?: (creatorId: string, videoIndex: number, auth: boolean) => void;
+  onConfirmPaid?: (creatorId: string, confirmed: boolean) => Promise<void> | void;
 }) {
   let n = 0;
   const groups = STATUS_GROUP_ORDER
@@ -309,7 +365,7 @@ export function CreatorStatusGroupsRO({ creators, onToggleAuth }: {
               <span className="pc-ct-group-count">{g.items.length}</span>
             </span>
           </div>
-          {g.items.map(c => { n += 1; return <CreatorRowRO key={c.id} c={c} idx={n} onToggleAuth={onToggleAuth ? (i, a) => onToggleAuth(c.id, i, a) : undefined} />; })}
+          {g.items.map(c => { n += 1; return <CreatorRowRO key={c.id} c={c} idx={n} onToggleAuth={onToggleAuth ? (i, a) => onToggleAuth(c.id, i, a) : undefined} onConfirmPaid={onConfirmPaid ? (v) => onConfirmPaid(c.id, v) : undefined} />; })}
         </Fragment>
       ))}
     </>

@@ -243,6 +243,41 @@
 .pc-visbtn.on{ border-style:solid; border-color:var(--pc-warn-fg); background:var(--pc-warn-bg); color:var(--pc-warn-fg); }
 .pc-visbtn-txt{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
+/* "Client marked paid" chip — handler/Bob/APC see the client's soft confirmation */
+.pc-clientpaid{ margin-top:7px; display:inline-flex; align-items:center; gap:6px; height:auto; min-height:24px; padding:3px 10px;
+  background:var(--pc-success-bg); color:var(--pc-success-fg); border:1px solid #BFE3C4; border-radius:var(--pc-pill);
+  font-size:11.5px; font-weight:800; white-space:nowrap; }
+.pc-clientpaid .bi{ font-size:13px; line-height:1; }
+.pc-clientpaid-txt{ overflow:hidden; text-overflow:ellipsis; }
+
+/* Client "process payment & mark as done" panel (share-link pending creators) */
+.pc-paynudge{ display:flex; align-items:flex-start; gap:13px; margin:2px 0 14px; padding:14px 16px;
+  background:var(--pc-warn-bg); border:1px solid #F4C99B; border-radius:var(--pc-radius-xs); }
+.pc-paynudge.done{ background:var(--pc-success-bg); border-color:#BFE3C4; }
+.pc-paynudge.compact{ padding:10px 14px; margin:2px 0 12px; }
+.pc-paynudge-ic{ flex:0 0 auto; width:34px; height:34px; border-radius:10px; display:flex; align-items:center; justify-content:center;
+  background:#fff; color:var(--pc-warn-fg); box-shadow:0 1px 4px rgba(0,0,0,.06); }
+.pc-paynudge.done .pc-paynudge-ic{ color:var(--pc-success-fg); }
+.pc-paynudge-body{ flex:1 1 auto; min-width:0; }
+.pc-paynudge-title{ font-size:13.5px; font-weight:800; color:var(--pc-text); letter-spacing:-.1px; }
+.pc-paynudge-text{ margin-top:3px; font-size:12.5px; line-height:1.45; color:var(--pc-text-2); }
+.pc-paynudge-text b{ color:var(--pc-text); font-weight:700; word-break:break-word; }
+.pc-paynudge-btn{ flex:0 0 auto; align-self:center; display:inline-flex; align-items:center; gap:9px; height:38px; padding:0 16px 0 8px;
+  border:1px solid var(--pc-warn-fg); background:#fff; color:var(--pc-warn-fg); border-radius:var(--pc-pill);
+  font-size:13px; font-weight:800; cursor:pointer; transition:transform .12s var(--pc-ease), background .15s, color .15s, border-color .15s; }
+.pc-paynudge-btn:hover:not(:disabled){ transform:translateY(-1px); }
+.pc-paynudge-btn:disabled{ opacity:.6; cursor:default; }
+.pc-paynudge-btn .pc-paynudge-knob{ flex:0 0 auto; width:22px; height:22px; border-radius:50%; background:var(--pc-warn-fg);
+  position:relative; transition:background .15s; }
+.pc-paynudge-btn .pc-paynudge-knob::after{ content:''; position:absolute; inset:0; margin:auto; width:8px; height:8px; border-radius:50%; background:#fff; }
+.pc-paynudge-btn.on{ border-color:var(--pc-success-fg); background:var(--pc-success-fg); color:#fff; }
+.pc-paynudge-btn.on .pc-paynudge-knob{ background:#fff; }
+.pc-paynudge-btn.on .pc-paynudge-knob::after{ background:var(--pc-success-fg); }
+@media (max-width:560px){
+  .pc-paynudge{ flex-wrap:wrap; }
+  .pc-paynudge-btn{ width:100%; justify-content:center; }
+}
+
 /* payout cell (PayPal + Zelle) */
 .pc-payout{ display:flex; flex-direction:column; gap:2px; min-width:0; }
 .pc-payline{ display:flex; align-items:center; gap:5px; min-width:0; font-size:12.5px; color:var(--pc-text); }

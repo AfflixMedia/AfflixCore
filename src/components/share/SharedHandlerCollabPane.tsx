@@ -19,11 +19,13 @@ import {
 ════════════════════════════════════════════════════════════ */
 interface BrandLite { id: string; name: string; client: string | null }
 
-export default function SharedHandlerCollabPane({ brand, months, creators, comments = [], publicName, onAddComment }: {
+export default function SharedHandlerCollabPane({ brand, months, creators, comments = [], publicName, onAddComment, onConfirmPaid }: {
   brand: BrandLite; months: HandlerBrandMonth[]; creators: HandlerCreator[];
   comments?: PaidCollabComment[];
   publicName?: string;
   onAddComment?: (brandId: string, targetType: string, targetKey: string, body: string, authorName: string, parentId?: string) => Promise<void>;
+  // Client confirms they processed a creator's payment — flags it + pings the team.
+  onConfirmPaid?: (creatorId: string, confirmed: boolean) => Promise<void>;
 }) {
   const [section, setSection] = useState<'programs' | 'performance' | 'discussions'>('programs');
   const [openMonth, setOpenMonth] = useState<string | null>(null);
@@ -118,7 +120,7 @@ export default function SharedHandlerCollabPane({ brand, months, creators, comme
         ) : (
           <div className="pc-card pc-list">
             <CreatorListHeadRO />
-            <CreatorStatusGroupsRO creators={mc} />
+            <CreatorStatusGroupsRO creators={mc} onConfirmPaid={onConfirmPaid} />
           </div>
         )}
         {disc && (

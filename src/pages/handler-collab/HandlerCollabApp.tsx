@@ -1258,6 +1258,7 @@ function CreatorRow({ c, idx, open, onToggle, onEdit, onDelete, patchCreatorLoca
         <div className="pc-cell" data-label="Status">
           <StatusDropdown value={c.payment_status} onChange={v => onSetStatus(c.id, v)} />
           <PendingVisibilityToggle c={c} onToggleVisible={onToggleVisible} />
+          <ClientPaidBadge c={c} />
         </div>
         <div className="pc-cell pc-num" data-label="Content"><span className="pc-content-cell">{filled > 0 ? <b>{filled}</b> : ''} {open ? '▴' : '▾'}</span></div>
 
@@ -1283,6 +1284,7 @@ function CreatorRow({ c, idx, open, onToggle, onEdit, onDelete, patchCreatorLoca
           <div className="pc-mc-foot">
             <StatusDropdown value={c.payment_status} onChange={v => onSetStatus(c.id, v)} />
             <PendingVisibilityToggle c={c} onToggleVisible={onToggleVisible} />
+            <ClientPaidBadge c={c} />
             {(c.paypal || c.zelle) && <span className="pc-mc-footmeta"><PayoutCell paypal={c.paypal} zelle={c.zelle} /></span>}
           </div>
         </div>
@@ -2292,6 +2294,19 @@ function PendingVisibilityToggle({ c, onToggleVisible }) {
       <i className={`bi ${on ? 'bi-eye-fill' : 'bi-eye-slash'}`} />
       <span className="pc-visbtn-txt">{on ? 'Visible to client' : 'Hidden from client'}</span>
     </button>
+  );
+}
+
+// Read-only chip shown once a share-link client has marked this creator's payment
+// as done. Soft signal for the handler to cross-check, then set "Payment Sent".
+function ClientPaidBadge({ c }) {
+  if (!c.client_paid_confirmed_at || c.payment_status === 'paid') return null;
+  const who = c.client_paid_confirmed_name ? ` by ${c.client_paid_confirmed_name}` : '';
+  return (
+    <span className="pc-badge pc-clientpaid" title={`Client marked this payment as done${who}. Cross-check, then set Payment Sent.`}>
+      <i className="bi bi-cash-coin" />
+      <span className="pc-clientpaid-txt">Client marked paid</span>
+    </span>
   );
 }
 
