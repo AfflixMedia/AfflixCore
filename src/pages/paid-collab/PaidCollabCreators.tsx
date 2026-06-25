@@ -14,7 +14,9 @@ import { useAuth } from '../../auth/AuthContext';
 const CREATOR_STATUS_VALUES: CreatorStatus[] = ['active', 'paused', 'done', 'dropped'];
 
 import { useClientPaidCollabData, Brand } from './useClientPaidCollabData';
+import * as store from '../handler-collab/store';
 import { copyWithToast } from '../../lib/copyToast';
+import '../handler-collab/handlerCollab.css';
 import './creatorsTable.css';
 
 const CCT_GRADIENTS = [
@@ -102,6 +104,20 @@ export default function PaidCollabCreators() {
   const [openCreator, setOpenCreator] = useState<PaidCreator | null>(null);
   // Which table row is expanded inline.
   const [openId, setOpenId] = useState<string | null>(null);
+  // Client "mark payment as done" — local overrides + busy state (the hook has no setter).
+  const [paidOverride, setPaidOverride] = useState<Record<string, { at: string | null; name: string | null }>>({});
+  const [paidBusy, setPaidBusy] = useState<string | null>(null);
+  const confirmPaid = async (creatorId: string, confirmed: boolean) => {
+    setPaidBusy(creatorId);
+    try {
+      const updated = await store.setClientPaid(creatorId, confirmed);
+      setPaidOverride(prev => ({ ...prev, [creatorId]: { at: updated.client_paid_confirmed_at ?? null, name: updated.client_paid_confirmed_name ?? null } }));
+    } catch (e: any) {
+      alert(e?.message ?? 'Failed to update payment');
+    } finally {
+      setPaidBusy(null);
+    }
+  };
 
   // Lookup maps
   const brandById = useMemo(() => {
@@ -401,6 +417,44 @@ export default function PaidCollabCreators() {
                           </div>
                         </div>
                       </div>
+
+                      {/* Client "process payment & mark as done" — same GUI as the share
+                          link (pc-paynudge). Client view only, while payment-pending. */}
+                      {!revealPending && pending && (() => {
+                        const ov = paidOverride[c.id];
+                        const confirmedAt = ov ? ov.at : ((c as any).client_paid_confirmed_at ?? null);
+                        const confirmedName = ov ? ov.name : ((c as any).client_paid_confirmed_name ?? null);
+                        const done = !!confirmedAt;
+                        const busy = paidBusy === c.id;
+                        return (
+                          <div className={`pc-paynudge ${done ? 'done' : ''}`}>
+                            <div className="pc-paynudge-ic">
+                              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                {done ? <path d="M20 6 9 17l-5-5" /> : <><circle cx="12" cy="12" r="9" /><path d="M12 8v4M12 16h.01" /></>}
+                              </svg>
+                            </div>
+                            <div className="pc-paynudge-body">
+                              <div className="pc-paynudge-title">
+                                {done ? 'Payment marked as done' : 'Action needed — process this payment'}
+                              </div>
+                              <div className="pc-paynudge-text">
+                                {done
+                                  ? <>Thanks{confirmedName ? `, ${confirmedName}` : ''} — the team has been notified and will verify, then finalize the status.</>
+                                  : <>Please process the payment via PayPal{paypal ? <> (<b>{paypal}</b>)</> : ''}, then mark it as done below. The team will cross-check and finalize.</>}
+                              </div>
+                            </div>
+                            <button type="button"
+                              className={`pc-paynudge-btn ${done ? 'on' : ''}`}
+                              aria-pressed={done}
+                              disabled={busy}
+                              onClick={() => confirmPaid(c.id, !done)}
+                              title={done ? 'Undo — mark as not paid' : 'Mark this payment as done'}>
+                              <span className="pc-paynudge-knob" />
+                              <span className="pc-paynudge-btn-txt">{busy ? 'Saving…' : done ? 'Marked as paid' : 'Mark as paid'}</span>
+                            </button>
+                          </div>
+                        );
+                      })()}
 
                       <div className="cct-videos">
                         <div className="cct-videos-title">Videos &amp; ad codes{videoCodes.length > 0 && <span className="cct-videos-count">{videoCodes.length}</span>}</div>
