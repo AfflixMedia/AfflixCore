@@ -300,7 +300,7 @@ function PerformanceReport({ brand, creators, onDiscuss }: {
   brand: BrandLite; creators: HandlerCreator[];
   onDiscuss?: (tt: string, tk: string) => void;
 }) {
-  const [mode, setMode] = useState<'monthly' | 'weekly'>('monthly');
+  const [mode, setMode] = useState<'monthly' | 'weekly'>('weekly');
   const [weekSel, setWeekSel] = useState<string | null>(null);
   const isWeekly = mode === 'weekly';
 

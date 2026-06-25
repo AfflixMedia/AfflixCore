@@ -1478,7 +1478,7 @@ const rdAgreed = (c) => Number(c.videos_count) || 0;
 const rdUnauthCodes = (c) => (Array.isArray(c.video_codes) ? c.video_codes : []).filter(v => (v?.adCode || '').trim() && !v?.auth).length;
 
 function ReportingView({ brands, brandById, creators, month, comments = [], onOpenComments }) {
-  const [mode, setMode] = useState('monthly'); // monthly | weekly
+  const [mode, setMode] = useState('weekly'); // monthly | weekly
   const [approvalsOpen, setApprovalsOpen] = useState(false);
   const [weekSel, setWeekSel] = useState(null); // null = all weeks of the month
   const [brandSel, setBrandSel] = useState(''); // '' = all brands, else brand_id
@@ -1864,7 +1864,7 @@ function PerfModeToggle({ mode, setMode }) {
 function PerformanceView({ brands, creators, brandById, month, reportWeeks, reportAnchors, onCreateWeek, onSaveMonthly }) {
   const [bId, setBId] = useState(null);
   // Period granularity for GMV / Ad tracking — persisted across the drilldown.
-  const [mode, setMode] = useState('monthly'); // 'monthly' | 'weekly'
+  const [mode, setMode] = useState('weekly'); // 'monthly' | 'weekly'
   const byBrand = useMemo(() => {
     const m = {};
     creators.forEach(c => { (m[c.brand_id] = m[c.brand_id] || []).push(c); });
@@ -2147,7 +2147,7 @@ export function BrandPerformancePane({ brandId, brandName, canEdit = false }) {
   const { user } = useAuth();
   const [creators, setCreators] = useState([]);
   const [month, setMonth] = useState(thisMonthKey());
-  const [mode, setMode] = useState('monthly'); // 'monthly' | 'weekly'
+  const [mode, setMode] = useState('weekly'); // 'monthly' | 'weekly'
   const [reportWeeks, setReportWeeks] = useState([]); // [{ start, end }]
   const [anchor, setAnchor] = useState(null);
   const [loading, setLoading] = useState(true);
