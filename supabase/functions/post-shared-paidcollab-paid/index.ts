@@ -61,14 +61,15 @@ serve(async (req) => {
     // On confirm, notify the brand's assigned handler(s) + Bob so they can verify.
     if (confirmed) {
       try {
-        const [{ data: brand }, { data: handlerRows }, { data: bobs }] = await Promise.all([
+        // Notify ONLY the brand's assigned paid-collab handler(s) — paid collab is
+        // the handler's domain (same convention as post-shared-paidcollab-comment).
+        // Not Bob, not APC.
+        const [{ data: brand }, { data: handlerRows }] = await Promise.all([
           admin.from('brands').select('id,name').eq('id', brand_id).single(),
           admin.from('paid_collab_handler_brands').select('handler_id').eq('brand_id', brand_id),
-          admin.from('profiles').select('id').eq('role', 'bob'),
         ]);
         const recipientIds = new Set<string>();
         (handlerRows ?? []).forEach((r: any) => recipientIds.add(r.handler_id));
-        (bobs ?? []).forEach((p: any) => recipientIds.add(p.id));
 
         const title = `${cleanName} marked a payment as done (Paid Collab)`;
         const bodyText = `${cleanName} confirmed paying ${cr.name || 'a creator'} on ${brand?.name ?? 'a brand'}. Please cross-check and update the status.`;
