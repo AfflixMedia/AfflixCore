@@ -297,6 +297,38 @@ export async function addComment(input: {
   return data as PaidCollabComment;
 }
 
+// Signed-in CLIENT "mark payment as done" on a creator deal. Soft confirmation only
+// (sets client_paid_confirmed_at, NOT payment_status) + notifies the brand's handler(s).
+// Clients can't UPDATE handler_collab_creators via RLS, so this goes through a
+// SECURITY DEFINER RPC. Mirrors the public share fn post-shared-paidcollab-paid.
+export async function setClientPaid(creatorId: string, confirmed: boolean): Promise<HandlerCreator> {
+  const { data, error } = await supabase.rpc('set_client_paidcollab_paid', {
+    p_creator: creatorId,
+    p_confirmed: confirmed,
+  });
+  if (error) throw error;
+  return data as HandlerCreator;
+}
+
+// Add a comment as the signed-in paid-collab CLIENT. Clients can't insert into
+// paid_collab_comments via RLS (only bob/handler/apc can), so this goes through a
+// SECURITY DEFINER RPC that posts as author_type='client' and notifies the brand's
+// handler(s). Mirrors the public share link's post-shared-paidcollab-comment fn.
+export async function addClientComment(input: {
+  brandId: string; targetType: CommentTargetType; targetKey: string;
+  body: string; parentId?: string | null;
+}): Promise<PaidCollabComment> {
+  const { data, error } = await supabase.rpc('post_client_paidcollab_comment', {
+    p_brand: input.brandId,
+    p_tt: input.targetType,
+    p_tk: input.targetKey || '',
+    p_body: input.body,
+    p_parent: input.parentId || null,
+  });
+  if (error) throw error;
+  return data as PaidCollabComment;
+}
+
 // Toggle a single video's "Authorised" flag. Uses a SECURITY DEFINER RPC so APCs /
 // team leads with brand access can flip it from the read-only views without broad
 // write access to the creators table (bob / handler can also call it).

@@ -188,7 +188,13 @@ export default function PaidCollabPortal() {
               {filtered.map((o, i) => {
                 const isClosed = o.brand.client_status === 'closed';
                 const totalProgs = o.activePrograms + o.endedPrograms;
-                const go = () => nav(`/paid-collab/brands/${o.brand.id}`);
+                // Client → new Programs page filtered to this brand; handler keeps the
+                // brand view (it has their Payments controls tab).
+                const go = () => nav(
+                  revealPending
+                    ? `/paid-collab/brands/${o.brand.id}`
+                    : `/paid-collab/programs?brand=${o.brand.id}`,
+                );
                 const status = (
                   <div className="pct-statuscell">
                     {isClosed
