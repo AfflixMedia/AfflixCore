@@ -329,6 +329,11 @@ export default function PaidCollabCreators() {
                   <div className="cct-cell cct-bp">
                     <div className="cct-bp-brand">{b?.name ?? '—'}</div>
                     <div className="cct-bp-prog">{programDisplayName(prog)}</div>
+                    {(c as any).onboard_date && (
+                      <div className="cct-bp-prog" style={{ fontSize: 11, opacity: .75 }}>
+                        <i className="bi bi-calendar3 me-1" />Onboarded {new Date((c as any).onboard_date + 'T00:00:00').toLocaleDateString()}
+                      </div>
+                    )}
                   </div>
                   <div className="cct-cell cct-prog">
                     {agreed > 0 ? (
@@ -384,7 +389,8 @@ export default function PaidCollabCreators() {
                         <div className="cct-stat"><div className="cct-stat-l">Pipeline</div><div className="cct-stat-v orange">{pipeline}</div></div>
                         <div className="cct-stat"><div className="cct-stat-l">Agreed</div><div className="cct-stat-v">{agreed || '—'}</div></div>
                         <div className="cct-stat"><div className="cct-stat-l">GMV</div><div className="cct-stat-v green">{fmtMoney(Number(c.gmv) || 0, currency)}</div></div>
-                        <div className="cct-stat"><div className="cct-stat-l">Items sold</div><div className="cct-stat-v blue">{fmtNumber(Number(c.items_sold) || 0)}</div></div>
+                        {/* Items sold — not tracked in the current handler_collab model (always 0), hidden.
+                        <div className="cct-stat"><div className="cct-stat-l">Items sold</div><div className="cct-stat-v blue">{fmtNumber(Number(c.items_sold) || 0)}</div></div> */}
                       </div>
                       <div className="cct-details">
                         <div><div className="cct-dt-l">Brand</div><div className="cct-dt-v">{b?.name ?? '—'}</div></div>

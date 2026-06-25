@@ -89,6 +89,7 @@ export function useClientPaidCollabData() {
           // flip this on — so the client only ever sees a pending status when true.
           pending_visible_to_client: !!c.pending_visible_to_client,
           completed_on: c.completed_on || null,
+          onboard_date: c.onboarded_on || null,
           // Client "marked payment as done" soft flag (set via set_client_paidcollab_paid).
           client_paid_confirmed_at: c.client_paid_confirmed_at || null,
           client_paid_confirmed_name: c.client_paid_confirmed_name || null,
