@@ -577,14 +577,26 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
     return Object.values(last).filter((c) => c.author_type === 'client').length;
   }, [comments]);
 
-  // Notification click-through: /paid-collab?brand=&tt=&tk=&pcc= opens the thread.
+  // Notification click-through:
+  //  • /paid-collab?brand=&pay=1[&month=]  → open the brand's workspace drilldown
+  //    (client "marked paid" — handler cross-checks + updates status here)
+  //  • /paid-collab?brand=&tt=&tk=&pcc=    → open the discussion thread drawer
   const deepLinked = useRef(false);
   useEffect(() => {
     if (loading || deepLinked.current) return;
     deepLinked.current = true;
     const sp = new URLSearchParams(window.location.search);
     const b = sp.get('brand');
-    if (b) setCommentDrawer({ brandId: b, tt: sp.get('tt') || 'brand', tk: sp.get('tk') || '', highlight: sp.get('pcc') || null });
+    if (!b) return;
+    if (sp.get('pay') === '1') {
+      const m = sp.get('month');
+      if (m && /^\d{4}-\d{2}$/.test(m)) setMonth(m);
+      setTab('brands');
+      setDrillId(b);
+      scrollTop();
+    } else {
+      setCommentDrawer({ brandId: b, tt: sp.get('tt') || 'brand', tk: sp.get('tk') || '', highlight: sp.get('pcc') || null });
+    }
   }, [loading]);
   // notes (per brand, per month) — optimistic + persist
   const saveNotes = useCallback((brandId, notesText) => {

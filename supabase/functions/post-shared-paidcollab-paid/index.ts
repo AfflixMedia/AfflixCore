@@ -43,7 +43,7 @@ serve(async (req) => {
 
     // Confirm the creator belongs to this brand.
     const { data: cr } = await admin.from('handler_collab_creators')
-      .select('id,brand_id,name').eq('id', creator_id).maybeSingle();
+      .select('id,brand_id,name,onboarded_on').eq('id', creator_id).maybeSingle();
     if (!cr || cr.brand_id !== brand_id) return json({ error: 'Invalid creator' }, 400);
 
     const cleanName = String(author_name ?? '').trim().slice(0, 80) || 'Client';
@@ -73,7 +73,10 @@ serve(async (req) => {
 
         const title = `${cleanName} marked a payment as done (Paid Collab)`;
         const bodyText = `${cleanName} confirmed paying ${cr.name || 'a creator'} on ${brand?.name ?? 'a brand'}. Please cross-check and update the status.`;
-        const linkUrl = `/paid-collab?brand=${encodeURIComponent(brand_id)}`;
+        // `pay=1` opens the brand's workspace drilldown (not the discussion drawer);
+        // `month` jumps to the creator's program month so the pending row is visible.
+        const month = cr.onboarded_on ? String(cr.onboarded_on).slice(0, 7) : '';
+        const linkUrl = `/paid-collab?brand=${encodeURIComponent(brand_id)}&pay=1${month ? `&month=${month}` : ''}`;
         const payload = { brand_id, creator_id, kind: 'client_marked_paid' };
         const rows = Array.from(recipientIds).map(uid => ({
           user_id: uid, type: 'paid_collab_client_paid', title, body: bodyText, link: linkUrl, payload,
