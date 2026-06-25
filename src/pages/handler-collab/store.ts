@@ -86,10 +86,10 @@ export async function getClients() {
 }
 
 export async function loadAll() {
-  // Brands now come from public.brands: paid-collab-enabled (scope contains
-  // 'paid_creator') and, for a handler, RLS-scoped to those assigned to them.
+  // Brands come from public.brands, RLS-scoped to those assigned to the handler
+  // (via paid_collab_handler_brands) — no paid_creator scope requirement.
   const { data: bRows, error: bErr } = await supabase
-    .from('brands').select('id,name,client').contains('scope', ['paid_creator']).order('name');
+    .from('brands').select('id,name,client').order('name');
   if (bErr) throw bErr;
   const brands = (bRows || []) as HandlerBrand[];
   const ids = brands.map(b => b.id);

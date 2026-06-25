@@ -25,6 +25,7 @@ export default function PaidCollabHandlers() {
   const [show, setShow] = useState(false);
   const [editHandler, setEditHandler] = useState<Handler | null>(null);
   const [form, setForm] = useState({ email: '', password: '', full_name: '', brand_ids: [] as string[] });
+  const [brandSearch, setBrandSearch] = useState('');
   const [saving, setSaving] = useState(false);
 
   const [pwHandler, setPwHandler] = useState<Handler | null>(null);
@@ -41,7 +42,7 @@ export default function PaidCollabHandlers() {
     setLoading(true); setErr(null);
     const [{ data: hRows, error: e1 }, { data: brandRows, error: e2 }, { data: assigns, error: e3 }] = await Promise.all([
       supabase.from('profiles').select('id,email,full_name,role,created_at').eq('role', 'paid_collab_handler').order('created_at', { ascending: false }),
-      supabase.from('brands').select('id,name').contains('scope', ['paid_creator']).order('name'),
+      supabase.from('brands').select('id,name').order('name'),
       supabase.from('paid_collab_handler_brands').select('handler_id,brand_id'),
     ]);
     if (e1 || e2 || e3) {
@@ -79,6 +80,7 @@ export default function PaidCollabHandlers() {
   const openAdd = () => {
     setEditHandler(null);
     setForm({ email: '', password: '', full_name: '', brand_ids: [] });
+    setBrandSearch('');
     setErr(null);
     setShow(true);
   };
@@ -86,6 +88,7 @@ export default function PaidCollabHandlers() {
   const openEdit = (h: Handler) => {
     setEditHandler(h);
     setForm({ email: h.email, password: '', full_name: h.full_name ?? '', brand_ids: h.brand_ids ?? [] });
+    setBrandSearch('');
     setErr(null);
     setShow(true);
   };
@@ -217,11 +220,18 @@ export default function PaidCollabHandlers() {
                   <div className="mt-2 ac-chip-group">
                     {(h.brand_names ?? []).length === 0 ? (
                       <span className="text-muted small fst-italic">No brands assigned</span>
-                    ) : h.brand_names!.map(n => (
-                      <span key={n} className="ac-chip neutral">
-                        <i className="bi bi-shop" /> {n}
-                      </span>
-                    ))}
+                    ) : (
+                      <>
+                        <span className="ac-chip" title="Brands assigned">
+                          <i className="bi bi-shop" /> {h.brand_names!.length} brand{h.brand_names!.length === 1 ? '' : 's'}
+                        </span>
+                        {h.brand_names!.map(n => (
+                          <span key={n} className="ac-chip neutral">
+                            <i className="bi bi-shop" /> {n}
+                          </span>
+                        ))}
+                      </>
+                    )}
                   </div>
                 </div>
                 <div className="ac-row-actions">
@@ -271,23 +281,49 @@ export default function PaidCollabHandlers() {
             )}
 
             <Form.Group className="mb-2">
-              <Form.Label>Assign brands</Form.Label>
+              <div className="d-flex align-items-center justify-content-between mb-1">
+                <Form.Label className="mb-0">Assign brands</Form.Label>
+                <span className="text-muted small">
+                  {form.brand_ids.length} of {brands.length} selected
+                </span>
+              </div>
               {brands.length === 0 ? (
-                <p className="text-muted small mb-0">No paid-collab-enabled brands yet. Turn on “Enable paid collab” for a brand on the Brands page.</p>
-              ) : (
-                <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid #dee2e6', borderRadius: 6, padding: 10 }}>
-                  {brands.map(b => (
-                    <Form.Check
-                      key={b.id}
-                      type="checkbox"
-                      id={`pch-${b.id}`}
-                      label={b.name}
-                      checked={form.brand_ids.includes(b.id)}
-                      onChange={() => toggleBrand(b.id)}
-                    />
-                  ))}
-                </div>
-              )}
+                <p className="text-muted small mb-0">No brands yet. Create a brand on the Brands page.</p>
+              ) : (() => {
+                const q = brandSearch.trim().toLowerCase();
+                const visible = q ? brands.filter(b => b.name.toLowerCase().includes(q)) : brands;
+                return (
+                  <>
+                    <div className="ac-search mb-2">
+                      <i className="bi bi-search" />
+                      <input
+                        placeholder="Search brands…"
+                        value={brandSearch}
+                        onChange={e => setBrandSearch(e.target.value)}
+                      />
+                      {brandSearch && (
+                        <button type="button" className="btn btn-link p-0 text-muted" onClick={() => setBrandSearch('')}>
+                          <i className="bi bi-x-lg" />
+                        </button>
+                      )}
+                    </div>
+                    <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid #dee2e6', borderRadius: 6, padding: 10 }}>
+                      {visible.length === 0 ? (
+                        <p className="text-muted small mb-0">No brands match “{brandSearch}”.</p>
+                      ) : visible.map(b => (
+                        <Form.Check
+                          key={b.id}
+                          type="checkbox"
+                          id={`pch-${b.id}`}
+                          label={b.name}
+                          checked={form.brand_ids.includes(b.id)}
+                          onChange={() => toggleBrand(b.id)}
+                        />
+                      ))}
+                    </div>
+                  </>
+                );
+              })()}
             </Form.Group>
           </Modal.Body>
           <Modal.Footer>
