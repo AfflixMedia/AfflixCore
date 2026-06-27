@@ -1,6 +1,6 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { Card, Form, Button, Row, Col, Table, Modal, Badge, Dropdown } from 'react-bootstrap';
-import { CustomField, CustomFieldType, CustomSection, StandardSectionId, WEEKLY_SECTIONS } from '../lib/reportSchema';
+import { CustomField, CustomFieldType, CustomSection, StandardSectionId } from '../lib/reportSchema';
 import RichTextEditor from './RichTextEditor';
 import NumberInput from './NumberInput';
 import { supabase } from '../lib/supabase';
@@ -16,11 +16,17 @@ const TYPE_LABELS: Partial<Record<CustomFieldType, string>> = {
   date: 'Date', url: 'URL', select: 'Dropdown',
 };
 
-export const POSITION_LABELS = {
+export const POSITION_LABELS: Record<StandardSectionId, string> = {
   start: 'At the very top',
-  ...Object.fromEntries(WEEKLY_SECTIONS.map(s => [s.id, `After ${s.num}. ${s.title}`])),
+  overall: 'After Overall Performance',
+  top_creators: 'After Top Creators',
+  top_videos: 'After Top Videos',
+  video_performance: 'After Video Performance',
+  gmv_max: 'After GMV Max',
+  product_highlights: 'After Product Highlights',
+  shop_health: 'After Shop Health',
   insights: 'After Insights (end)',
-} as Record<StandardSectionId, string>;
+};
 
 /* ------------------ "Add section above/below" menu ------------------ */
 
@@ -248,7 +254,7 @@ function FieldInput({ field, value, onChange, size }: {
 /* ------------------ Definition modal (add / edit a section) ------------------ */
 
 export function CustomSectionDefModal({
-  show, onHide, initial, onSave, isEdit, hidePosition,
+  show, onHide, initial, onSave, isEdit, hidePosition, positions,
 }: {
   show: boolean;
   onHide: () => void;
@@ -258,7 +264,11 @@ export function CustomSectionDefModal({
   /** When true, the Position picker is hidden — the position is already
    *  decided (e.g. adding via a section's "above/below" + menu). */
   hidePosition?: boolean;
+  /** Anchor id -> label map for the Position picker. Defaults to the classic
+   *  POSITION_LABELS; the v2 editor passes its own section anchors. */
+  positions?: Record<string, string>;
 }) {
+  const posMap: Record<string, string> = positions ?? POSITION_LABELS;
   const [draft, setDraft] = useState<CustomSection>(initial);
   // Track the raw text of options per field so commas type freely
   const [optsText, setOptsText] = useState<Record<string, string>>({});
@@ -318,9 +328,9 @@ export function CustomSectionDefModal({
             {!hidePosition && (
               <Col md={12}>
                 <Form.Label className="small">Position</Form.Label>
-                <Form.Select value={draft.insert_after} onChange={e => setDraft({ ...draft, insert_after: e.target.value as StandardSectionId })}>
-                  {(Object.keys(POSITION_LABELS) as StandardSectionId[]).map(p => (
-                    <option key={p} value={p}>{POSITION_LABELS[p]}</option>
+                <Form.Select value={draft.insert_after} onChange={e => setDraft({ ...draft, insert_after: e.target.value })}>
+                  {Object.keys(posMap).map(p => (
+                    <option key={p} value={p}>{posMap[p]}</option>
                   ))}
                 </Form.Select>
                 <Form.Text className="text-muted">Where this section will appear in the form and the dashboard.</Form.Text>
@@ -431,7 +441,7 @@ export function CustomSectionDefModal({
 
 /* ------------------ Helpers ------------------ */
 
-export function newSection(insertAfter: StandardSectionId = 'insights'): CustomSection {
+export function newSection(insertAfter: string = 'insights'): CustomSection {
   return {
     id: crypto.randomUUID(),
     name: '',
@@ -448,6 +458,6 @@ export function newSection(insertAfter: StandardSectionId = 'insights'): CustomS
   };
 }
 
-export function customSectionsAt(all: CustomSection[], anchor: StandardSectionId): CustomSection[] {
+export function customSectionsAt(all: CustomSection[], anchor: string): CustomSection[] {
   return all.filter(s => s.insert_after === anchor);
 }

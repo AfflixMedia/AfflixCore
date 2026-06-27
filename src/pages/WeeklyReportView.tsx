@@ -7,8 +7,10 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/AuthContext';
 import { useNotifications } from '../notifications/NotificationsContext';
 import { addDays, formatRange, formatHuman, formatWeekShort } from '../lib/dates';
-import { WeeklyReportContent, normalizeContent } from '../lib/reportSchema';
+import { normalizeContent } from '../lib/reportSchema';
+import { normalizeContentV2 } from '../lib/reportSchemaV2';
 import ReportDashboard, { TrendPoint, ApprovalDecisionView } from '../components/ReportDashboard';
+import ReportDashboardV2 from '../components/ReportDashboardV2';
 import CanvasRenderer from '../components/canvas/CanvasRenderer';
 import {
   CanvasSchema, parseTemplateRow, buildMetricBagFromReportContent,
@@ -18,7 +20,7 @@ import ReportReviewBar, { ReviewState, ReviewStatus } from '../components/Report
 
 interface ReportRow {
   id: string; brand_id: string; week_start: string; week_end: string;
-  week_number: number; status: string; content: WeeklyReportContent;
+  week_number: number; status: string; content: any;
   template_id?: string | null;
   review_status?: ReviewStatus; reviewed_at?: string | null; review_note?: string | null;
 }
@@ -152,14 +154,21 @@ export default function WeeklyReportView() {
     })();
   }, [id]);
 
-  const c = useMemo<WeeklyReportContent>(() => normalizeContent(report?.content), [report]);
-  const p = useMemo<WeeklyReportContent | null>(() => prev ? normalizeContent(prev.content) : null, [prev]);
+  // New (14-section) reports carry content.format_version === 'v2'; everything
+  // else renders on the original classic dashboard.
+  const isV2 = (report?.content as any)?.format_version === 'v2';
+  const c = useMemo<any>(() => isV2 ? normalizeContentV2(report?.content) : normalizeContent(report?.content), [report, isV2]);
+  const p = useMemo<any>(() => !prev ? null : (isV2 ? normalizeContentV2(prev.content) : normalizeContent(prev.content)), [prev, isV2]);
+  // GMV trend reads the raw content for either format, so a brand whose history
+  // mixes classic + v2 reports still charts correctly.
   const trendData: TrendPoint[] = useMemo(() => trend.map(t => {
-    const n = normalizeContent(t.content);
+    const cn: any = t.content ?? {};
+    const gmv = cn?.snapshot?.total_gmv ?? cn?.gmv_performance?.total_gmv ?? cn?.overall?.total_gmv;
+    const aff = cn?.snapshot?.affiliate_gmv ?? cn?.gmv_performance?.affiliate_gmv ?? cn?.overall?.affiliate_gmv;
     return {
       label: formatWeekShort(t.week_start, t.week_end),
-      GMV: Number(n.snapshot.total_gmv ?? n.gmv_performance.total_gmv) || 0,
-      'Affiliate GMV': Number(n.snapshot.affiliate_gmv ?? n.gmv_performance.affiliate_gmv) || 0,
+      GMV: Number(gmv) || 0,
+      'Affiliate GMV': Number(aff) || 0,
     };
   }), [trend]);
 
@@ -260,22 +269,41 @@ export default function WeeklyReportView() {
           </div>
         )}
 
-        <ReportDashboard
-          c={c}
-          p={p}
-          trendData={trendData}
-          hasPrev={!!prev}
-          prevTopVideos={p?.top_videos}
-          openSectionOnLoad={openSection}
-          highlightCommentId={highlightCommentId}
-          approvalDecisions={decisions}
-          commentsConfig={{
-            mode: 'authed',
-            comments,
-            currentAuthorName: profile?.full_name || profile?.email || 'User',
-            onAdd: addComment,
-          }}
-        />
+        {isV2 ? (
+          <ReportDashboardV2
+            c={c}
+            p={p}
+            trendData={trendData}
+            hasPrev={!!prev}
+            prevTopVideos={p?.top_videos}
+            openSectionOnLoad={openSection}
+            highlightCommentId={highlightCommentId}
+            approvalDecisions={decisions}
+            commentsConfig={{
+              mode: 'authed',
+              comments,
+              currentAuthorName: profile?.full_name || profile?.email || 'User',
+              onAdd: addComment,
+            }}
+          />
+        ) : (
+          <ReportDashboard
+            c={c}
+            p={p}
+            trendData={trendData}
+            hasPrev={!!prev}
+            prevTopVideos={p?.top_videos}
+            openSectionOnLoad={openSection}
+            highlightCommentId={highlightCommentId}
+            approvalDecisions={decisions}
+            commentsConfig={{
+              mode: 'authed',
+              comments,
+              currentAuthorName: profile?.full_name || profile?.email || 'User',
+              onAdd: addComment,
+            }}
+          />
+        )}
       </div>
     </>
   );

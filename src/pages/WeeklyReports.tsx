@@ -112,6 +112,8 @@ export default function WeeklyReports() {
   const [anchorPick, setAnchorPick] = useState('');
   // Optional Reporting Canvas template — null = legacy layout.
   const [createTemplateId, setCreateTemplateId] = useState<string | null>(null);
+  // Which report format to create: 'v2' = new 14-section, 'classic' = previous.
+  const [createFormat, setCreateFormat] = useState<'classic' | 'v2'>('v2');
   const [saving, setSaving] = useState(false);
 
   const load = async () => {
@@ -198,6 +200,7 @@ export default function WeeklyReports() {
     }
     setCreateBrand(b);
     setAnchorPick(settings[b.id] ?? '');
+    setCreateFormat('v2');
     setErr(null);
     setShow(true);
     setPickerOpen(false);
@@ -238,6 +241,8 @@ export default function WeeklyReports() {
         week_number,
         status: 'draft',
         template_id: createTemplateId,
+        // Stamp the chosen format into content; classic stays null (unchanged behaviour).
+        content: createFormat === 'v2' ? { format_version: 'v2' } : null,
       }).select('id').single();
       if (error) throw error;
       setShow(false);
@@ -552,6 +557,28 @@ export default function WeeklyReports() {
                 </Alert>
               );
             })()}
+            <div className="mb-3">
+              <Form.Label className="small fw-semibold mb-2">Report template</Form.Label>
+              <div className="d-flex flex-column gap-2">
+                <label className={`d-flex align-items-start gap-2 p-2 rounded border ${createFormat === 'v2' ? 'border-primary bg-light' : ''}`} style={{ cursor: 'pointer' }}>
+                  <Form.Check type="radio" name="report-format" checked={createFormat === 'v2'}
+                    onChange={() => setCreateFormat('v2')} className="mt-1" />
+                  <span>
+                    <span className="fw-semibold">New — 14-section format</span>
+                    <span className="badge bg-primary ms-2">New</span>
+                    <div className="text-muted small">TikTok-Shop performance layout with auto-calculations, GMV Max auto-fill, charts and advanced insights dividers.</div>
+                  </span>
+                </label>
+                <label className={`d-flex align-items-start gap-2 p-2 rounded border ${createFormat === 'classic' ? 'border-primary bg-light' : ''}`} style={{ cursor: 'pointer' }}>
+                  <Form.Check type="radio" name="report-format" checked={createFormat === 'classic'}
+                    onChange={() => setCreateFormat('classic')} className="mt-1" />
+                  <span>
+                    <span className="fw-semibold">Previous format</span>
+                    <div className="text-muted small">The original report layout. All existing reports use this.</div>
+                  </span>
+                </label>
+              </div>
+            </div>
             {createBrand && (
               <TemplatePicker
                 reportKind="weekly"

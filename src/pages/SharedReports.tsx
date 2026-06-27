@@ -4,8 +4,10 @@ import { Card, Spinner, Alert, Form, Row, Col, Badge, Button, Tab, Nav, Offcanva
 import { supabase } from '../lib/supabase';
 import { addDays, formatRange, formatHuman, formatWeekShort, fromISO } from '../lib/dates';
 import { WeeklyReportContent, normalizeContent } from '../lib/reportSchema';
+import { normalizeContentV2 } from '../lib/reportSchemaV2';
 import { MonthlyReportContent, normalizeMonthlyContent } from '../lib/monthlyReportSchema';
 import ReportDashboard, { TrendPoint, ApprovalDecisionView } from '../components/ReportDashboard';
+import ReportDashboardV2 from '../components/ReportDashboardV2';
 import MonthlyReportDashboard from '../components/MonthlyReportDashboard';
 import SectionComments, { Comment, CommentSection } from '../components/SectionComments';
 import { resourceIcon } from '../lib/resourceIcon';
@@ -222,11 +224,13 @@ export default function SharedReports() {
       .sort((a, b) => a.week_start.localeCompare(b.week_start))
       .slice(-8)
       .map(t => {
-        const n = normalizeContent(t.content);
+        const cn: any = t.content ?? {};
+        const gmv = cn?.snapshot?.total_gmv ?? cn?.gmv_performance?.total_gmv ?? cn?.overall?.total_gmv;
+        const aff = cn?.snapshot?.affiliate_gmv ?? cn?.gmv_performance?.affiliate_gmv ?? cn?.overall?.affiliate_gmv;
         return {
           label: formatWeekShort(t.week_start, t.week_end),
-          GMV: Number(n.snapshot.total_gmv ?? n.gmv_performance.total_gmv) || 0,
-          'Affiliate GMV': Number(n.snapshot.affiliate_gmv ?? n.gmv_performance.affiliate_gmv) || 0,
+          GMV: Number(gmv) || 0,
+          'Affiliate GMV': Number(aff) || 0,
         };
       });
   }, [openReport, reports]);
@@ -438,6 +442,10 @@ export default function SharedReports() {
     const idx = sameBrand.findIndex(r => r.id === openReport.id);
     const newer = idx > 0 ? sameBrand[idx - 1] : null;          // index-1 is more recent
     const older = idx >= 0 && idx < sameBrand.length - 1 ? sameBrand[idx + 1] : null;
+    // New (14-section) reports render on the v2 dashboard; older reports stay classic.
+    const isOpenV2 = (openReport.content as any)?.format_version === 'v2';
+    const WeeklyDash: any = isOpenV2 ? ReportDashboardV2 : ReportDashboard;
+    const normWeekly = isOpenV2 ? normalizeContentV2 : normalizeContent;
     return (
       <PublicShell clientName={clientName}>
         <div className="d-flex align-items-start gap-3 mb-4 flex-wrap">
@@ -449,14 +457,14 @@ export default function SharedReports() {
             <h4 className="mb-0">Week #{openReport.week_number} — {formatRange(openReport.week_start, openReport.week_end)}</h4>
           </div>
         </div>
-        <ReportDashboard
-          c={normalizeContent(openReport.content)}
-          p={prevReport ? normalizeContent(prevReport.content) : null}
+        <WeeklyDash
+          c={normWeekly(openReport.content)}
+          p={prevReport ? normWeekly(prevReport.content) : null}
           trendData={trendData}
           hasPrev={!!prevReport}
-          prevTopVideos={prevReport ? normalizeContent(prevReport.content).top_videos : undefined}
+          prevTopVideos={prevReport ? (normWeekly(prevReport.content) as any).top_videos : undefined}
           paidCollab={{ programs: pcPrograms, creators: pcCreators, videos: pcVideos, performance: pcPerformance }}
-          onOpenPaidCollabProgram={(pid) => {
+          onOpenPaidCollabProgram={(pid: string) => {
             setOpenId(null);
             setOpenMonthlyId(null);
             setActiveTab('paid-collab');
@@ -472,7 +480,7 @@ export default function SharedReports() {
               } : null;
             })(),
             defaultName: publicName,
-            onSubmit: async (choice, comment, name) => {
+            onSubmit: async (choice: 'approved' | 'changes_requested', comment: string, name: string) => {
               await submitApprovals([{
                 report_id: openReport.id,
                 report_type: 'weekly',
@@ -544,7 +552,7 @@ export default function SharedReports() {
         <MonthlyReportDashboard
           c={normalizeMonthlyContent(openMonthly.content)}
           paidCollab={{ programs: pcPrograms, creators: pcCreators, videos: pcVideos, performance: pcPerformance }}
-          onOpenPaidCollabProgram={(pid) => {
+          onOpenPaidCollabProgram={(pid: string) => {
             setOpenId(null);
             setOpenMonthlyId(null);
             setActiveTab('paid-collab');

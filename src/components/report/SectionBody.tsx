@@ -1,5 +1,5 @@
 import { Row, Col, Form, Table, Button, Badge } from 'react-bootstrap';
-import { SectionDef, SectionField, ScalarData, RowData, fieldValue, formatValue } from '../../lib/reportSchema';
+import { SectionDef, SectionField, ScalarData, RowData, fieldValue, formatValue } from '../../lib/reportSchemaV2';
 import NumField from '../NumField';
 
 // Currency/decimal fields step by cents; counts step by 1.
