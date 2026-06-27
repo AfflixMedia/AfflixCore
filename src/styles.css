@@ -258,6 +258,25 @@ a:hover { color: var(--ac-primary-2); }
 .ac-rte-view h3 { font-size: 1.15rem; margin: .8rem 0 .4rem; }
 .ac-rte-view hr { border: 0; border-top: 1px solid #cbd5e1; margin: 1rem 0; }
 
+/* Advanced Insights dividers — inline style carries colour/thickness/width;
+   the wavy & ornamental geometry lives here and is coloured via currentColor.
+   Targets both the live editor (.ql-editor) and the read-only view. */
+.ac-rte-view hr.ac-divider,
+.ql-editor hr.ac-divider { border: 0; background: none; }
+.ac-rte-view hr.ac-divider-wavy,
+.ql-editor hr.ac-divider-wavy {
+  background-color: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='12' viewBox='0 0 24 12'%3E%3Cpath d='M0 6 Q 6 0 12 6 T 24 6' fill='none' stroke='black' stroke-width='2.4'/%3E%3C/svg%3E") repeat-x center / 24px 100%;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='12' viewBox='0 0 24 12'%3E%3Cpath d='M0 6 Q 6 0 12 6 T 24 6' fill='none' stroke='black' stroke-width='2.4'/%3E%3C/svg%3E") repeat-x center / 24px 100%;
+}
+.ac-rte-view hr.ac-divider-ornament,
+.ql-editor hr.ac-divider-ornament {
+  background-image: radial-gradient(currentColor 38%, transparent 42%);
+  background-size: 14px 100%;
+  background-repeat: repeat-x;
+  background-position: center;
+}
+
 /* Rich-text list markers — Word / Google Docs style varied bullets per
    indent level. Quill renders bullets as <li data-list="bullet"> inside an
    <ol>, with the actual marker drawn by `.ql-ui::before` (an injected

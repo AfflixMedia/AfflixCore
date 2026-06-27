@@ -1,6 +1,6 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { Card, Form, Button, Row, Col, Table, Modal, Badge, Dropdown } from 'react-bootstrap';
-import { CustomField, CustomFieldType, CustomSection, StandardSectionId } from '../lib/reportSchema';
+import { CustomField, CustomFieldType, CustomSection, StandardSectionId, WEEKLY_SECTIONS } from '../lib/reportSchema';
 import RichTextEditor from './RichTextEditor';
 import NumberInput from './NumberInput';
 import { supabase } from '../lib/supabase';
@@ -16,17 +16,11 @@ const TYPE_LABELS: Partial<Record<CustomFieldType, string>> = {
   date: 'Date', url: 'URL', select: 'Dropdown',
 };
 
-export const POSITION_LABELS: Record<StandardSectionId, string> = {
+export const POSITION_LABELS = {
   start: 'At the very top',
-  overall: 'After Overall Performance',
-  top_creators: 'After Top Creators',
-  top_videos: 'After Top Videos',
-  video_performance: 'After Video Performance',
-  gmv_max: 'After GMV Max',
-  product_highlights: 'After Product Highlights',
-  shop_health: 'After Shop Health',
+  ...Object.fromEntries(WEEKLY_SECTIONS.map(s => [s.id, `After ${s.num}. ${s.title}`])),
   insights: 'After Insights (end)',
-};
+} as Record<StandardSectionId, string>;
 
 /* ------------------ "Add section above/below" menu ------------------ */
 
