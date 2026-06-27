@@ -92,15 +92,21 @@ export default function Dashboard() {
     return c;
   }, [brands]);
 
-  // Sum total_gmv across every weekly report whose week_end fell in the last
-  // 30 days. Each report's content.overall.total_gmv is treated as that week's
-  // brand GMV; we add them all together for the workspace-wide total.
+  // Each report's Total GMV — reads the v2 (14-section) path first, falling back
+  // to the legacy `overall` shape so historical reports still count.
+  const reportGmv = (content: any): number => {
+    const v = content?.snapshot?.total_gmv
+      ?? content?.gmv_performance?.total_gmv
+      ?? content?.overall?.total_gmv;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  // Sum Total GMV across every weekly report whose week_end fell in the last
+  // 30 days for the workspace-wide total.
   const gmv30d = useMemo(() => {
     let total = 0;
-    for (const r of reports) {
-      const v = Number(r?.content?.overall?.total_gmv) || 0;
-      if (Number.isFinite(v)) total += v;
-    }
+    for (const r of reports) total += reportGmv(r?.content);
     return total;
   }, [reports]);
 
@@ -109,7 +115,7 @@ export default function Dashboard() {
   const brandsContributingToGmv = useMemo(() => {
     const set = new Set<string>();
     for (const r of reports) {
-      if ((Number(r?.content?.overall?.total_gmv) || 0) > 0) set.add(r.brand_id);
+      if (reportGmv(r?.content) > 0) set.add(r.brand_id);
     }
     return set.size;
   }, [reports]);

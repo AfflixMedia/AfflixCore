@@ -225,8 +225,8 @@ export default function SharedReports() {
         const n = normalizeContent(t.content);
         return {
           label: formatWeekShort(t.week_start, t.week_end),
-          GMV: n.overall.total_gmv,
-          'Affiliate GMV': n.overall.affiliate_gmv,
+          GMV: Number(n.snapshot.total_gmv ?? n.gmv_performance.total_gmv) || 0,
+          'Affiliate GMV': Number(n.snapshot.affiliate_gmv ?? n.gmv_performance.affiliate_gmv) || 0,
         };
       });
   }, [openReport, reports]);

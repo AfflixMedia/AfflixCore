@@ -259,23 +259,30 @@ export const EMPTY_METRIC_BAG: MetricBag = { current: {}, previous: {} };
  */
 export function buildMetricBagFromReportContent(content: any): Record<string, number | null> {
   if (!content) return {};
+  // v2 (14-section) shape — with graceful fallback to the legacy v1 `overall`.
+  const snap = content.snapshot ?? {};
+  const gmvPerf = content.gmv_performance ?? {};
+  const activity = content.activity ?? {};
+  const adOverall = content.ad_overall ?? {};
+  const products = Array.isArray(content.product_analytics) ? content.product_analytics : [];
+  // legacy fallbacks
   const overall = content.overall ?? {};
   const videoPerf = content.video_performance ?? {};
   const gmvMax = content.gmv_max ?? {};
-  const products = Array.isArray(content.product_highlights) ? content.product_highlights : [];
 
   const sum = (k: string) => products.reduce((s: number, p: any) => s + (Number(p?.[k]) || 0), 0);
+  const pick = (...vals: any[]) => { for (const v of vals) { const n = num(v); if (n != null) return n; } return null; };
 
   return {
-    gmv:            num(overall.total_gmv),
-    affiliate_gmv:  num(overall.affiliate_gmv),
-    paid_gmv:       num(gmvMax.gmv),
-    revenue:        null,                          // not directly stored — extend later
+    gmv:            pick(snap.total_gmv, gmvPerf.total_gmv, overall.total_gmv),
+    affiliate_gmv:  pick(snap.affiliate_gmv, gmvPerf.affiliate_gmv, overall.affiliate_gmv),
+    paid_gmv:       pick(adOverall.gmv_generated, gmvMax.gmv),
+    revenue:        null,
     commission:     null,
-    orders:         num(overall.orders),
-    units_sold:     sum('total_units_sold'),
-    affiliate_units: sum('affiliate_units_sold'),
-    videos_live:    num(videoPerf.total_videos_posted),
+    orders:         pick(snap.orders, content.shop_analytics?.orders, overall.orders),
+    units_sold:     sum('items') || null,
+    affiliate_units: null,
+    videos_live:    pick(snap.new_videos_posted, activity.new_videos_posted, videoPerf.total_videos_posted),
     videos_pipeline: null,
     creators_active: Array.isArray(content.top_creators) ? content.top_creators.length : null,
     views:          num(videoPerf.video_views),
