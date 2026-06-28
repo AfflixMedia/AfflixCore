@@ -169,39 +169,40 @@ export default function ReportDashboard({
       const snap = deriveSnapshot(c);
       const psnap = p ? deriveSnapshot(p) : null;
       return (
-        <div data-section="snapshot">
-          <Card className="mb-3">
-            <Card.Header>
-              <div className="d-flex justify-content-between align-items-center w-100">
-                <span className="fw-semibold">{!isClient && <span className="text-muted me-1">1.</span>}{def.title}</span>
-                <FeedbackIcon section="snapshot" />
-              </div>
-            </Card.Header>
-            <Card.Body>
-              <Row className="g-3">
-                {def.fields.map(f => (
-                  <Col xs={6} md={4} xl={2} key={f.key}>
-                    <KpiTile label={f.label} value={formatValue(f.format, fieldValue(f, snap))}
-                      f={f} cur={fieldValue(f, snap)} prev={psnap ? fieldValue(f, psnap) : null} />
-                  </Col>
-                ))}
-              </Row>
-            </Card.Body>
-          </Card>
+        <div data-section="snapshot" className="s14-section">
+          <div className="s14-title">
+            <span className="s14-title-accent" style={{ background: '#e8862e' }} />
+            <div className="flex-grow-1">
+              <div className="s14-title-text">Executive Snapshot</div>
+              <div className="s14-title-sub">{isClient ? 'This week at a glance — vs the previous week' : 'Headline scorecard · auto-calculated'}</div>
+            </div>
+            <FeedbackIcon section="snapshot" />
+          </div>
+          <Row className="g-3">
+            {def.fields.map(f => (
+              <Col xs={6} md={4} xl={2} key={f.key}>
+                <KpiTile label={f.label} value={formatValue(f.format, fieldValue(f, snap))}
+                  f={f} cur={fieldValue(f, snap)} prev={psnap ? fieldValue(f, psnap) : null} />
+              </Col>
+            ))}
+          </Row>
           {trendData.length > 1 && (
-            <Card className="mb-3">
-              <Card.Header><span className="fw-semibold">GMV trend (last {trendData.length} weeks)</span></Card.Header>
-              <Card.Body style={{ height: 280 }}>
+            <div className="s14-card mt-3">
+              <div className="s14-kpi-label mb-2">GMV trend · last {trendData.length} weeks</div>
+              <div style={{ height: 260 }}>
                 <ResponsiveContainer>
-                  <LineChart data={trendData}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="label" /><YAxis /><Tooltip /><Legend />
+                  <LineChart data={trendData} margin={{ top: 8, right: 16, bottom: 4, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis dataKey="label" tick={{ fontSize: 12, fill: '#8a93a6' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
+                    <YAxis tick={{ fontSize: 12, fill: '#8a93a6' }} tickLine={false} axisLine={false} width={64} tickFormatter={(v: number) => formatValue('currency', v, { compact: true })} />
+                    <Tooltip contentStyle={{ borderRadius: 10, border: '1px solid #eef0f4', boxShadow: '0 6px 18px rgba(16,24,40,.08)' }} />
+                    <Legend />
                     <Line type="monotone" dataKey="GMV" stroke="#e8862e" strokeWidth={3} dot={{ r: 4 }} />
                     <Line type="monotone" dataKey="Affiliate GMV" stroke="#ffbe76" strokeWidth={3} dot={{ r: 4 }} />
                   </LineChart>
                 </ResponsiveContainer>
-              </Card.Body>
-            </Card>
+              </div>
+            </div>
           )}
         </div>
       );
@@ -482,7 +483,7 @@ function DashTable({ def, rows, prevRows, matchKey }: {
   const findPrev = (row: RowData): RowData | undefined =>
     matchKey && prevRows ? prevRows.find(r => String(r[matchKey] ?? '') !== '' && r[matchKey] === row[matchKey]) : undefined;
   return (
-    <Table size="sm" responsive className="mb-0 align-middle">
+    <Table responsive className="mb-0 align-middle dash-table">
       <thead><tr>
         {def.fields.map(f => (
           <th key={f.key} className={isTextCol(f) ? '' : 'text-end'} style={{ whiteSpace: 'nowrap' }}>{f.label}</th>

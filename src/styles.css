@@ -2427,6 +2427,19 @@ input[type="number"] {
 .s14-donut-total { font-family: 'Sora', sans-serif; font-weight: 800; font-size: 1.45rem; color: #161a22; line-height: 1; }
 .s14-donut-cap { font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: #94a3b8; margin-top: 4px; }
 
+/* Minimalist data tables (design-system: no vertical lines, roomy rows) */
+.dash-table { font-size: .86rem; }
+.dash-table thead th {
+  font-family: 'DM Sans', sans-serif; text-transform: uppercase; letter-spacing: .04em;
+  font-size: .68rem; font-weight: 700; color: #8a93a6;
+  border: 0; border-bottom: 1px solid #eef0f4; padding: 10px 12px; background: transparent;
+}
+.dash-table tbody td { border: 0; border-bottom: 1px solid #f3f4f7; padding: 13px 12px; vertical-align: middle; }
+.dash-table tbody tr:last-child td { border-bottom: 0; }
+.dash-table tbody tr { transition: background-color .12s ease; }
+.dash-table tbody tr:hover { background: #fbf7f3; }
+.dash-table tbody td .fw-semibold { color: #1f2430; }
+
 @media (max-width: 575px) {
   .s14-funnel-meta { width: 96px; }
   .s14-funnel-rate { width: 56px; }
