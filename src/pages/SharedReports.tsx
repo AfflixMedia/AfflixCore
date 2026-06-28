@@ -2287,7 +2287,7 @@ function CreatorCopyExtras({ notes, paypal }: { notes: string | null; paypal: st
 
 function PublicShell({ children, clientName }: { children: React.ReactNode; clientName: string }) {
   return (
-    <div style={{ minHeight: '100vh', background: '#f5f6fa' }}>
+    <div style={{ minHeight: '100vh', background: 'linear-gradient(180deg, #fff8f5 0%, #fdeee2 100%)', backgroundAttachment: 'fixed' }}>
       <div style={{ background: '#111827', color: 'white', padding: '14px 24px' }}>
         <strong>Afflix Core</strong>
         <span className="opacity-75 mx-2">— Reporting</span>

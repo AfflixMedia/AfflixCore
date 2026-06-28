@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Card, Row, Col, Table, Alert, Badge, Offcanvas, Button, Form } from 'react-bootstrap';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
-  LineChart, Line, PieChart, Pie, Cell,
+  AreaChart, Area, PieChart, Pie, Cell,
 } from 'recharts';
 import {
   WeeklyReportContentV2, CustomSection, CustomField, StandardSectionIdV2,
@@ -188,18 +188,31 @@ export default function ReportDashboard({
           </div>
           {trendData.length > 1 && (
             <div className="s14-card mt-3">
-              <div className="s14-kpi-label mb-2">GMV trend · last {trendData.length} weeks</div>
-              <div style={{ height: 260 }}>
+              <div className="s14-kpi-label mb-3">GMV trend · last {trendData.length} weeks</div>
+              <div style={{ height: 280 }}>
                 <ResponsiveContainer>
-                  <LineChart data={trendData} margin={{ top: 8, right: 16, bottom: 4, left: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                    <XAxis dataKey="label" tick={{ fontSize: 12, fill: '#8a93a6' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
-                    <YAxis tick={{ fontSize: 12, fill: '#8a93a6' }} tickLine={false} axisLine={false} width={64} tickFormatter={(v: number) => formatValue('currency', v, { compact: true })} />
-                    <Tooltip contentStyle={{ borderRadius: 10, border: '1px solid #eef0f4', boxShadow: '0 6px 18px rgba(16,24,40,.08)' }} />
-                    <Legend />
-                    <Line type="monotone" dataKey="GMV" stroke="#e8862e" strokeWidth={3} dot={{ r: 4 }} />
-                    <Line type="monotone" dataKey="Affiliate GMV" stroke="#ffbe76" strokeWidth={3} dot={{ r: 4 }} />
-                  </LineChart>
+                  <AreaChart data={trendData} margin={{ top: 10, right: 18, bottom: 4, left: 4 }}>
+                    <defs>
+                      <linearGradient id="gmvGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#e8862e" stopOpacity={0.28} />
+                        <stop offset="92%" stopColor="#e8862e" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="affGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#f5b06a" stopOpacity={0.22} />
+                        <stop offset="92%" stopColor="#f5b06a" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#f1f5f9" />
+                    <XAxis dataKey="label" tick={{ fontSize: 12, fill: '#8a93a6' }} tickLine={false} axisLine={{ stroke: '#eadfd6' }} padding={{ left: 12, right: 12 }} />
+                    <YAxis tick={{ fontSize: 12, fill: '#8a93a6' }} tickLine={false} axisLine={false} width={58} tickFormatter={(v: number) => formatValue('currency', v, { compact: true })} />
+                    <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #eef0f4', boxShadow: '0 10px 28px rgba(16,24,40,.12)', fontSize: 13 }}
+                      formatter={(v: any, n: any) => [formatValue('currency', Number(v)), n]} />
+                    <Legend iconType="circle" wrapperStyle={{ fontSize: 13 }} />
+                    <Area type="monotone" dataKey="GMV" stroke="#e8862e" strokeWidth={3.5} fill="url(#gmvGrad)"
+                      dot={{ r: 5, fill: '#fff', stroke: '#e8862e', strokeWidth: 2.5 }} activeDot={{ r: 7 }} />
+                    <Area type="monotone" dataKey="Affiliate GMV" stroke="#f5b06a" strokeWidth={2.5} fill="url(#affGrad)"
+                      dot={{ r: 4, fill: '#fff', stroke: '#f5b06a', strokeWidth: 2 }} activeDot={{ r: 6 }} />
+                  </AreaChart>
                 </ResponsiveContainer>
               </div>
             </div>
