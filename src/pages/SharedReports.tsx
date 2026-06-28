@@ -452,10 +452,12 @@ export default function SharedReports() {
           <button type="button" className="ac-back-btn" onClick={() => setOpenId(null)}>
             <i className="bi bi-arrow-left" /> Back
           </button>
-          <div className="flex-grow-1 min-w-0">
-            <div className="text-muted small">{activeBrand.name}</div>
-            <h4 className="mb-0">Week #{openReport.week_number} — {formatRange(openReport.week_start, openReport.week_end)}</h4>
-          </div>
+          {!isOpenV2 && (
+            <div className="flex-grow-1 min-w-0">
+              <div className="text-muted small">{activeBrand.name}</div>
+              <h4 className="mb-0">Week #{openReport.week_number} — {formatRange(openReport.week_start, openReport.week_end)}</h4>
+            </div>
+          )}
         </div>
         <WeeklyDash
           c={normWeekly(openReport.content)}
@@ -463,6 +465,11 @@ export default function SharedReports() {
           trendData={trendData}
           hasPrev={!!prevReport}
           audience={isOpenV2 ? 'client' : undefined}
+          reportMeta={isOpenV2 ? {
+            title: `${activeBrand.name} — Weekly Performance`,
+            period: formatRange(openReport.week_start, openReport.week_end),
+            compare: prevReport ? `Week #${openReport.week_number} vs #${prevReport.week_number}` : `Week #${openReport.week_number}`,
+          } : undefined}
           prevTopVideos={prevReport ? (normWeekly(prevReport.content) as any).top_videos : undefined}
           paidCollab={{ programs: pcPrograms, creators: pcCreators, videos: pcVideos, performance: pcPerformance }}
           onOpenPaidCollabProgram={(pid: string) => {

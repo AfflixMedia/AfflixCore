@@ -102,14 +102,6 @@ export default function Section14Dashboard({ data, targets, renderFeedback, clie
 
   return (
     <div className="s14-root">
-      <div className="s14-hero">
-        <div>
-          <div className="s14-hero-kicker">Weekly Performance</div>
-          <h3 className="s14-hero-title">Key Stats Dashboard</h3>
-        </div>
-        <i className="bi bi-graph-up-arrow s14-hero-icon" />
-      </div>
-
       {/* North-Star & Efficiency */}
       <section className="s14-section" data-section="14.1">
         <SectionTitle title="North-Star & Efficiency" sub="The numbers that define the week" color="#e8862e" fb={fb('14.1')} />

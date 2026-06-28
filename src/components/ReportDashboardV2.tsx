@@ -58,7 +58,7 @@ const S14_LABELS: Record<string, string> = {
 export default function ReportDashboard({
   c, p, trendData, hasPrev, commentsConfig, openSectionOnLoad, highlightCommentId,
   approvalDecisions, approvalAction, paidCollab, onOpenPaidCollabProgram, audience = 'staff',
-  chronologyData,
+  chronologyData, reportMeta,
 }: {
   c: WeeklyReportContentV2;
   p: WeeklyReportContentV2 | null;
@@ -66,6 +66,8 @@ export default function ReportDashboard({
   hasPrev: boolean;
   /** §2 auto-timeline (this report + prior weeks), built by the page. */
   chronologyData?: ChronoPoint[];
+  /** Client report header (brand · period · comparison pill). */
+  reportMeta?: { title: string; period: string; compare?: string };
   commentsConfig?: CommentsConfig;
   prevTopVideos?: RowData[];
   openSectionOnLoad?: CommentSection | null;
@@ -178,14 +180,12 @@ export default function ReportDashboard({
             </div>
             <FeedbackIcon section="snapshot" />
           </div>
-          <Row className="g-3">
+          <div className="ac-bento">
             {def.fields.map(f => (
-              <Col xs={6} md={4} xl={2} key={f.key}>
-                <KpiTile label={f.label} value={formatValue(f.format, fieldValue(f, snap))}
-                  f={f} cur={fieldValue(f, snap)} prev={psnap ? fieldValue(f, psnap) : null} />
-              </Col>
+              <KpiTile key={f.key} label={f.label} value={formatValue(f.format, fieldValue(f, snap))}
+                f={f} cur={fieldValue(f, snap)} prev={psnap ? fieldValue(f, psnap) : null} />
             ))}
-          </Row>
+          </div>
           {trendData.length > 1 && (
             <div className="s14-card mt-3">
               <div className="s14-kpi-label mb-2">GMV trend · last {trendData.length} weeks</div>
@@ -308,6 +308,17 @@ export default function ReportDashboard({
 
   return (
     <div className={`ac-themed ${isClient ? 'dash-client' : ''}`}>
+      {isClient && reportMeta && (
+        <div className="dash-report-head ac-fade">
+          <div>
+            <h1 className="dash-report-title">{reportMeta.title}</h1>
+            <div className="dash-report-period"><i className="bi bi-calendar3" />{reportMeta.period}</div>
+          </div>
+          {reportMeta.compare && (
+            <div className="dash-report-pill"><i className="bi bi-arrow-left-right" />{reportMeta.compare}</div>
+          )}
+        </div>
+      )}
       {!hasPrev && !isClient && <Alert variant="warning" className="py-2">No previous period — single-period view (no comparison).</Alert>}
 
       {renderCustomAt('start')}

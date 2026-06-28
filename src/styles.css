@@ -2349,15 +2349,17 @@ input[type="number"] {
 .s14-hero-title { margin: 2px 0 0; font-family: 'Sora', sans-serif; font-weight: 700; font-size: 1.6rem; color: #ffffff; }
 .s14-hero-icon { font-size: 2.4rem; color: rgba(232,134,46,.85); z-index: 1; }
 
-.s14-section { margin-bottom: 32px; }
-/* Clean uppercase "label-caps" section headers (Linear / Stitch aesthetic) */
+.s14-section { margin-bottom: 34px; }
+/* Plain uppercase tracking-widest section labels (exact Stitch aesthetic — no accent bar) */
 .s14-title { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
-.s14-title-accent { width: 4px; height: 15px; align-self: center; border-radius: 3px; flex-shrink: 0; }
-.s14-title-text { font-family: 'DM Sans', sans-serif; font-weight: 700; font-size: .8rem; letter-spacing: .07em; text-transform: uppercase; color: #6b7280; line-height: 1.2; }
-.s14-title-sub { font-size: .76rem; color: #aab2c0; margin-top: 2px; text-transform: none; letter-spacing: 0; }
+.s14-title-accent { display: none; }
+.s14-title-text { font-family: 'DM Sans', sans-serif; font-weight: 700; font-size: .78rem; letter-spacing: .12em; text-transform: uppercase; color: #554337; line-height: 1.3; }
+.s14-title-sub { font-size: .76rem; color: #aab2c0; margin-top: 1px; text-transform: none; letter-spacing: 0; font-weight: 400; }
 
-/* Centred premium canvas for the client share dashboard */
-.dash-client { max-width: 1200px; margin: 0 auto; padding: 8px 4px 24px; }
+/* Warm centred canvas for the client share dashboard (surface #fff8f5) */
+.dash-client { max-width: 1280px; margin: 0 auto; padding: 28px 20px 48px; background: #fff8f5; }
+.dash-client .s14-card,
+.dash-client .ac-kpi { box-shadow: 0 1px 2px rgba(16,24,40,.03); }
 
 .s14-card {
   background: #fff; border: 1px solid #eef0f4; border-top: 3px solid #eef0f4;
@@ -2406,25 +2408,42 @@ input[type="number"] {
 .s14-rag-pill { color: #fff; font-weight: 700; font-size: .66rem; text-transform: uppercase; letter-spacing: .4px; padding: 2px 8px; border-radius: 999px; }
 .s14-rag-detail { font-size: .8rem; color: #4a5160; line-height: 1.35; }
 
-/* Premium KPI tiles + delta pills (Stitch "AAA Analytics" design system) */
+/* Glass-card KPI tiles + delta pills — exact Stitch "AAA Analytics" recipe */
 .ac-kpi {
-  display: flex; flex-direction: column; background: #fff;
-  border: 1px solid #eef0f4; border-radius: 14px; padding: 16px 18px;
-  box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 6px 16px rgba(16,24,40,.04);
-  transition: transform .15s ease, box-shadow .15s ease;
+  display: flex; flex-direction: column; justify-content: space-between;
+  background: rgba(255,255,255,.8); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  border: 1px solid #eef0f4; border-radius: 14px; padding: 18px;
+  transition: all .3s cubic-bezier(.4,0,.2,1);
 }
-.ac-kpi:hover { transform: translateY(-2px); box-shadow: 0 4px 10px rgba(16,24,40,.07), 0 12px 28px rgba(16,24,40,.08); }
-.ac-kpi-label { font-family: 'DM Sans', sans-serif; text-transform: uppercase; letter-spacing: .05em; font-size: .7rem; font-weight: 700; color: #8a93a6; }
-.ac-kpi-value { font-family: 'Sora', sans-serif; font-weight: 800; font-size: 1.6rem; line-height: 1.1; color: #161a22; margin-top: 6px; }
-.ac-kpi-foot { margin-top: auto; padding-top: 10px; display: flex; align-items: center; gap: 8px; min-height: 14px; }
+.ac-kpi:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(16,24,40,.08); }
+.ac-kpi-label { font-family: 'DM Sans', sans-serif; text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; font-weight: 700; color: #887365; }
+.ac-kpi-value { font-family: 'Sora', sans-serif; font-weight: 700; font-size: 1.7rem; line-height: 1.05; color: #231a13; margin-top: 8px; letter-spacing: -.01em; }
+.ac-kpi-foot { margin-top: auto; padding-top: 12px; display: flex; align-items: center; gap: 8px; min-height: 14px; }
 .ac-kpi-hint { font-size: .68rem; color: #aab2c0; }
 .ac-pill {
-  display: inline-flex; align-items: center; gap: 1px; font-weight: 700; font-size: .72rem;
-  padding: 2px 9px 2px 6px; border-radius: 999px; white-space: nowrap; line-height: 1.6;
+  display: inline-flex; align-items: center; gap: 1px; font-weight: 700; font-size: .68rem;
+  padding: 1px 9px 1px 6px; border-radius: 999px; white-space: nowrap; line-height: 1.7;
 }
-.ac-pill-up { background: rgba(16,185,129,.12); color: #0f766e; }
-.ac-pill-down { background: rgba(239,68,68,.12); color: #b91c1c; }
-.ac-pill-flat { background: rgba(148,163,184,.16); color: #64748b; }
+.ac-pill-up { background: rgba(16,185,129,.1); color: #10b981; }
+.ac-pill-down { background: rgba(239,68,68,.1); color: #ef4444; }
+.ac-pill-flat { background: rgba(148,163,184,.14); color: #94a3b8; }
+
+/* Bento grid for the snapshot scorecard (4-up on desktop, like Stitch) */
+.ac-bento { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; }
+@media (min-width: 992px) { .ac-bento { grid-template-columns: repeat(4, 1fr); } }
+
+/* Report header (brand · period · comparison pill) */
+.dash-report-head { display: flex; flex-direction: column; gap: 14px; margin-bottom: 30px; }
+@media (min-width: 768px) { .dash-report-head { flex-direction: row; align-items: flex-end; justify-content: space-between; } }
+.dash-report-title { font-family: 'Sora', sans-serif; font-weight: 700; font-size: 2.1rem; letter-spacing: -.02em; color: #231a13; line-height: 1.08; margin: 0; }
+.dash-report-period { display: inline-flex; align-items: center; gap: 6px; color: #554337; margin-top: 7px; font-size: .92rem; }
+.dash-report-pill {
+  display: inline-flex; align-items: center; gap: 7px; background: #e8862e; color: #4a2400;
+  padding: 9px 17px; border-radius: 999px; font-weight: 700; font-size: .85rem;
+  box-shadow: 0 2px 6px rgba(232,134,46,.3); white-space: nowrap; width: fit-content;
+}
+.ac-fade { animation: acFadeIn .6s ease-out both; }
+@keyframes acFadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
 /* Donut centre total */
 .s14-donut-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
