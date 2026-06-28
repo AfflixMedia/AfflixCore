@@ -199,7 +199,8 @@ export const WEEKLY_SECTIONS: SectionDef[] = [
   },
   // 8 ──────────────────────────────────────────────────────────────────────
   {
-    id: 'channel_analytics', num: '8', title: 'Channel Analytics — Video vs LIVE GMV', kind: 'table',
+    id: 'channel_analytics', num: '8', title: 'Channel Analytics — Video vs LIVE GMV', kind: 'fixed',
+    labelKey: 'channel', fixedRows: ['Video', 'LIVE'],
     blurb: 'Attributed GMV per channel. Views = video views or LIVE views depending on the row.',
     fields: [
       { key: 'channel', label: 'Channel', format: 'text' },
@@ -423,7 +424,7 @@ export const emptyContentV2 = (): WeeklyReportContentV2 => ({
   shop_analytics: emptyScalar(SECTION_BY_ID.shop_analytics),
   search_insights: emptyScalar(SECTION_BY_ID.search_insights),
   product_traffic: fixedRows(SECTION_BY_ID.product_traffic),
-  channel_analytics: [],
+  channel_analytics: fixedRows(SECTION_BY_ID.channel_analytics),
   product_analytics: [],
   marketing_offsite: emptyScalar(SECTION_BY_ID.marketing_offsite),
   ad_overall: emptyScalar(SECTION_BY_ID.ad_overall),
@@ -521,17 +522,22 @@ export function normalizeContentV2(raw: any): WeeklyReportContentV2 {
   };
 
   // product_traffic: ensure the 4 fixed channels always exist (merge stored values in).
-  const trafficDef = SECTION_BY_ID.product_traffic;
-  const storedTraffic: any[] = Array.isArray(src.product_traffic) ? src.product_traffic : [];
-  const product_traffic: RowData[] = (trafficDef.fixedRows ?? []).map(label => {
-    const stored = storedTraffic.find(r => str(r.channel) === label) ?? {};
-    const out: RowData = { channel: label };
-    for (const f of trafficDef.fields) {
-      if (f.auto || f.key === 'channel') continue;
-      out[f.key] = numOrNull(stored[f.key]);
-    }
-    return out;
-  });
+  // Fixed-row sections (e.g. §7 channels, §8 Video/LIVE): always yield the
+  // locked rows, merging in any stored values, so the channels are pre-written.
+  const fixedTable = (def: SectionDef): RowData[] => {
+    const labelKey = def.labelKey ?? 'channel';
+    const stored: any[] = Array.isArray(src[def.id]) ? src[def.id] : [];
+    return (def.fixedRows ?? []).map(label => {
+      const row = stored.find(r => str(r[labelKey]) === label) ?? {};
+      const out: RowData = { [labelKey]: label };
+      for (const f of def.fields) {
+        if (f.auto || f.key === labelKey) continue;
+        out[f.key] = (f.format === 'text' || f.format === 'url') ? str(row[f.key]) : numOrNull(row[f.key]);
+      }
+      return out;
+    });
+  };
+  const product_traffic = fixedTable(SECTION_BY_ID.product_traffic);
 
   // Custom sections: re-anchor legacy insert_after values onto the new ids.
   const custom_sections: CustomSection[] = Array.isArray(src.custom_sections)
@@ -591,7 +597,7 @@ export function normalizeContentV2(raw: any): WeeklyReportContentV2 {
     shop_analytics: scalar(SECTION_BY_ID.shop_analytics),
     search_insights: scalar(SECTION_BY_ID.search_insights),
     product_traffic,
-    channel_analytics: table(SECTION_BY_ID.channel_analytics),
+    channel_analytics: fixedTable(SECTION_BY_ID.channel_analytics),
     product_analytics: table(SECTION_BY_ID.product_analytics, src.product_highlights, (r: any) => ({
       product: str(r.product_name), product_id: str(r.product_id),
       gmv: numOrNull(r.total_gmv ?? r.gmv),
