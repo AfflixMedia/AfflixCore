@@ -70,6 +70,8 @@ export interface SectionDef {
   special?: 'gmv_max' | 'product_traffic';
   /** Auto-generated section — no manual editor input; the dashboard derives it. */
   derived?: boolean;
+  /** Note shown in the editor in place of inputs for a derived section. */
+  derivedNote?: string;
 }
 
 // ---- tiny formula helpers --------------------------------------------------
@@ -92,6 +94,8 @@ export const WEEKLY_SECTIONS: SectionDef[] = [
   // 1 ──────────────────────────────────────────────────────────────────────
   {
     id: 'snapshot', num: '1', title: 'Executive Snapshot', kind: 'scalar',
+    derived: true,
+    derivedNote: 'The client’s headline scorecard — auto-calculated from Sections 3, 4, 5, 10, 11 & 12 below. No input needed here.',
     blurb: 'The headline scorecard — twelve numbers, organic up top, paid media below.',
     fields: [
       { key: 'total_gmv', label: 'Total GMV', format: 'currency', comparable: true },
@@ -114,7 +118,8 @@ export const WEEKLY_SECTIONS: SectionDef[] = [
   // 2 ──────────────────────────────────────────────────────────────────────
   {
     id: 'chronology', num: '2', title: 'Weekly Chronology', kind: 'table', chart: 'line', derived: true,
-    blurb: 'Auto-generated timeline — pulled from §1 and §3 across your weekly reports.',
+    derivedNote: 'Auto-generated — shown as a live trend graph on the dashboard, built from your weekly performance data across reports.',
+    blurb: 'Auto-generated timeline — pulled from your weekly performance data.',
     fields: [
       { key: 'week_label', label: 'Reporting Week', format: 'text' },
       { key: 'samples', label: 'Samples', format: 'number' },
@@ -619,6 +624,31 @@ export function normalizeContentV2(raw: any): WeeklyReportContentV2 {
     insights: { summary: str(src.insights?.summary) },
     custom_sections,
     approval,
+  };
+}
+
+/**
+ * §1 Executive Snapshot is derived (no manual entry) — its values come from the
+ * canonical detail sections (§3/§4/§5/§10/§11.1/§12.1), falling back to any
+ * value stored on an older report's snapshot. The three auto fields (ROAS, CPO,
+ * Ad %) are computed from these by their field.auto functions at render time.
+ */
+export function deriveSnapshot(c: any): ScalarData {
+  const sn = c?.snapshot ?? {}, gp = c?.gmv_performance ?? {}, sa = c?.shop_analytics ?? {};
+  const act = c?.activity ?? {}, mo = c?.marketing_offsite ?? {}, ao = c?.ad_overall ?? {}, ss = c?.shop_score ?? {};
+  const p = (...vals: any[]): number | null => { for (const v of vals) { const x = numOrNull(v); if (x != null) return x; } return null; };
+  const total_gmv = p(gp.total_gmv, sa.gmv, sn.total_gmv);
+  const orders = p(sa.orders, sn.orders);
+  return {
+    total_gmv,
+    orders,
+    aov: p(sa.aov, sn.aov) ?? div(total_gmv, orders),
+    shop_performance_score: p(ss.shop_performance_score, sn.shop_performance_score),
+    new_videos_posted: p(act.new_videos_posted, sn.new_videos_posted),
+    affiliate_gmv: p(gp.affiliate_gmv, sn.affiliate_gmv),
+    live_gmv: p(gp.live_gmv, sn.live_gmv),
+    offsite_effect: p(mo.offsite_effect, sn.offsite_effect),
+    ad_spend: p(ao.ad_spend, sn.ad_spend),
   };
 }
 

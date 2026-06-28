@@ -588,7 +588,7 @@ export default function WeeklyReportEdit() {
                 <i className="bi bi-magic text-primary" />
                 <div className="small">
                   <span className="fw-semibold">{def.num}. {def.title}</span>
-                  <span className="text-muted ms-2">Auto-generated — no input needed. Shown as a live trend graph on the dashboard, built from §1 &amp; §3 across your weekly reports.</span>
+                  <span className="text-muted ms-2">{def.derivedNote ?? 'Auto-generated — no input needed.'}</span>
                 </div>
               </Card.Body>
             </Card>

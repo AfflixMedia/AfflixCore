@@ -7,7 +7,7 @@ import {
 import {
   WeeklyReportContentV2, CustomSection, CustomField, StandardSectionIdV2,
   WEEKLY_SECTIONS, SECTION_BY_ID, SectionDef, SectionField,
-  ScalarData, RowData, fieldValue, formatValue, FieldFormat,
+  ScalarData, RowData, fieldValue, formatValue, FieldFormat, deriveSnapshot,
 } from '../lib/reportSchemaV2';
 import { sanitizeRich } from '../lib/sanitize';
 import { computeSection14 } from '../lib/section14';
@@ -151,8 +151,10 @@ export default function ReportDashboard({
     const data = (c as any)[def.id];
     const prev = p ? (p as any)[def.id] : null;
 
-    // 1 — Executive Snapshot scorecard
+    // 1 — Executive Snapshot scorecard (derived from the detail sections)
     if (def.id === 'snapshot') {
+      const snap = deriveSnapshot(c);
+      const psnap = p ? deriveSnapshot(p) : null;
       return (
         <div data-section="snapshot">
           <Card className="mb-3">
@@ -168,8 +170,8 @@ export default function ReportDashboard({
                   <Col xs={6} md={4} xl={2} key={f.key}>
                     <div className="h-100 p-3 rounded shadow-sm" style={{ borderLeft: '4px solid #e8862e', background: '#fff' }}>
                       <div className="ac-label">{f.label}</div>
-                      <div className="fs-5 fw-bold mt-1">{formatValue(f.format, fieldValue(f, data as ScalarData))}</div>
-                      <DeltaV f={f} cur={fieldValue(f, data as ScalarData)} prev={prev ? fieldValue(f, prev as ScalarData) : null} />
+                      <div className="fs-5 fw-bold mt-1">{formatValue(f.format, fieldValue(f, snap))}</div>
+                      <DeltaV f={f} cur={fieldValue(f, snap)} prev={psnap ? fieldValue(f, psnap) : null} />
                     </div>
                   </Col>
                 ))}
