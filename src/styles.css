@@ -2407,6 +2407,22 @@ input[type="number"] {
   .s14-funnel-rate { width: 56px; }
 }
 
+/* Top Creators / Top Videos client showcase */
+.tp-card { border-top-width: 1px; }
+.tp-rank {
+  width: 26px; height: 26px; border-radius: 50%; color: #fff; font-weight: 800;
+  font-size: .82rem; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.tp-name { font-weight: 700; color: #1f2430; text-decoration: none; font-size: .95rem; }
+.tp-name:hover { color: #e8862e; text-decoration: underline; }
+.tp-product { font-weight: 700; color: #1f2430; font-size: .95rem; }
+.tp-gmv { font-family: 'Sora', sans-serif; font-weight: 800; font-size: 1.5rem; color: #161a22; margin-top: 6px; line-height: 1.1; }
+.tp-sub { font-size: .74rem; color: #94a3b8; text-transform: uppercase; letter-spacing: .4px; font-weight: 700; }
+.tp-stat { font-size: .82rem; color: #64748b; }
+.tp-stat strong { color: #1f2430; }
+.tp-watch { font-weight: 700; font-size: .8rem; color: #0d6efd; text-decoration: none; }
+.tp-watch:hover { text-decoration: underline; }
+
 /* Weekly Chronology (§2) chart — metric selector chips + WoW badge */
 .chrono-chip {
   border: 1.5px solid #e5e7eb; background: #fff; border-radius: 999px;

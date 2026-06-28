@@ -85,11 +85,13 @@ function RagCard({ s }: { s: RagSignal }) {
 }
 
 // ---- main ------------------------------------------------------------------
-export default function Section14Dashboard({ data, targets, renderFeedback }: {
+export default function Section14Dashboard({ data, targets, renderFeedback, clientMode }: {
   data: Section14;
   targets: TargetRow[];
   /** Renders the per-section comment button for a given comment-section key. */
   renderFeedback?: (key: string) => ReactNode;
+  /** Client view hides the internal-only Health & Risk Signals + Targets. */
+  clientMode?: boolean;
 }) {
   const { northStar, mix, funnel, productivity, sps, paid, signals } = data;
   const fb = (key: string) => renderFeedback?.(key);
@@ -238,16 +240,18 @@ export default function Section14Dashboard({ data, targets, renderFeedback }: {
         </div>
       </section>
 
-      {/* Health & Risk Signals */}
-      <section className="s14-section" data-section="14.6">
-        <SectionTitle title="Health & Risk Signals" sub="Red = act now · Amber = watch · Green = healthy" color="#ef4444" fb={fb('14.6')} />
-        <div className="s14-rag-grid">
-          {signals.map(s => <RagCard key={s.key} s={s} />)}
-        </div>
-      </section>
+      {/* Health & Risk Signals — internal only, hidden from the client view */}
+      {!clientMode && (
+        <section className="s14-section" data-section="14.6">
+          <SectionTitle title="Health & Risk Signals" sub="Internal · Red = act now · Amber = watch · Green = healthy" color="#ef4444" fb={fb('14.6')} />
+          <div className="s14-rag-grid">
+            {signals.map(s => <RagCard key={s.key} s={s} />)}
+          </div>
+        </section>
+      )}
 
-      {/* Weekly Targets & Action Items (only when present) */}
-      {realTargets.length > 0 && (
+      {/* Weekly Targets & Action Items — internal only, hidden from the client */}
+      {!clientMode && realTargets.length > 0 && (
         <section className="s14-section" data-section="14.7">
           <SectionTitle title="Weekly Targets & Action Items" color="#0ea5e9" fb={fb('14.7')} />
           <div className="s14-card">

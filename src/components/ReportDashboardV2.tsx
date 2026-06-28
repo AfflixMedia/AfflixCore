@@ -12,6 +12,7 @@ import {
 import { sanitizeRich } from '../lib/sanitize';
 import { computeSection14 } from '../lib/section14';
 import Section14Dashboard from './report/Section14Dashboard';
+import TopPerformers from './report/TopPerformers';
 import ChronologyChart, { ChronoPoint } from './report/ChronologyChart';
 import SectionComments, { Comment, CommentSection } from './SectionComments';
 import PaidCollabSectionBlock, { PaidCollabPrefetch } from './paidcollab/PaidCollabSectionBlock';
@@ -351,14 +352,20 @@ export default function ReportDashboard({
       {section14.hasAnyData && (
         <div className="mt-2 mb-3">
           {!isClient && (
-            <div className="d-flex align-items-center gap-2 mb-2">
-              <Badge bg="dark"><i className="bi bi-eye me-1" />Client preview</Badge>
-              <small className="text-muted">This is the auto-generated dashboard your client sees.</small>
+            <div className="d-flex align-items-center gap-2 mb-2 flex-wrap">
+              <Badge bg="dark"><i className="bi bi-eye me-1" />Key Stats Dashboard</Badge>
+              <small className="text-muted">Auto-generated. <strong>Health &amp; Risk Signals</strong> and <strong>Targets</strong> are internal — the client sees the rest plus Top Creators &amp; Top Videos.</small>
             </div>
           )}
-          <Section14Dashboard data={section14} targets={c.targets ?? []}
+          <Section14Dashboard data={section14} targets={c.targets ?? []} clientMode={isClient}
             renderFeedback={(key) => <FeedbackIcon section={key} />} />
         </div>
+      )}
+
+      {/* Top Creators & Top Videos — shown to the client (§13.2 / §13.3) */}
+      {isClient && (
+        <TopPerformers creators={c.top_creators ?? []} videos={c.top_videos ?? []}
+          renderFeedback={(key) => <FeedbackIcon section={key} />} />
       )}
 
       {/* Insights */}
