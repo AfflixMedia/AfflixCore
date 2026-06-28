@@ -2410,3 +2410,17 @@ input[type="number"] {
   .s14-funnel-meta { width: 96px; }
   .s14-funnel-rate { width: 56px; }
 }
+
+/* Weekly Chronology (§2) chart — metric selector chips + WoW badge */
+.chrono-chip {
+  border: 1.5px solid #e5e7eb; background: #fff; border-radius: 999px;
+  padding: 3px 13px; font-size: .8rem; font-weight: 600; cursor: pointer;
+  transition: background-color .15s ease, color .15s ease, border-color .15s ease, transform .1s ease;
+}
+.chrono-chip:hover { transform: translateY(-1px); }
+.chrono-wow {
+  display: inline-flex; align-items: center; gap: 3px; font-weight: 700; font-size: .85rem;
+  padding: 3px 12px; border-radius: 999px;
+}
+.chrono-wow.is-up { background: rgba(16,185,129,.12); color: #0f766e; }
+.chrono-wow.is-down { background: rgba(239,68,68,.12); color: #b91c1c; }

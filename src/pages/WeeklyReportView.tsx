@@ -11,6 +11,27 @@ import { normalizeContent } from '../lib/reportSchema';
 import { normalizeContentV2 } from '../lib/reportSchemaV2';
 import ReportDashboard, { TrendPoint, ApprovalDecisionView } from '../components/ReportDashboard';
 import ReportDashboardV2 from '../components/ReportDashboardV2';
+import { ChronoPoint } from '../components/report/ChronologyChart';
+
+/** Pull §2 chronology metrics from a report's content (v2 or legacy shape). */
+function chronoFromContent(content: any): Omit<ChronoPoint, 'label'> {
+  const c = content ?? {};
+  const sn = c.snapshot ?? {}, act = c.activity ?? {}, gp = c.gmv_performance ?? {};
+  const sa = c.shop_analytics ?? {}, ov = c.overall ?? {}, vp = c.video_performance ?? {};
+  const num = (v: any): number | null => {
+    if (v == null || v === '') return null;
+    const n = Number(v); return Number.isFinite(n) ? n : null;
+  };
+  const total_gmv = num(sn.total_gmv ?? gp.total_gmv ?? sa.gmv ?? ov.total_gmv);
+  const orders = num(sn.orders ?? sa.orders ?? ov.orders);
+  const aov = num(sn.aov ?? sa.aov) ?? (total_gmv != null && orders ? total_gmv / orders : null);
+  return {
+    samples: num(act.samples_approved ?? ov.samples_approved),
+    videos: num(act.new_videos_posted ?? sn.new_videos_posted ?? vp.total_videos_posted),
+    lives: num(act.live_streams),
+    total_gmv, orders, aov,
+  };
+}
 import CanvasRenderer from '../components/canvas/CanvasRenderer';
 import {
   CanvasSchema, parseTemplateRow, buildMetricBagFromReportContent,
@@ -171,6 +192,11 @@ export default function WeeklyReportView() {
       'Affiliate GMV': Number(aff) || 0,
     };
   }), [trend]);
+  // §2 Weekly Chronology — auto-built from each week's §1/§3 data (no manual entry).
+  const chronologyData: ChronoPoint[] = useMemo(() => trend.map(t => ({
+    label: formatWeekShort(t.week_start, t.week_end),
+    ...chronoFromContent(t.content),
+  })), [trend]);
 
   const addComment = async (section: CommentSection, body: string, _authorName: string, parentId?: string) => {
     // We ignore the passed-in author name — the edge function uses the
@@ -274,6 +300,7 @@ export default function WeeklyReportView() {
             c={c}
             p={p}
             trendData={trendData}
+            chronologyData={chronologyData}
             hasPrev={!!prev}
             prevTopVideos={p?.top_videos}
             openSectionOnLoad={openSection}

@@ -68,6 +68,8 @@ export interface SectionDef {
   labelKey?: string;
   /** Special handling flags consumed by the editor/dashboard. */
   special?: 'gmv_max' | 'product_traffic';
+  /** Auto-generated section — no manual editor input; the dashboard derives it. */
+  derived?: boolean;
 }
 
 // ---- tiny formula helpers --------------------------------------------------
@@ -111,8 +113,8 @@ export const WEEKLY_SECTIONS: SectionDef[] = [
   },
   // 2 ──────────────────────────────────────────────────────────────────────
   {
-    id: 'chronology', num: '2', title: 'Weekly Chronology', kind: 'table', chart: 'line',
-    blurb: 'A running log across reporting weeks. Add a row per week — the chart tracks the trend.',
+    id: 'chronology', num: '2', title: 'Weekly Chronology', kind: 'table', chart: 'line', derived: true,
+    blurb: 'Auto-generated timeline — pulled from §1 and §3 across your weekly reports.',
     fields: [
       { key: 'week_label', label: 'Reporting Week', format: 'text' },
       { key: 'samples', label: 'Samples', format: 'number' },

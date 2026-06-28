@@ -582,15 +582,27 @@ export default function WeeklyReportEdit() {
       {/* All 14 standard sections, registry-driven */}
       {WEEKLY_SECTIONS.map(def => (
         <Fragment key={def.id}>
-          <Card className="mb-4" data-section={def.id}>
-            <Card.Header>
-              <HeaderWithFeedback title={`${def.num}. ${def.title}`} section={def.id} sectionId={def.id} />
-            </Card.Header>
-            <Card.Body>
-              {def.blurb && <p className="text-muted small mb-3">{def.blurb}</p>}
-              {renderSectionBody(def)}
-            </Card.Body>
-          </Card>
+          {def.derived ? (
+            <Card className="mb-4 border-0" data-section={def.id} style={{ background: '#f8fafc' }}>
+              <Card.Body className="py-3 d-flex align-items-center gap-2">
+                <i className="bi bi-magic text-primary" />
+                <div className="small">
+                  <span className="fw-semibold">{def.num}. {def.title}</span>
+                  <span className="text-muted ms-2">Auto-generated — no input needed. Shown as a live trend graph on the dashboard, built from §1 &amp; §3 across your weekly reports.</span>
+                </div>
+              </Card.Body>
+            </Card>
+          ) : (
+            <Card className="mb-4" data-section={def.id}>
+              <Card.Header>
+                <HeaderWithFeedback title={`${def.num}. ${def.title}`} section={def.id} sectionId={def.id} />
+              </Card.Header>
+              <Card.Body>
+                {def.blurb && <p className="text-muted small mb-3">{def.blurb}</p>}
+                {renderSectionBody(def)}
+              </Card.Body>
+            </Card>
+          )}
           {renderCustomAt(def.id)}
         </Fragment>
       ))}

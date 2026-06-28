@@ -12,6 +12,7 @@ import {
 import { sanitizeRich } from '../lib/sanitize';
 import { computeSection14 } from '../lib/section14';
 import Section14Dashboard from './report/Section14Dashboard';
+import ChronologyChart, { ChronoPoint } from './report/ChronologyChart';
 import SectionComments, { Comment, CommentSection } from './SectionComments';
 import PaidCollabSectionBlock, { PaidCollabPrefetch } from './paidcollab/PaidCollabSectionBlock';
 
@@ -45,11 +46,14 @@ const PIE_COLORS = ['#e8862e', '#0d6efd', '#198754', '#6f42c1', '#dc3545'];
 export default function ReportDashboard({
   c, p, trendData, hasPrev, commentsConfig, openSectionOnLoad, highlightCommentId,
   approvalDecisions, approvalAction, paidCollab, onOpenPaidCollabProgram, audience = 'staff',
+  chronologyData,
 }: {
   c: WeeklyReportContentV2;
   p: WeeklyReportContentV2 | null;
   trendData: TrendPoint[];
   hasPrev: boolean;
+  /** §2 auto-timeline (this report + prior weeks), built by the page. */
+  chronologyData?: ChronoPoint[];
   commentsConfig?: CommentsConfig;
   prevTopVideos?: RowData[];
   openSectionOnLoad?: CommentSection | null;
@@ -191,36 +195,11 @@ export default function ReportDashboard({
       );
     }
 
-    // 2 — Weekly Chronology (line chart + table)
+    // 2 — Weekly Chronology — auto-derived timeline from §1 / §3 across weeks.
     if (def.id === 'chronology') {
-      const rows = (data as RowData[]) ?? [];
-      const chartData = rows.map(r => ({
-        label: String(r.week_label ?? ''),
-        'Total GMV': numv(r.total_gmv), Orders: numv(r.orders), Videos: numv(r.videos),
-      }));
       return (
         <SectionCard def={def}>
-          {rows.length === 0 ? <p className="text-muted small mb-0">No weekly rows yet.</p> : (
-            <>
-              <div style={{ height: 300 }}>
-                <ResponsiveContainer>
-                  <LineChart data={chartData} margin={{ top: 8, right: 16, bottom: 4, left: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="label" />
-                    <YAxis yAxisId="left" />
-                    <YAxis yAxisId="right" orientation="right" />
-                    <Tooltip /><Legend />
-                    <Line yAxisId="left" type="monotone" dataKey="Total GMV" stroke="#e8862e" strokeWidth={3} dot={{ r: 4 }} />
-                    <Line yAxisId="right" type="monotone" dataKey="Orders" stroke="#0d6efd" strokeWidth={2} dot={{ r: 3 }} />
-                    <Line yAxisId="right" type="monotone" dataKey="Videos" stroke="#198754" strokeWidth={2} dot={{ r: 3 }} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="table-responsive mt-3">
-                <DashTable def={def} rows={rows} />
-              </div>
-            </>
-          )}
+          <ChronologyChart data={chronologyData ?? []} />
         </SectionCard>
       );
     }
