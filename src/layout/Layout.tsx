@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
+import NotificationToaster from '../notifications/NotificationToaster';
 
 const KEY = 'ac_sidebar_collapsed';
 
@@ -23,6 +24,7 @@ export default function Layout() {
           <Outlet />
         </div>
       </div>
+      <NotificationToaster />
     </div>
   );
 }
