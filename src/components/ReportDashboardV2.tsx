@@ -43,6 +43,17 @@ export interface ApprovalActionConfig {
 
 const PIE_COLORS = ['#e8862e', '#0d6efd', '#198754', '#6f42c1', '#dc3545'];
 
+// §14 sub-section comment keys -> label (for the per-section feedback threads).
+const S14_LABELS: Record<string, string> = {
+  '14.1': 'North-Star & Efficiency',
+  '14.2': 'Channel & Source Mix',
+  '14.3': 'Conversion Funnel',
+  '14.4': 'Productivity & Marketing',
+  '14.5': 'Paid Media Efficiency',
+  '14.6': 'Health & Risk Signals',
+  '14.7': 'Weekly Targets & Action Items',
+};
+
 export default function ReportDashboard({
   c, p, trendData, hasPrev, commentsConfig, openSectionOnLoad, highlightCommentId,
   approvalDecisions, approvalAction, paidCollab, onOpenPaidCollabProgram, audience = 'staff',
@@ -92,6 +103,7 @@ export default function ReportDashboard({
     if (cs) return cs.name || 'Custom Section';
     if (section === 'approval') return 'Approval Needed / Action Items';
     if (section === 'insights') return 'Insights';
+    if (S14_LABELS[section]) return `Key Stats — ${S14_LABELS[section]}`;
     const def = SECTION_BY_ID[section];
     return def ? `${def.num}. ${def.title}` : section;
   };
@@ -160,7 +172,7 @@ export default function ReportDashboard({
           <Card className="mb-3">
             <Card.Header>
               <div className="d-flex justify-content-between align-items-center w-100">
-                <span className="fw-semibold"><span className="text-muted me-1">1.</span>{def.title}</span>
+                <span className="fw-semibold">{!isClient && <span className="text-muted me-1">1.</span>}{def.title}</span>
                 <FeedbackIcon section="snapshot" />
               </div>
             </Card.Header>
@@ -344,7 +356,8 @@ export default function ReportDashboard({
               <small className="text-muted">This is the auto-generated dashboard your client sees.</small>
             </div>
           )}
-          <Section14Dashboard data={section14} targets={c.targets ?? []} />
+          <Section14Dashboard data={section14} targets={c.targets ?? []}
+            renderFeedback={(key) => <FeedbackIcon section={key} />} />
         </div>
       )}
 

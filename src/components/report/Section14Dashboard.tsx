@@ -1,3 +1,4 @@
+import { ReactNode } from 'react';
 import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip,
   RadialBarChart, RadialBar, PolarAngleAxis,
@@ -40,14 +41,16 @@ function KpiTile({ k, accent }: { k: Kpi; accent?: string }) {
   );
 }
 
-function SectionTitle({ num, title, sub }: { num: string; title: string; sub?: string }) {
+/** Clean section header — colored accent bar, title, optional comment button. */
+function SectionTitle({ title, sub, color = '#e8862e', fb }: { title: string; sub?: string; color?: string; fb?: ReactNode }) {
   return (
     <div className="s14-title">
-      <span className="s14-title-badge">{num}</span>
-      <div>
+      <span className="s14-title-accent" style={{ background: color }} />
+      <div className="flex-grow-1">
         <div className="s14-title-text">{title}</div>
         {sub && <div className="s14-title-sub">{sub}</div>}
       </div>
+      {fb}
     </div>
   );
 }
@@ -82,8 +85,14 @@ function RagCard({ s }: { s: RagSignal }) {
 }
 
 // ---- main ------------------------------------------------------------------
-export default function Section14Dashboard({ data, targets }: { data: Section14; targets: TargetRow[] }) {
+export default function Section14Dashboard({ data, targets, renderFeedback }: {
+  data: Section14;
+  targets: TargetRow[];
+  /** Renders the per-section comment button for a given comment-section key. */
+  renderFeedback?: (key: string) => ReactNode;
+}) {
   const { northStar, mix, funnel, productivity, sps, paid, signals } = data;
+  const fb = (key: string) => renderFeedback?.(key);
   const pieData = mix.slices.filter(s => (s.pct ?? 0) > 0);
   const maxFunnel = Math.max(1, ...funnel.stages.map(s => s.value ?? 0));
   const realTargets = (targets ?? []).filter(t => t.objective.trim() !== '' || t.target != null || t.actual != null);
@@ -92,15 +101,15 @@ export default function Section14Dashboard({ data, targets }: { data: Section14;
     <div className="s14-root">
       <div className="s14-hero">
         <div>
-          <div className="s14-hero-kicker">Section 14</div>
+          <div className="s14-hero-kicker">Weekly Performance</div>
           <h3 className="s14-hero-title">Key Stats Dashboard</h3>
         </div>
         <i className="bi bi-graph-up-arrow s14-hero-icon" />
       </div>
 
-      {/* 14.1 North-Star & Efficiency */}
-      <section className="s14-section">
-        <SectionTitle num="14.1" title="North-Star & Efficiency" sub="The numbers that define the week" />
+      {/* North-Star & Efficiency */}
+      <section className="s14-section" data-section="14.1">
+        <SectionTitle title="North-Star & Efficiency" sub="The numbers that define the week" color="#e8862e" fb={fb('14.1')} />
         <div className="row g-3">
           {northStar.map(k => (
             <div className="col-6 col-lg" key={k.key}><KpiTile k={k} accent="#e8862e" /></div>
@@ -108,9 +117,9 @@ export default function Section14Dashboard({ data, targets }: { data: Section14;
         </div>
       </section>
 
-      {/* 14.2 Channel & Source Mix */}
-      <section className="s14-section">
-        <SectionTitle num="14.2" title="Channel & Source Mix" sub="Where GMV comes from" />
+      {/* Channel & Source Mix */}
+      <section className="s14-section" data-section="14.2">
+        <SectionTitle title="Channel & Source Mix" sub="Where GMV comes from" color="#0d6efd" fb={fb('14.2')} />
         <div className="row g-3 align-items-stretch">
           <div className="col-lg-5">
             <div className="s14-card h-100 d-flex flex-column">
@@ -154,9 +163,9 @@ export default function Section14Dashboard({ data, targets }: { data: Section14;
         </div>
       </section>
 
-      {/* 14.3 Conversion Funnel */}
-      <section className="s14-section">
-        <SectionTitle num="14.3" title="Conversion Funnel" sub="Impressions → Clicks → Cart → Orders" />
+      {/* Conversion Funnel */}
+      <section className="s14-section" data-section="14.3">
+        <SectionTitle title="Conversion Funnel" sub="Impressions → Clicks → Cart → Orders" color="#06b6d4" fb={fb('14.3')} />
         <div className="row g-3">
           <div className="col-lg-7">
             <div className="s14-card h-100">
@@ -188,9 +197,9 @@ export default function Section14Dashboard({ data, targets }: { data: Section14;
         </div>
       </section>
 
-      {/* 14.4 Productivity & Marketing */}
-      <section className="s14-section">
-        <SectionTitle num="14.4" title="Productivity & Marketing" />
+      {/* Productivity & Marketing */}
+      <section className="s14-section" data-section="14.4">
+        <SectionTitle title="Productivity & Marketing" color="#198754" fb={fb('14.4')} />
         <div className="row g-3 align-items-stretch">
           {productivity.map(k => (
             <div className="col-6 col-lg-3" key={k.key}><KpiTile k={k} accent="#198754" /></div>
@@ -219,9 +228,9 @@ export default function Section14Dashboard({ data, targets }: { data: Section14;
         </div>
       </section>
 
-      {/* 14.5 Paid Media Efficiency */}
-      <section className="s14-section">
-        <SectionTitle num="14.5" title="Paid Media Efficiency" />
+      {/* Paid Media Efficiency */}
+      <section className="s14-section" data-section="14.5">
+        <SectionTitle title="Paid Media Efficiency" color="#8b5cf6" fb={fb('14.5')} />
         <div className="row g-3">
           {paid.map(k => (
             <div className="col-6 col-lg-2" key={k.key}><KpiTile k={k} accent="#8b5cf6" /></div>
@@ -229,18 +238,18 @@ export default function Section14Dashboard({ data, targets }: { data: Section14;
         </div>
       </section>
 
-      {/* 14.6 Health & Risk Signals */}
-      <section className="s14-section">
-        <SectionTitle num="14.6" title="Health & Risk Signals" sub="Red = act now · Amber = watch · Green = healthy" />
+      {/* Health & Risk Signals */}
+      <section className="s14-section" data-section="14.6">
+        <SectionTitle title="Health & Risk Signals" sub="Red = act now · Amber = watch · Green = healthy" color="#ef4444" fb={fb('14.6')} />
         <div className="s14-rag-grid">
           {signals.map(s => <RagCard key={s.key} s={s} />)}
         </div>
       </section>
 
-      {/* 14.7 Weekly Targets & Action Items (only when present) */}
+      {/* Weekly Targets & Action Items (only when present) */}
       {realTargets.length > 0 && (
-        <section className="s14-section">
-          <SectionTitle num="14.7" title="Weekly Targets & Action Items" />
+        <section className="s14-section" data-section="14.7">
+          <SectionTitle title="Weekly Targets & Action Items" color="#0ea5e9" fb={fb('14.7')} />
           <div className="s14-card">
             <div className="d-flex flex-column gap-3">
               {realTargets.map((t, i) => <TargetRowView key={i} t={t} />)}
