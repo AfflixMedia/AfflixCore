@@ -21,21 +21,21 @@ function DeltaChip({ value, prev, lowerIsBetter }: { value: number | null; prev:
   const p = prev === 0 ? 100 : (diff / Math.abs(prev)) * 100;
   const good = lowerIsBetter ? diff < 0 : diff > 0;
   return (
-    <span className={`s14-chip ${good ? 's14-chip-up' : 's14-chip-down'}`} title={`${p >= 0 ? '+' : ''}${p.toFixed(1)}%`}>
+    <span className={`ac-pill ${good ? 'ac-pill-up' : 'ac-pill-down'}`} title={`${p >= 0 ? '+' : ''}${p.toFixed(1)}%`}>
       <i className={`bi ${diff >= 0 ? 'bi-arrow-up-short' : 'bi-arrow-down-short'}`} />
       {prev === 0 ? 'new' : `${p >= 0 ? '+' : ''}${fmtPct(p)}%`}
     </span>
   );
 }
 
-function KpiTile({ k, accent }: { k: Kpi; accent?: string }) {
+function KpiTile({ k }: { k: Kpi; accent?: string }) {
   return (
-    <div className="s14-card s14-kpi h-100" style={accent ? { borderTopColor: accent } : undefined}>
-      <div className="s14-kpi-label">{k.label}</div>
-      <div className="s14-kpi-value">{formatValue(k.format, k.value)}</div>
-      <div className="d-flex align-items-center gap-2 mt-1" style={{ minHeight: 22 }}>
+    <div className="ac-kpi h-100">
+      <div className="ac-kpi-label">{k.label}</div>
+      <div className="ac-kpi-value">{formatValue(k.format, k.value)}</div>
+      <div className="ac-kpi-foot">
         <DeltaChip value={k.value} prev={k.prev} lowerIsBetter={k.lowerIsBetter} />
-        {k.hint && <span className="s14-kpi-hint">{k.hint}</span>}
+        {k.hint && <span className="ac-kpi-hint">{k.hint}</span>}
       </div>
     </div>
   );
@@ -95,6 +95,7 @@ export default function Section14Dashboard({ data, targets, renderFeedback, clie
 }) {
   const { northStar, mix, funnel, productivity, sps, paid, signals } = data;
   const fb = (key: string) => renderFeedback?.(key);
+  const totalGmv = northStar.find(k => k.key === 'gmv')?.value ?? null;
   const pieData = mix.slices.filter(s => (s.pct ?? 0) > 0);
   const maxFunnel = Math.max(1, ...funnel.stages.map(s => s.value ?? 0));
   const realTargets = (targets ?? []).filter(t => t.objective.trim() !== '' || t.target != null || t.actual != null);
@@ -129,15 +130,19 @@ export default function Section14Dashboard({ data, targets, renderFeedback, clie
               {pieData.length === 0 ? (
                 <div className="s14-empty">No channel mix yet</div>
               ) : (
-                <div style={{ height: 240 }}>
+                <div style={{ height: 240, position: 'relative' }}>
                   <ResponsiveContainer>
                     <PieChart>
-                      <Pie data={pieData} dataKey="value" nameKey="label" innerRadius="60%" outerRadius="90%" paddingAngle={2} stroke="none">
+                      <Pie data={pieData} dataKey="value" nameKey="label" innerRadius="64%" outerRadius="92%" paddingAngle={2} stroke="none" cornerRadius={4}>
                         {pieData.map((s, i) => <Cell key={i} fill={s.color} />)}
                       </Pie>
                       <Tooltip formatter={(v: any, _n: any, e: any) => [`${formatValue('currency', Number(v))} · ${e?.payload?.pct != null ? e.payload.pct.toFixed(1) + '%' : ''}`, e?.payload?.label]} />
                     </PieChart>
                   </ResponsiveContainer>
+                  <div className="s14-donut-center">
+                    <div className="s14-donut-total">{formatValue('currency', totalGmv, { compact: true })}</div>
+                    <div className="s14-donut-cap">Total GMV</div>
+                  </div>
                 </div>
               )}
             </div>

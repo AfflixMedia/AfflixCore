@@ -181,11 +181,8 @@ export default function ReportDashboard({
               <Row className="g-3">
                 {def.fields.map(f => (
                   <Col xs={6} md={4} xl={2} key={f.key}>
-                    <div className="h-100 p-3 rounded shadow-sm" style={{ borderLeft: '4px solid #e8862e', background: '#fff' }}>
-                      <div className="ac-label">{f.label}</div>
-                      <div className="fs-5 fw-bold mt-1">{formatValue(f.format, fieldValue(f, snap))}</div>
-                      <DeltaV f={f} cur={fieldValue(f, snap)} prev={psnap ? fieldValue(f, psnap) : null} />
-                    </div>
+                    <KpiTile label={f.label} value={formatValue(f.format, fieldValue(f, snap))}
+                      f={f} cur={fieldValue(f, snap)} prev={psnap ? fieldValue(f, psnap) : null} />
                   </Col>
                 ))}
               </Row>
@@ -469,11 +466,7 @@ function StatGrid({ def, data, prev, cols }: {
         const pv = prev ? fieldValue(f, prev) : null;
         return (
           <Col md={cols ?? f.col ?? 3} key={f.key}>
-            <div className="p-3 rounded h-100" style={{ background: '#f8fafc', border: '1px solid #e5e7eb' }}>
-              <div className="ac-label">{f.label}</div>
-              <div className="fs-5 fw-semibold mt-1">{formatValue(f.format, cur)}</div>
-              <DeltaV f={f} cur={cur} prev={pv} />
-            </div>
+            <KpiTile label={f.label} value={formatValue(f.format, cur)} f={f} cur={cur} prev={pv} />
           </Col>
         );
       })}
@@ -564,6 +557,34 @@ function DeltaV({ f, cur, prev, inline }: {
     <small className={`${color} ${inline ? 'd-block' : ''}`} title={`${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`}>
       <i className={`bi ${icon}`} /> {abs}{newBadge ? ' (new)' : ` (${pct >= 0 ? '+' : ''}${fmtPct(pct)}%)`}
     </small>
+  );
+}
+
+/** Pill-style WoW delta for KPI tiles (matches the design-system delta badge). */
+export function DeltaPill({ f, cur, prev }: { f: SectionField; cur: number | null; prev: number | null }) {
+  if (cur == null || prev == null) return null;
+  const diff = cur - prev;
+  if (diff === 0) return <span className="ac-pill ac-pill-flat">±0%</span>;
+  const pct = prev === 0 ? 100 : (diff / Math.abs(prev)) * 100;
+  const good = f.lowerIsBetter ? diff < 0 : diff > 0;
+  return (
+    <span className={`ac-pill ${good ? 'ac-pill-up' : 'ac-pill-down'}`} title={`${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`}>
+      <i className={`bi ${diff >= 0 ? 'bi-arrow-up-short' : 'bi-arrow-down-short'}`} />
+      {prev === 0 ? 'new' : `${pct >= 0 ? '+' : ''}${fmtPct(pct)}%`}
+    </span>
+  );
+}
+
+/** Premium KPI tile (design-system spec: label-caps + stat-lg + pill delta). */
+function KpiTile({ label, value, f, cur, prev }: {
+  label: string; value: string; f: SectionField; cur: number | null; prev: number | null;
+}) {
+  return (
+    <div className="ac-kpi h-100">
+      <div className="ac-kpi-label">{label}</div>
+      <div className="ac-kpi-value">{value}</div>
+      <div className="ac-kpi-foot"><DeltaPill f={f} cur={cur} prev={prev} /></div>
+    </div>
   );
 }
 

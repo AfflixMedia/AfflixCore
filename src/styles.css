@@ -2402,6 +2402,31 @@ input[type="number"] {
 .s14-rag-pill { color: #fff; font-weight: 700; font-size: .66rem; text-transform: uppercase; letter-spacing: .4px; padding: 2px 8px; border-radius: 999px; }
 .s14-rag-detail { font-size: .8rem; color: #4a5160; line-height: 1.35; }
 
+/* Premium KPI tiles + delta pills (Stitch "AAA Analytics" design system) */
+.ac-kpi {
+  display: flex; flex-direction: column; background: #fff;
+  border: 1px solid #eef0f4; border-radius: 14px; padding: 16px 18px;
+  box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 6px 16px rgba(16,24,40,.04);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.ac-kpi:hover { transform: translateY(-2px); box-shadow: 0 4px 10px rgba(16,24,40,.07), 0 12px 28px rgba(16,24,40,.08); }
+.ac-kpi-label { font-family: 'DM Sans', sans-serif; text-transform: uppercase; letter-spacing: .05em; font-size: .7rem; font-weight: 700; color: #8a93a6; }
+.ac-kpi-value { font-family: 'Sora', sans-serif; font-weight: 800; font-size: 1.6rem; line-height: 1.1; color: #161a22; margin-top: 6px; }
+.ac-kpi-foot { margin-top: auto; padding-top: 10px; display: flex; align-items: center; gap: 8px; min-height: 14px; }
+.ac-kpi-hint { font-size: .68rem; color: #aab2c0; }
+.ac-pill {
+  display: inline-flex; align-items: center; gap: 1px; font-weight: 700; font-size: .72rem;
+  padding: 2px 9px 2px 6px; border-radius: 999px; white-space: nowrap; line-height: 1.6;
+}
+.ac-pill-up { background: rgba(16,185,129,.12); color: #0f766e; }
+.ac-pill-down { background: rgba(239,68,68,.12); color: #b91c1c; }
+.ac-pill-flat { background: rgba(148,163,184,.16); color: #64748b; }
+
+/* Donut centre total */
+.s14-donut-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
+.s14-donut-total { font-family: 'Sora', sans-serif; font-weight: 800; font-size: 1.45rem; color: #161a22; line-height: 1; }
+.s14-donut-cap { font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: #94a3b8; margin-top: 4px; }
+
 @media (max-width: 575px) {
   .s14-funnel-meta { width: 96px; }
   .s14-funnel-rate { width: 56px; }
@@ -2422,6 +2447,21 @@ input[type="number"] {
 .tp-stat strong { color: #1f2430; }
 .tp-watch { font-weight: 700; font-size: .8rem; color: #0d6efd; text-decoration: none; }
 .tp-watch:hover { text-decoration: underline; }
+.tp-avatar {
+  width: 40px; height: 40px; border-radius: 50%; display: inline-flex; align-items: center;
+  justify-content: center; font-family: 'Sora', sans-serif; font-weight: 700; font-size: .95rem; flex-shrink: 0;
+}
+.tp-gold { border-color: #f4c77e !important; box-shadow: 0 0 0 1px #f4c77e, 0 10px 26px rgba(245,158,11,.14) !important; }
+.tp-video { padding: 0; overflow: hidden; }
+.tp-thumb {
+  position: relative; display: flex; align-items: center; justify-content: center; height: 124px;
+  background: linear-gradient(135deg, #141620 0%, #2a2230 55%, #6f3a12 100%);
+  color: rgba(255,255,255,.92); text-decoration: none;
+}
+.tp-thumb .tp-play { font-size: 2.7rem; opacity: .92; transition: transform .15s ease; }
+.tp-thumb:hover .tp-play { transform: scale(1.08); }
+.tp-rank-badge { position: absolute; top: 10px; left: 10px; color: #fff; font-weight: 800; font-size: .72rem; padding: 2px 9px; border-radius: 999px; }
+.tp-video-body { padding: 14px 16px 16px; }
 
 /* Weekly Chronology (§2) chart — metric selector chips + WoW badge */
 .chrono-chip {
