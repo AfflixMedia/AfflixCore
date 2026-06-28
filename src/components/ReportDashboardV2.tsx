@@ -14,6 +14,7 @@ import { computeSection14 } from '../lib/section14';
 import Section14Dashboard from './report/Section14Dashboard';
 import TopPerformers from './report/TopPerformers';
 import ChronologyChart, { ChronoPoint } from './report/ChronologyChart';
+import DashSidebar, { DashNavItem } from './report/DashSidebar';
 import SectionComments, { Comment, CommentSection } from './SectionComments';
 import PaidCollabSectionBlock, { PaidCollabPrefetch } from './paidcollab/PaidCollabSectionBlock';
 
@@ -83,6 +84,27 @@ export default function ReportDashboard({
   const isClient = audience === 'client';
   const section14 = computeSection14(c, p);
   const [feedbackSection, setFeedbackSection] = useState<CommentSection | null>(null);
+  const [navCollapsed, setNavCollapsed] = useState<boolean>(() => {
+    try { return localStorage.getItem('ac_dash_nav') === '1'; } catch { return false; }
+  });
+  const toggleNav = () => setNavCollapsed(v => {
+    const n = !v; try { localStorage.setItem('ac_dash_nav', n ? '1' : '0'); } catch { /* ignore */ }
+    return n;
+  });
+
+  // Left-rail items — only the sections the client actually sees.
+  const insightsText = c.insights?.summary?.replace(/<[^>]*>/g, '').trim();
+  const navItems: DashNavItem[] = [{ id: 'snapshot', label: 'Overview', icon: 'bi-grid-1x2-fill' }];
+  if (section14.hasAnyData) {
+    navItems.push({ id: '14.1', label: 'North-Star', icon: 'bi-stars' });
+    navItems.push({ id: '14.2', label: 'Channel Mix', icon: 'bi-pie-chart-fill' });
+    navItems.push({ id: '14.3', label: 'Funnel', icon: 'bi-funnel-fill' });
+    navItems.push({ id: '14.5', label: 'Paid Media', icon: 'bi-cash-stack' });
+  }
+  if ((c.top_creators ?? []).length > 0) navItems.push({ id: 'top_creators', label: 'Top Creators', icon: 'bi-trophy-fill' });
+  if ((c.top_videos ?? []).length > 0) navItems.push({ id: 'top_videos', label: 'Top Videos', icon: 'bi-play-btn-fill' });
+  if (insightsText) navItems.push({ id: 'insights', label: 'Insights', icon: 'bi-lightbulb-fill' });
+  if (c.approval?.enabled) navItems.push({ id: 'approval', label: 'Approval', icon: 'bi-shield-check' });
 
   useEffect(() => {
     if (!openSectionOnLoad) return;
@@ -322,7 +344,9 @@ export default function ReportDashboard({
   };
 
   return (
-    <div className={`ac-themed ${isClient ? 'dash-client' : ''}`}>
+    <div className={isClient ? 'ac-themed dash-shell' : 'ac-themed'}>
+      {isClient && <DashSidebar items={navItems} collapsed={navCollapsed} onToggle={toggleNav} />}
+      <div className={isClient ? `dash-client ${navCollapsed ? 'nav-collapsed' : ''}` : ''}>
       {isClient && reportMeta && (
         <div className="dash-report-head ac-fade">
           <div>
@@ -466,6 +490,7 @@ export default function ReportDashboard({
           </Card>
         );
       })()}
+      </div>
     </div>
   );
 }
