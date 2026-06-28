@@ -12,10 +12,10 @@ const cors = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const STANDARD_SECTIONS = ['overall','top_creators','top_videos','video_performance','gmv_max','product_highlights','shop_health','insights','approval'];
-const CUSTOM_SECTION_RE = /^cs:[0-9a-f-]{16,64}$/i;
+// Accept any short, safe section key: classic + v2 section ids, the §14
+// sub-section keys (14.1–14.7), and custom-section ids (cs:<uuid>).
 function isValidSection(s: string): boolean {
-  return STANDARD_SECTIONS.includes(s) || CUSTOM_SECTION_RE.test(s);
+  return typeof s === 'string' && s.length > 0 && s.length <= 64 && /^[a-z0-9:._-]+$/i.test(s);
 }
 
 serve(async (req) => {
@@ -81,6 +81,11 @@ serve(async (req) => {
         video_performance: 'Video Performance', gmv_max: 'GMV Max',
         product_highlights: 'Product Highlights', shop_health: 'Shop Health', insights: 'Insights',
         approval: 'Approval Needed',
+        snapshot: 'Executive Snapshot',
+        '14.1': 'Key Stats — North-Star & Efficiency', '14.2': 'Key Stats — Channel & Source Mix',
+        '14.3': 'Key Stats — Conversion Funnel', '14.4': 'Key Stats — Productivity & Marketing',
+        '14.5': 'Key Stats — Paid Media Efficiency', '14.6': 'Key Stats — Health & Risk Signals',
+        '14.7': 'Key Stats — Weekly Targets & Action Items',
       };
       const labelFor = (s: string): string => {
         if (sectionLabel[s]) return sectionLabel[s];
