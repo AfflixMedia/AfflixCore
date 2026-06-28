@@ -2349,11 +2349,15 @@ input[type="number"] {
 .s14-hero-title { margin: 2px 0 0; font-family: 'Sora', sans-serif; font-weight: 700; font-size: 1.6rem; color: #ffffff; }
 .s14-hero-icon { font-size: 2.4rem; color: rgba(232,134,46,.85); z-index: 1; }
 
-.s14-section { margin-bottom: 30px; }
-.s14-title { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
-.s14-title-accent { width: 5px; align-self: stretch; min-height: 30px; border-radius: 3px; flex-shrink: 0; }
-.s14-title-text { font-family: 'Sora', sans-serif; font-weight: 700; font-size: 1.15rem; color: #1f2430; line-height: 1.15; }
-.s14-title-sub { font-size: .8rem; color: #8a93a6; margin-top: 1px; }
+.s14-section { margin-bottom: 32px; }
+/* Clean uppercase "label-caps" section headers (Linear / Stitch aesthetic) */
+.s14-title { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.s14-title-accent { width: 4px; height: 15px; align-self: center; border-radius: 3px; flex-shrink: 0; }
+.s14-title-text { font-family: 'DM Sans', sans-serif; font-weight: 700; font-size: .8rem; letter-spacing: .07em; text-transform: uppercase; color: #6b7280; line-height: 1.2; }
+.s14-title-sub { font-size: .76rem; color: #aab2c0; margin-top: 2px; text-transform: none; letter-spacing: 0; }
+
+/* Centred premium canvas for the client share dashboard */
+.dash-client { max-width: 1200px; margin: 0 auto; padding: 8px 4px 24px; }
 
 .s14-card {
   background: #fff; border: 1px solid #eef0f4; border-top: 3px solid #eef0f4;

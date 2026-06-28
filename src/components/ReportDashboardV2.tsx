@@ -307,7 +307,7 @@ export default function ReportDashboard({
   };
 
   return (
-    <div className="ac-themed">
+    <div className={`ac-themed ${isClient ? 'dash-client' : ''}`}>
       {!hasPrev && !isClient && <Alert variant="warning" className="py-2">No previous period — single-period view (no comparison).</Alert>}
 
       {renderCustomAt('start')}
