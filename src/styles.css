@@ -2447,6 +2447,10 @@ input[type="number"] {
 .ac-fade { animation: acFadeIn .6s ease-out both; }
 @keyframes acFadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
+/* Inline chart legend dots */
+.ac-legend-dot { display: inline-flex; align-items: center; gap: 6px; font-size: .78rem; font-weight: 600; color: #554337; }
+.ac-legend-dot::before { content: ''; width: 9px; height: 9px; border-radius: 50%; background: var(--c, #e8862e); }
+
 /* Donut centre total */
 .s14-donut-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
 .s14-donut-total { font-family: 'Sora', sans-serif; font-weight: 800; font-size: 1.45rem; color: #161a22; line-height: 1; }

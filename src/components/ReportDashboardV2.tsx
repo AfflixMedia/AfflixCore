@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Card, Row, Col, Table, Alert, Badge, Offcanvas, Button, Form } from 'react-bootstrap';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
-  AreaChart, Area, PieChart, Pie, Cell,
+  PieChart, Pie, Cell,
 } from 'recharts';
 import {
   WeeklyReportContentV2, CustomSection, CustomField, StandardSectionIdV2,
@@ -188,31 +188,33 @@ export default function ReportDashboard({
           </div>
           {trendData.length > 1 && (
             <div className="s14-card mt-3">
-              <div className="s14-kpi-label mb-3">GMV trend · last {trendData.length} weeks</div>
+              <div className="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                <div className="s14-kpi-label">GMV by week · last {trendData.length} weeks</div>
+                <div className="d-flex gap-3">
+                  <span className="ac-legend-dot" style={{ '--c': '#e8862e' } as any}>GMV</span>
+                  <span className="ac-legend-dot" style={{ '--c': '#f5b06a' } as any}>Affiliate GMV</span>
+                </div>
+              </div>
               <div style={{ height: 280 }}>
                 <ResponsiveContainer>
-                  <AreaChart data={trendData} margin={{ top: 10, right: 18, bottom: 4, left: 4 }}>
+                  <BarChart data={trendData} margin={{ top: 10, right: 12, bottom: 4, left: 4 }} barGap={8} barCategoryGap="32%">
                     <defs>
-                      <linearGradient id="gmvGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#e8862e" stopOpacity={0.28} />
-                        <stop offset="92%" stopColor="#e8862e" stopOpacity={0} />
+                      <linearGradient id="gmvBar" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#f2a35a" /><stop offset="100%" stopColor="#e8862e" />
                       </linearGradient>
-                      <linearGradient id="affGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#f5b06a" stopOpacity={0.22} />
-                        <stop offset="92%" stopColor="#f5b06a" stopOpacity={0} />
+                      <linearGradient id="affBar" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#ffd6ac" /><stop offset="100%" stopColor="#f5b06a" />
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#f1f5f9" />
-                    <XAxis dataKey="label" tick={{ fontSize: 12, fill: '#8a93a6' }} tickLine={false} axisLine={{ stroke: '#eadfd6' }} padding={{ left: 12, right: 12 }} />
+                    <XAxis dataKey="label" tick={{ fontSize: 12, fill: '#8a93a6' }} tickLine={false} axisLine={{ stroke: '#eadfd6' }} />
                     <YAxis tick={{ fontSize: 12, fill: '#8a93a6' }} tickLine={false} axisLine={false} width={58} tickFormatter={(v: number) => formatValue('currency', v, { compact: true })} />
-                    <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #eef0f4', boxShadow: '0 10px 28px rgba(16,24,40,.12)', fontSize: 13 }}
+                    <Tooltip cursor={{ fill: 'rgba(232,134,46,.07)', radius: 8 }}
+                      contentStyle={{ borderRadius: 12, border: '1px solid #eef0f4', boxShadow: '0 10px 28px rgba(16,24,40,.12)', fontSize: 13 }}
                       formatter={(v: any, n: any) => [formatValue('currency', Number(v)), n]} />
-                    <Legend iconType="circle" wrapperStyle={{ fontSize: 13 }} />
-                    <Area type="monotone" dataKey="GMV" stroke="#e8862e" strokeWidth={3.5} fill="url(#gmvGrad)"
-                      dot={{ r: 5, fill: '#fff', stroke: '#e8862e', strokeWidth: 2.5 }} activeDot={{ r: 7 }} />
-                    <Area type="monotone" dataKey="Affiliate GMV" stroke="#f5b06a" strokeWidth={2.5} fill="url(#affGrad)"
-                      dot={{ r: 4, fill: '#fff', stroke: '#f5b06a', strokeWidth: 2 }} activeDot={{ r: 6 }} />
-                  </AreaChart>
+                    <Bar dataKey="GMV" fill="url(#gmvBar)" radius={[8, 8, 0, 0]} maxBarSize={56} />
+                    <Bar dataKey="Affiliate GMV" fill="url(#affBar)" radius={[8, 8, 0, 0]} maxBarSize={56} />
+                  </BarChart>
                 </ResponsiveContainer>
               </div>
             </div>
