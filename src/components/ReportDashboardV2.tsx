@@ -10,6 +10,8 @@ import {
   ScalarData, RowData, fieldValue, formatValue, FieldFormat,
 } from '../lib/reportSchemaV2';
 import { sanitizeRich } from '../lib/sanitize';
+import { computeSection14 } from '../lib/section14';
+import Section14Dashboard from './report/Section14Dashboard';
 import SectionComments, { Comment, CommentSection } from './SectionComments';
 import PaidCollabSectionBlock, { PaidCollabPrefetch } from './paidcollab/PaidCollabSectionBlock';
 
@@ -42,7 +44,7 @@ const PIE_COLORS = ['#e8862e', '#0d6efd', '#198754', '#6f42c1', '#dc3545'];
 
 export default function ReportDashboard({
   c, p, trendData, hasPrev, commentsConfig, openSectionOnLoad, highlightCommentId,
-  approvalDecisions, approvalAction, paidCollab, onOpenPaidCollabProgram,
+  approvalDecisions, approvalAction, paidCollab, onOpenPaidCollabProgram, audience = 'staff',
 }: {
   c: WeeklyReportContentV2;
   p: WeeklyReportContentV2 | null;
@@ -56,7 +58,12 @@ export default function ReportDashboard({
   approvalAction?: ApprovalActionConfig;
   paidCollab?: PaidCollabPrefetch;
   onOpenPaidCollabProgram?: (programId: string) => void;
+  /** 'client' = the share view: only §1 + §14 + Insights + Approval.
+   *  'staff' (default) = the full input dashboard + a §14 client preview. */
+  audience?: 'staff' | 'client';
 }) {
+  const isClient = audience === 'client';
+  const section14 = computeSection14(c, p);
   const [feedbackSection, setFeedbackSection] = useState<CommentSection | null>(null);
 
   useEffect(() => {
@@ -124,7 +131,7 @@ export default function ReportDashboard({
   );
 
   const renderCustomAt = (anchor: StandardSectionIdV2) =>
-    (c.custom_sections ?? []).filter(s => s.insert_after === anchor).map(s => (
+    isClient ? null : (c.custom_sections ?? []).filter(s => s.insert_after === anchor).map(s => (
       <CustomSectionView
         key={s.id}
         section={s}
@@ -309,7 +316,7 @@ export default function ReportDashboard({
 
   return (
     <div className="ac-themed">
-      {!hasPrev && <Alert variant="warning" className="py-2">No previous period — single-period view (no comparison).</Alert>}
+      {!hasPrev && !isClient && <Alert variant="warning" className="py-2">No previous period — single-period view (no comparison).</Alert>}
 
       {renderCustomAt('start')}
 
@@ -334,13 +341,31 @@ export default function ReportDashboard({
         </Offcanvas.Body>
       </Offcanvas>
 
-      {/* All 14 sections in order, with custom sections anchored after each */}
-      {WEEKLY_SECTIONS.map(def => (
-        <div key={def.id}>
-          {renderSection(def)}
-          {renderCustomAt(def.id)}
+      {/* Sections. Client share view shows ONLY the Executive Snapshot (§1);
+          staff see every input section. Both then get the §14 dashboard. */}
+      {isClient ? (
+        <div>{renderSection(SECTION_BY_ID.snapshot)}</div>
+      ) : (
+        WEEKLY_SECTIONS.map(def => (
+          <div key={def.id}>
+            {renderSection(def)}
+            {renderCustomAt(def.id)}
+          </div>
+        ))
+      )}
+
+      {/* Section 14 — Key Stats Dashboard (auto-computed, client-facing) */}
+      {section14.hasAnyData && (
+        <div className="mt-2 mb-3">
+          {!isClient && (
+            <div className="d-flex align-items-center gap-2 mb-2">
+              <Badge bg="dark"><i className="bi bi-eye me-1" />Client preview</Badge>
+              <small className="text-muted">This is the auto-generated dashboard your client sees.</small>
+            </div>
+          )}
+          <Section14Dashboard data={section14} targets={c.targets ?? []} />
         </div>
-      ))}
+      )}
 
       {/* Insights */}
       {c.insights.summary && c.insights.summary.replace(/<[^>]*>/g, '').trim().length > 0 && (

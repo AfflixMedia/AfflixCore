@@ -462,6 +462,7 @@ export default function SharedReports() {
           p={prevReport ? normWeekly(prevReport.content) : null}
           trendData={trendData}
           hasPrev={!!prevReport}
+          audience={isOpenV2 ? 'client' : undefined}
           prevTopVideos={prevReport ? (normWeekly(prevReport.content) as any).top_videos : undefined}
           paidCollab={{ programs: pcPrograms, creators: pcCreators, videos: pcVideos, performance: pcPerformance }}
           onOpenPaidCollabProgram={(pid: string) => {

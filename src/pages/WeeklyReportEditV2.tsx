@@ -5,10 +5,11 @@ import { supabase } from '../lib/supabase';
 import { formatRange } from '../lib/dates';
 import {
   WeeklyReportContentV2, emptyContentV2, normalizeContentV2, numOrNull,
-  WEEKLY_SECTIONS, SECTION_LABELS, SectionDef, emptyRow,
+  WEEKLY_SECTIONS, SECTION_LABELS, SectionDef, emptyRow, emptyTarget,
   CustomSection, CustomField, CustomFieldType, StandardSectionIdV2,
 } from '../lib/reportSchemaV2';
 import { ScalarSectionBody, TableSectionBody } from '../components/report/SectionBody';
+import NumField from '../components/NumField';
 import SectionComments, { Comment, CommentSection } from '../components/SectionComments';
 import { useAuth } from '../auth/AuthContext';
 import RichTextEditor from '../components/RichTextEditor';
@@ -224,6 +225,13 @@ export default function WeeklyReportEdit() {
       arr.splice(i, 1);
       return { ...prev, [sectionId]: arr };
     });
+
+  // ----- §14.7 targets setters ----------------------------------------------
+  const addTarget = () => setC(prev => ({ ...prev, targets: [...prev.targets, emptyTarget()] }));
+  const setTarget = (i: number, key: string, v: any) =>
+    setC(prev => { const arr = [...prev.targets]; arr[i] = { ...arr[i], [key]: v }; return { ...prev, targets: arr }; });
+  const delTarget = (i: number) =>
+    setC(prev => { const arr = [...prev.targets]; arr.splice(i, 1); return { ...prev, targets: arr }; });
 
   // ----- GMV Max auto-fill for section 11.1 ---------------------------------
   const fetchGmvMaxFromBrand = async () => {
@@ -586,6 +594,56 @@ export default function WeeklyReportEdit() {
           {renderCustomAt(def.id)}
         </Fragment>
       ))}
+
+      {/* §14.7 Weekly Targets & Action Items — the only manual part of Section 14.
+          Section 14.1–14.6 are auto-generated for the client from the data above. */}
+      <Card className="mb-4" data-section="targets">
+        <Card.Header>
+          <div className="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <span className="fw-semibold">14.7 Weekly Targets &amp; Action Items <span className="badge bg-light text-secondary border ms-1">optional</span></span>
+            <Button size="sm" variant="outline-primary" onClick={addTarget}><i className="bi bi-plus-lg me-1" />Add target</Button>
+          </div>
+        </Card.Header>
+        <Card.Body>
+          <p className="text-muted small mb-3">
+            <i className="bi bi-info-circle me-1" />
+            Sections 14.1–14.6 of the client dashboard are calculated automatically from the data above. Add targets here only if you want a client-facing progress tracker — leave it empty to skip it.
+          </p>
+          {c.targets.length === 0 ? (
+            <p className="text-muted small mb-0">No targets — the client dashboard will show 14.1–14.6 only.</p>
+          ) : (
+            <div className="table-responsive">
+              <table className="table table-sm align-middle mb-0">
+                <thead><tr>
+                  <th>Objective</th><th style={{ width: 110 }}>Unit</th>
+                  <th style={{ width: 120 }}>Target</th><th style={{ width: 120 }}>Actual</th>
+                  <th style={{ width: 120 }}>Lower is better</th><th>Owner / next step</th><th style={{ width: 44 }} />
+                </tr></thead>
+                <tbody>
+                  {c.targets.map((t, i) => (
+                    <tr key={i}>
+                      <td><Form.Control size="sm" value={t.objective} onChange={e => setTarget(i, 'objective', e.target.value)} placeholder="e.g. Hit $50k GMV" /></td>
+                      <td>
+                        <Form.Select size="sm" value={t.unit} onChange={e => setTarget(i, 'unit', e.target.value)}>
+                          <option value="currency">$ currency</option>
+                          <option value="number">number</option>
+                          <option value="percent">% percent</option>
+                          <option value="ratio">x ratio</option>
+                        </Form.Select>
+                      </td>
+                      <td><NumField size="sm" value={t.target} onChange={n => setTarget(i, 'target', n)} /></td>
+                      <td><NumField size="sm" value={t.actual} onChange={n => setTarget(i, 'actual', n)} /></td>
+                      <td className="text-center"><Form.Check type="switch" checked={t.lower_is_better} onChange={e => setTarget(i, 'lower_is_better', e.target.checked)} /></td>
+                      <td><Form.Control size="sm" value={t.owner} onChange={e => setTarget(i, 'owner', e.target.value)} placeholder="Owner" /></td>
+                      <td><Button size="sm" variant="outline-danger" onClick={() => delTarget(i)}><i className="bi bi-trash" /></Button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card.Body>
+      </Card>
 
       {/* Insights — single advanced rich-text block (dividers built in) */}
       <Card className="mb-4" data-section="insights">

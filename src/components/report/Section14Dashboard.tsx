@@ -1,0 +1,295 @@
+import {
+  ResponsiveContainer, PieChart, Pie, Cell, Tooltip,
+  RadialBarChart, RadialBar, PolarAngleAxis,
+} from 'recharts';
+import { formatValue, FieldFormat, TargetRow } from '../../lib/reportSchemaV2';
+import { Section14, Kpi, RagSignal, RagStatus } from '../../lib/section14';
+
+// ---- small shared pieces ---------------------------------------------------
+function fmtPct(p: number): string {
+  const a = Math.abs(p);
+  const body = a >= 1000 ? `${(a / 1000).toFixed(1).replace(/\.0$/, '')}k` : a.toFixed(a < 10 ? 1 : 0);
+  return p < 0 ? `-${body}` : body;
+}
+
+/** WoW delta chip — only when both values exist (compare-when-available rule). */
+function DeltaChip({ value, prev, lowerIsBetter }: { value: number | null; prev: number | null; lowerIsBetter?: boolean }) {
+  if (value == null || prev == null) return null;
+  const diff = value - prev;
+  if (diff === 0) return <span className="s14-chip s14-chip-flat">±0%</span>;
+  const p = prev === 0 ? 100 : (diff / Math.abs(prev)) * 100;
+  const good = lowerIsBetter ? diff < 0 : diff > 0;
+  return (
+    <span className={`s14-chip ${good ? 's14-chip-up' : 's14-chip-down'}`} title={`${p >= 0 ? '+' : ''}${p.toFixed(1)}%`}>
+      <i className={`bi ${diff >= 0 ? 'bi-arrow-up-short' : 'bi-arrow-down-short'}`} />
+      {prev === 0 ? 'new' : `${p >= 0 ? '+' : ''}${fmtPct(p)}%`}
+    </span>
+  );
+}
+
+function KpiTile({ k, accent }: { k: Kpi; accent?: string }) {
+  return (
+    <div className="s14-card s14-kpi h-100" style={accent ? { borderTopColor: accent } : undefined}>
+      <div className="s14-kpi-label">{k.label}</div>
+      <div className="s14-kpi-value">{formatValue(k.format, k.value)}</div>
+      <div className="d-flex align-items-center gap-2 mt-1" style={{ minHeight: 22 }}>
+        <DeltaChip value={k.value} prev={k.prev} lowerIsBetter={k.lowerIsBetter} />
+        {k.hint && <span className="s14-kpi-hint">{k.hint}</span>}
+      </div>
+    </div>
+  );
+}
+
+function SectionTitle({ num, title, sub }: { num: string; title: string; sub?: string }) {
+  return (
+    <div className="s14-title">
+      <span className="s14-title-badge">{num}</span>
+      <div>
+        <div className="s14-title-text">{title}</div>
+        {sub && <div className="s14-title-sub">{sub}</div>}
+      </div>
+    </div>
+  );
+}
+
+function spsColor(v: number) {
+  if (v >= 4.5) return '#10b981';
+  if (v >= 3.5) return '#e8862e';
+  return '#ef4444';
+}
+
+const RAG_META: Record<RagStatus, { bg: string; fg: string; icon: string; label: string }> = {
+  green: { bg: 'rgba(16,185,129,.12)', fg: '#0f766e', icon: 'bi-check-circle-fill', label: 'Healthy' },
+  amber: { bg: 'rgba(245,158,11,.14)', fg: '#b45309', icon: 'bi-exclamation-triangle-fill', label: 'Watch' },
+  red: { bg: 'rgba(239,68,68,.12)', fg: '#b91c1c', icon: 'bi-exclamation-octagon-fill', label: 'Act now' },
+  na: { bg: 'rgba(148,163,184,.12)', fg: '#64748b', icon: 'bi-dash-circle', label: 'No data' },
+};
+
+function RagCard({ s }: { s: RagSignal }) {
+  const m = RAG_META[s.status];
+  return (
+    <div className="s14-rag" style={{ background: m.bg, borderColor: m.fg }}>
+      <div className="d-flex align-items-center justify-content-between mb-1">
+        <span className="s14-rag-label">{s.label}</span>
+        <span className="s14-rag-pill" style={{ background: m.fg }}>{m.label}</span>
+      </div>
+      <div className="d-flex align-items-start gap-2">
+        <i className={`bi ${m.icon}`} style={{ color: m.fg, fontSize: '1.1rem' }} />
+        <span className="s14-rag-detail">{s.detail}</span>
+      </div>
+    </div>
+  );
+}
+
+// ---- main ------------------------------------------------------------------
+export default function Section14Dashboard({ data, targets }: { data: Section14; targets: TargetRow[] }) {
+  const { northStar, mix, funnel, productivity, sps, paid, signals } = data;
+  const pieData = mix.slices.filter(s => (s.pct ?? 0) > 0);
+  const maxFunnel = Math.max(1, ...funnel.stages.map(s => s.value ?? 0));
+  const realTargets = (targets ?? []).filter(t => t.objective.trim() !== '' || t.target != null || t.actual != null);
+
+  return (
+    <div className="s14-root">
+      <div className="s14-hero">
+        <div>
+          <div className="s14-hero-kicker">Section 14</div>
+          <h3 className="s14-hero-title">Key Stats Dashboard</h3>
+        </div>
+        <i className="bi bi-graph-up-arrow s14-hero-icon" />
+      </div>
+
+      {/* 14.1 North-Star & Efficiency */}
+      <section className="s14-section">
+        <SectionTitle num="14.1" title="North-Star & Efficiency" sub="The numbers that define the week" />
+        <div className="row g-3">
+          {northStar.map(k => (
+            <div className="col-6 col-lg" key={k.key}><KpiTile k={k} accent="#e8862e" /></div>
+          ))}
+        </div>
+      </section>
+
+      {/* 14.2 Channel & Source Mix */}
+      <section className="s14-section">
+        <SectionTitle num="14.2" title="Channel & Source Mix" sub="Where GMV comes from" />
+        <div className="row g-3 align-items-stretch">
+          <div className="col-lg-5">
+            <div className="s14-card h-100 d-flex flex-column">
+              <div className="s14-kpi-label mb-2">GMV by selling surface</div>
+              {pieData.length === 0 ? (
+                <div className="s14-empty">No channel mix yet</div>
+              ) : (
+                <div style={{ height: 240 }}>
+                  <ResponsiveContainer>
+                    <PieChart>
+                      <Pie data={pieData} dataKey="value" nameKey="label" innerRadius="60%" outerRadius="90%" paddingAngle={2} stroke="none">
+                        {pieData.map((s, i) => <Cell key={i} fill={s.color} />)}
+                      </Pie>
+                      <Tooltip formatter={(v: any, _n: any, e: any) => [`${formatValue('currency', Number(v))} · ${e?.payload?.pct != null ? e.payload.pct.toFixed(1) + '%' : ''}`, e?.payload?.label]} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="col-lg-7">
+            <div className="s14-card h-100">
+              <div className="s14-kpi-label mb-2">Share of total GMV</div>
+              <div className="d-flex flex-column gap-2">
+                {mix.slices.map(s => (
+                  <div key={s.label}>
+                    <div className="d-flex justify-content-between align-items-center mb-1">
+                      <span className="s14-bar-label"><span className="s14-dot" style={{ background: s.color }} />{s.label}</span>
+                      <span className="s14-bar-val">{s.pct != null ? `${s.pct.toFixed(1)}%` : '—'}<span className="text-muted ms-2 small">{formatValue('currency', s.value)}</span></span>
+                    </div>
+                    <div className="s14-track"><div className="s14-fill" style={{ width: `${Math.min(100, s.pct ?? 0)}%`, background: s.color }} /></div>
+                  </div>
+                ))}
+              </div>
+              <div className="s14-split mt-3">
+                <div className="s14-split-head">Creator vs Seller content</div>
+                <CreatorSellerBar creator={mix.creator} seller={mix.seller} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 14.3 Conversion Funnel */}
+      <section className="s14-section">
+        <SectionTitle num="14.3" title="Conversion Funnel" sub="Impressions → Clicks → Cart → Orders" />
+        <div className="row g-3">
+          <div className="col-lg-7">
+            <div className="s14-card h-100">
+              {funnel.stages.every(s => (s.value ?? 0) === 0) ? (
+                <div className="s14-empty">No funnel data yet</div>
+              ) : funnel.stages.map((st, i) => (
+                <div key={st.label} className="s14-funnel-row">
+                  <div className="s14-funnel-meta">
+                    <span className="s14-funnel-label">{st.label}</span>
+                    <span className="s14-funnel-value">{formatValue('number', st.value)}</span>
+                  </div>
+                  <div className="s14-funnel-track">
+                    <div className="s14-funnel-bar" style={{ width: `${Math.max(4, ((st.value ?? 0) / maxFunnel) * 100)}%` }} />
+                  </div>
+                  {i > 0 && st.rate != null && (
+                    <span className="s14-funnel-rate"><i className="bi bi-arrow-return-right" /> {st.rate.toFixed(1)}%</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="col-lg-5">
+            <div className="row g-3 h-100">
+              {funnel.rates.map(k => (
+                <div className="col-6" key={k.key}><KpiTile k={k} accent="#0d6efd" /></div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 14.4 Productivity & Marketing */}
+      <section className="s14-section">
+        <SectionTitle num="14.4" title="Productivity & Marketing" />
+        <div className="row g-3 align-items-stretch">
+          {productivity.map(k => (
+            <div className="col-6 col-lg-3" key={k.key}><KpiTile k={k} accent="#198754" /></div>
+          ))}
+          <div className="col-6 col-lg-3">
+            <div className="s14-card h-100 d-flex flex-column align-items-center justify-content-center" style={{ position: 'relative' }}>
+              <div className="s14-kpi-label mb-1 align-self-start">Shop Performance Score</div>
+              {sps == null ? (
+                <div className="s14-empty my-3">Not yet assigned</div>
+              ) : (
+                <div style={{ width: '100%', height: 150, position: 'relative' }}>
+                  <ResponsiveContainer>
+                    <RadialBarChart innerRadius="72%" outerRadius="100%" data={[{ value: (sps / 5) * 100, fill: spsColor(sps) }]} startAngle={90} endAngle={-270}>
+                      <PolarAngleAxis type="number" domain={[0, 100]} tick={false} />
+                      <RadialBar background dataKey="value" cornerRadius={20} />
+                    </RadialBarChart>
+                  </ResponsiveContainer>
+                  <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+                    <div style={{ fontSize: '1.8rem', fontWeight: 800, fontFamily: 'Sora, sans-serif' }}>{sps.toFixed(1)}</div>
+                    <div className="text-muted" style={{ fontSize: '.7rem' }}>out of 5.0</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 14.5 Paid Media Efficiency */}
+      <section className="s14-section">
+        <SectionTitle num="14.5" title="Paid Media Efficiency" />
+        <div className="row g-3">
+          {paid.map(k => (
+            <div className="col-6 col-lg-2" key={k.key}><KpiTile k={k} accent="#8b5cf6" /></div>
+          ))}
+        </div>
+      </section>
+
+      {/* 14.6 Health & Risk Signals */}
+      <section className="s14-section">
+        <SectionTitle num="14.6" title="Health & Risk Signals" sub="Red = act now · Amber = watch · Green = healthy" />
+        <div className="s14-rag-grid">
+          {signals.map(s => <RagCard key={s.key} s={s} />)}
+        </div>
+      </section>
+
+      {/* 14.7 Weekly Targets & Action Items (only when present) */}
+      {realTargets.length > 0 && (
+        <section className="s14-section">
+          <SectionTitle num="14.7" title="Weekly Targets & Action Items" />
+          <div className="s14-card">
+            <div className="d-flex flex-column gap-3">
+              {realTargets.map((t, i) => <TargetRowView key={i} t={t} />)}
+            </div>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function CreatorSellerBar({ creator, seller }: { creator: number | null; seller: number | null }) {
+  const c = creator ?? 0, s = seller ?? 0, total = c + s;
+  if (total <= 0) return <div className="s14-empty">No split data</div>;
+  const cp = (c / total) * 100;
+  return (
+    <>
+      <div className="s14-split-track">
+        <div style={{ width: `${cp}%`, background: '#e8862e' }} />
+        <div style={{ width: `${100 - cp}%`, background: '#0d6efd' }} />
+      </div>
+      <div className="d-flex justify-content-between mt-1 small">
+        <span><span className="s14-dot" style={{ background: '#e8862e' }} />Creator {formatValue('currency', creator)} ({cp.toFixed(0)}%)</span>
+        <span><span className="s14-dot" style={{ background: '#0d6efd' }} />Seller {formatValue('currency', seller)} ({(100 - cp).toFixed(0)}%)</span>
+      </div>
+    </>
+  );
+}
+
+function TargetRowView({ t }: { t: TargetRow }) {
+  const fmt = (v: number | null) => formatValue(t.unit as FieldFormat, v);
+  const ratio = (t.target != null && t.target !== 0 && t.actual != null) ? t.actual / t.target : null;
+  const onTrack = ratio == null ? null : (t.lower_is_better ? t.actual! <= t.target! : ratio >= 1);
+  const pct = ratio == null ? null : Math.min(100, Math.max(0, ratio * 100));
+  const status: RagStatus = onTrack == null ? 'na' : onTrack ? 'green' : (pct != null && pct >= 80 ? 'amber' : 'red');
+  const m = RAG_META[status];
+  return (
+    <div>
+      <div className="d-flex justify-content-between align-items-center mb-1 flex-wrap gap-2">
+        <span className="fw-semibold">{t.objective || 'Objective'}</span>
+        <span className="d-flex align-items-center gap-2">
+          <span className="small text-muted">{fmt(t.actual)} {t.target != null && <>/ {fmt(t.target)}</>}</span>
+          <span className="s14-rag-pill" style={{ background: m.fg }}>{onTrack == null ? '—' : onTrack ? 'On track' : 'Behind'}</span>
+        </span>
+      </div>
+      <div className="s14-track">
+        <div className="s14-fill" style={{ width: `${pct ?? 0}%`, background: m.fg }} />
+      </div>
+      {t.owner && <div className="text-muted small mt-1"><i className="bi bi-person me-1" />{t.owner}</div>}
+    </div>
+  );
+}

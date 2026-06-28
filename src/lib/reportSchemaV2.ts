@@ -348,10 +348,26 @@ export interface WeeklyReportContentV2 {
   affiliate_summary: ScalarData;
   top_creators: RowData[];
   top_videos: RowData[];
+  /** §14.7 optional targets & action items (the only manual part of section 14). */
+  targets: TargetRow[];
   insights: Insights;
   custom_sections: CustomSection[];
   approval: ApprovalRequest;
 }
+
+/** One row of the §14.7 Weekly Targets & Action Items tracker. */
+export interface TargetRow {
+  objective: string;
+  target: number | null;
+  actual: number | null;
+  /** display unit hint: 'currency' | 'number' | 'percent' | 'ratio' */
+  unit: 'currency' | 'number' | 'percent' | 'ratio';
+  lower_is_better: boolean;
+  owner: string;
+}
+export const emptyTarget = (): TargetRow => ({
+  objective: '', target: null, actual: null, unit: 'currency', lower_is_better: false, owner: '',
+});
 
 // ---- value helpers ---------------------------------------------------------
 export function numOrNull(v: any): number | null {
@@ -409,6 +425,7 @@ export const emptyContentV2 = (): WeeklyReportContentV2 => ({
   affiliate_summary: emptyScalar(SECTION_BY_ID.affiliate_summary),
   top_creators: [],
   top_videos: [],
+  targets: [],
   insights: { summary: '' },
   custom_sections: [],
   approval: { enabled: false, content: '' },
@@ -589,6 +606,14 @@ export function normalizeContentV2(raw: any): WeeklyReportContentV2 {
       video_url: str(r.video_url), product: str(r.product ?? r.creator_name),
       video_gmv: numOrNull(r.gmv ?? r.video_gmv), items_sold: numOrNull(r.items_sold),
     })),
+    targets: Array.isArray(src.targets) ? src.targets.map((t: any) => ({
+      objective: str(t.objective),
+      target: numOrNull(t.target),
+      actual: numOrNull(t.actual),
+      unit: (['currency', 'number', 'percent', 'ratio'].includes(t.unit) ? t.unit : 'currency') as TargetRow['unit'],
+      lower_is_better: !!t.lower_is_better,
+      owner: str(t.owner),
+    })) : [],
     insights: { summary: str(src.insights?.summary) },
     custom_sections,
     approval,
