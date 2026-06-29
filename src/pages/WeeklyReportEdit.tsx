@@ -55,6 +55,10 @@ export default function WeeklyReportEdit() {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // Auto-save state for the Insights section (debounced).
+  const lastSavedInsights = useRef<string | null>(null);
+  const [insightsSave, setInsightsSave] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
   const [showComments, setShowComments] = useState(false);
   const [priorReports, setPriorReports] = useState<ReportRow[]>([]);
   const [pcPrograms, setPcPrograms] = useState<{ id: string; name: string | null; ended_at: string | null }[]>([]);
@@ -141,7 +145,9 @@ export default function WeeklyReportEdit() {
       if (error) { setErr(error.message); setLoading(false); return; }
       const r = data as ReportRow;
       setReport(r);
-      setC(normalizeContent(r.content));
+      const normalized = normalizeContent(r.content);
+      setC(normalized);
+      lastSavedInsights.current = normalized.insights.summary;
       const { data: bd } = await supabase.from('brands').select('id,name,client,client_status').eq('id', r.brand_id).single();
       setBrand(bd as Brand);
       const { data: pcp } = await supabase.from('paid_creator_programs')
@@ -166,6 +172,24 @@ export default function WeeklyReportEdit() {
       setLoading(false);
     })();
   }, [id]);
+
+  // Debounced auto-save of the Insights section. Saves the full report content
+  // (status untouched) ~1s after the user stops typing in Insights.
+  useEffect(() => {
+    if (loading || !report || lastSavedInsights.current === null) return;
+    if (brand?.client_status === 'closed') return;
+    const summary = c.insights.summary;
+    if (summary === lastSavedInsights.current) return;
+    setInsightsSave('saving');
+    const t = setTimeout(async () => {
+      const { error } = await supabase.from('weekly_reports')
+        .update({ content: c }).eq('id', id);
+      if (error) { setInsightsSave('error'); return; }
+      lastSavedInsights.current = summary;
+      setInsightsSave('saved');
+    }, 1000);
+    return () => clearTimeout(t);
+  }, [c.insights.summary]);
 
   const addCustomFromPreset = (preset: PresetRow) => {
     const p = preset.payload ?? {};
@@ -907,7 +931,16 @@ export default function WeeklyReportEdit() {
 
       {/* Insights */}
       <Card className="mb-4">
-        <Card.Header><HeaderWithFeedback title="Insights" section="insights" sectionId="insights" /></Card.Header>
+        <Card.Header className="d-flex justify-content-between align-items-center">
+          <HeaderWithFeedback title="Insights" section="insights" sectionId="insights" />
+          {insightsSave !== 'idle' && (
+            <span className={`small ${insightsSave === 'error' ? 'text-danger' : 'text-muted'}`}>
+              {insightsSave === 'saving' && (<><Spinner animation="border" size="sm" className="me-1" />Saving…</>)}
+              {insightsSave === 'saved' && (<><i className="bi bi-check2 me-1" />Saved</>)}
+              {insightsSave === 'error' && (<><i className="bi bi-exclamation-triangle me-1" />Save failed</>)}
+            </span>
+          )}
+        </Card.Header>
         <Card.Body>
           <RichTextEditor
             value={c.insights.summary}
