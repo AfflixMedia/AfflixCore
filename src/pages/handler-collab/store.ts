@@ -349,3 +349,72 @@ export async function setCreatorMonthly(creatorId: string, monthly: Record<strin
   });
   if (error) throw error;
 }
+
+/* ── Notes board (Google Keep-style) ──
+   Global notes for the handler workspace (handler_notes). Owner-scoped via RLS;
+   a note can optionally link to a brand (brand-wise) and/or a month (program-wise),
+   carry free-form labels, and a reminder that fires an in-app/push notification. */
+export interface HandlerNote {
+  id: string;
+  owner_id: string;
+  brand_id: string | null;
+  month: string | null;
+  title: string;
+  body: string;
+  color: string;
+  labels: string[];
+  pinned: boolean;
+  archived: boolean;
+  reminder_at: string | null;
+  reminder_done: boolean;
+  reminder_sent_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type NotePatch = Partial<Omit<HandlerNote, 'id' | 'owner_id' | 'created_at' | 'updated_at'>>;
+
+export async function loadNotes(): Promise<HandlerNote[]> {
+  const { data, error } = await supabase
+    .from('handler_notes')
+    .select('*')
+    .order('pinned', { ascending: false })
+    .order('updated_at', { ascending: false });
+  if (error) throw error;
+  return (data || []) as HandlerNote[];
+}
+
+export async function createNote(patch: NotePatch): Promise<HandlerNote> {
+  const { data, error } = await supabase
+    .from('handler_notes')
+    .insert(patch)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as HandlerNote;
+}
+
+export async function updateNote(id: string, patch: NotePatch): Promise<HandlerNote> {
+  const { data, error } = await supabase
+    .from('handler_notes')
+    .update(patch)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as HandlerNote;
+}
+
+export async function deleteNote(id: string): Promise<void> {
+  const { error } = await supabase.from('handler_notes').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// Convert any reminders that are now due into notifications (in-app + realtime).
+// Called from the front-end on load / interval so reminders surface even when
+// pg_cron isn't enabled. Returns the number fired.
+export async function fireDueNoteReminders(): Promise<number> {
+  const { data, error } = await supabase.rpc('fire_due_note_reminders');
+  if (error) throw error;
+  return (data as number) || 0;
+}

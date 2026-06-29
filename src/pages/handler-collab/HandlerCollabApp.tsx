@@ -10,6 +10,7 @@ import * as store from './store';
 import { useAuth } from '../../auth/AuthContext';
 import { PayChip, PayoutDetail } from '../paid-collab/handlerCollabReadonly';
 import PaidCollabComments from '../../components/paidcollab/PaidCollabComments';
+import NotesBoard, { BrandNotesDrawer, AllNotesDrawer } from './NotesBoard';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -218,6 +219,9 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
   const [brandMonths, setBrandMonths] = useState([]);
   const [creators, setCreators] = useState([]);
   const [clients, setClients] = useState([]);
+  // Lightweight notes list (own Keep-style notes) — only used for the Notes tab's
+  // due-reminder badge; the full board manages its own copy in NotesBoard.
+  const [notes, setNotes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
   const { user, profile } = useAuth();
@@ -255,7 +259,9 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
   const [search, setSearch] = useState('');
   const [brandEditor, setBrandEditor] = useState(null);   // { mode:'add'|'edit', brand? }
   const [creatorEditor, setCreatorEditor] = useState(null); // { mode, brandId, creator? }
-  const [notesBrand, setNotesBrand] = useState(null);     // { id, name }
+  const [notesBrand, setNotesBrand] = useState(null);     // { id, name } — quick month note drawer
+  const [keepBrand, setKeepBrand] = useState(null);       // { id, name } — Keep-notes list drawer
+  const [allNotesOpen, setAllNotesOpen] = useState(false); // global notes drawer (floating button)
   const [confirmDel, setConfirmDel] = useState(null);     // { message, onYes }
   const [undo, setUndo] = useState(null);                 // { label, restore, commit }
   const undoRef = useRef(null);
@@ -301,6 +307,8 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
       if (an) setReportAnchors(an);
       const cm = await store.loadComments(ids).catch(() => null);
       if (cm) setComments(cm);
+      const nts = await store.loadNotes().catch(() => null);
+      if (nts) setNotes(nts);
     } catch (e) {
       setErr(e.message || 'Failed to load');
     }
@@ -311,6 +319,17 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
   /* lookups */
   const brandById = useMemo(() => { const m = {}; brands.forEach(b => { m[b.id] = b; }); return m; }, [brands]);
   const bmByKey = useMemo(() => { const m = {}; brandMonths.forEach(x => { m[`${x.brand_id}|${x.month}`] = x; }); return m; }, [brandMonths]);
+  // Due reminders (overdue, not dismissed/archived) → Notes tab badge.
+  const dueReminderCount = useMemo(() => {
+    const now = Date.now();
+    return notes.filter(n => n.reminder_at && !n.reminder_done && !n.archived && new Date(n.reminder_at).getTime() <= now).length;
+  }, [notes]);
+  // Per-brand Keep-note counts (for the brand-row notes indicator).
+  const noteCountByBrand = useMemo(() => {
+    const m = {};
+    notes.forEach(n => { if (n.brand_id && !n.archived) m[n.brand_id] = (m[n.brand_id] || 0) + 1; });
+    return m;
+  }, [notes]);
 
   // ── keep in sync with the database (teammates / other devices) ──
   const busyRef = useRef(false);
@@ -333,6 +352,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'handler_collab_creators' }, ping)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'paid_collab_handler_brands' }, ping)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'handler_collab_brand_months' }, ping)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'handler_notes' }, ping)
       .subscribe();
     return () => { clearTimeout(t); try { supabase.removeChannel(ch); } catch {} };
   }, [reload]);
@@ -647,10 +667,11 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
         {err && <div className="pc-banner" style={{ background: 'var(--pc-error-bg)', color: 'var(--pc-error-fg)' }}><span>⚠️</span><span>{err}</span></div>}
 
         <div className="pc-tabs">
-          {[{ id: 'brands', label: 'Brands' }, { id: 'creators', label: 'Creators' }, { id: 'performance', label: 'Performance' }, { id: 'reporting', label: 'Internal Reporting' }, { id: 'discussions', label: 'Discussions' }].map(t => (
+          {[{ id: 'brands', label: 'Brands' }, { id: 'creators', label: 'Creators' }, { id: 'performance', label: 'Performance' }, { id: 'reporting', label: 'Internal Reporting' }, { id: 'discussions', label: 'Discussions' }, { id: 'notes', label: 'Notes' }].map(t => (
             <button key={t.id} className={`pc-tab ${tab === t.id ? 'active' : ''}`} onClick={() => { setTab(t.id); setDrillId(null); }}>
               {t.label}
               {t.id === 'discussions' && needsReplyCount > 0 && <span className="pc-tab-badge">{needsReplyCount}</span>}
+              {t.id === 'notes' && dueReminderCount > 0 && <span className="pc-tab-badge">{dueReminderCount}</span>}
             </button>
           ))}
         </div>
@@ -666,6 +687,8 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
             <ReportingView brands={brands} brandById={brandById} creators={creators} month={month} comments={comments} onOpenComments={openComments} />
           ) : tab === 'discussions' ? (
             <DiscussionsView comments={comments} brandById={brandById} creators={creators} onOpen={openComments} />
+          ) : tab === 'notes' ? (
+            <NotesBoard brands={brands} brandById={brandById} month={month} />
           ) : (
             drillId && drillBrand
               ? <Drilldown
@@ -690,6 +713,8 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
                   onEditBudget={(r) => setBrandEditor({ mode: 'edit', brand: brands.find(b => b.id === r.id) || { id: r.id, name: r.brand } })}
                   onAddBrand={() => setBrandEditor({ mode: 'add', brand: { id: null, name: '' } })}
                   onNotes={(r) => setNotesBrand({ id: r.id, name: r.brand })}
+                  noteCounts={noteCountByBrand}
+                  onBrandNotes={(r) => setKeepBrand({ id: r.id, name: r.brand })}
                   onReorder={reorderBrands}
                 />
           )
@@ -717,6 +742,21 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
           notes={(bmByKey[`${notesBrand.id}|${month}`] || {}).notes || ''}
           onClose={() => setNotesBrand(null)}
           onSave={(text) => saveNotes(notesBrand.id, text)} />
+      )}
+      {keepBrand && (
+        <BrandNotesDrawer brandId={keepBrand.id} brandName={keepBrand.name}
+          brands={brands} brandById={brandById} month={month}
+          notes={notes.filter(n => n.brand_id === keepBrand.id)}
+          onClose={() => setKeepBrand(null)} onChanged={reload} />
+      )}
+      {/* global notes — reachable from anywhere in the workspace */}
+      <button className="pc-notesfab" onClick={() => setAllNotesOpen(true)} title="Notes" aria-label="Open notes">
+        <i className="bi bi-journal-text" />
+        {dueReminderCount > 0 && <span className="pc-notesfab-badge">{dueReminderCount}</span>}
+      </button>
+      {allNotesOpen && (
+        <AllNotesDrawer notes={notes} brands={brands} brandById={brandById} month={month}
+          onClose={() => setAllNotesOpen(false)} onChanged={reload} />
       )}
       {confirmDel && <ConfirmModal message={confirmDel.message} onYes={confirmDel.onYes} onCancel={() => setConfirmDel(null)} />}
       {undo && <UndoToast label={undo.label} onUndo={doUndo} />}
@@ -993,7 +1033,7 @@ function UndoToast({ label, onUndo }) {
 /* ════════════════════════════════════════════════════════════
    Brand-level table
 ════════════════════════════════════════════════════════════ */
-function BrandLevel({ rows, totals, month, search, setSearch, onOpen, onEditBudget, onAddBrand, onNotes, onReorder }) {
+function BrandLevel({ rows, totals, month, search, setSearch, onOpen, onEditBudget, onAddBrand, onNotes, noteCounts = {}, onBrandNotes, onReorder }) {
   const collected = totals.allocated > 0 ? Math.round((totals.paid / totals.allocated) * 100) : 0;
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   function handleDragEnd(e) {
@@ -1036,7 +1076,7 @@ function BrandLevel({ rows, totals, month, search, setSearch, onOpen, onEditBudg
           </div>
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
             <SortableContext items={rows.map(r => r.id)} strategy={verticalListSortingStrategy}>
-              {rows.map(r => <BrandRow key={r.id} r={r} onOpen={() => onOpen(r.id)} onEditBudget={() => onEditBudget(r)} onNotes={() => onNotes(r)} />)}
+              {rows.map(r => <BrandRow key={r.id} r={r} onOpen={() => onOpen(r.id)} onEditBudget={() => onEditBudget(r)} onNotes={() => onNotes(r)} noteCount={noteCounts[r.id] || 0} onBrandNotes={() => onBrandNotes && onBrandNotes(r)} />)}
             </SortableContext>
           </DndContext>
           <div className="pc-bt-row is-total">
@@ -1071,12 +1111,18 @@ const DragGrip = (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden><circle cx="9" cy="6" r="1.7" /><circle cx="15" cy="6" r="1.7" /><circle cx="9" cy="12" r="1.7" /><circle cx="15" cy="12" r="1.7" /><circle cx="9" cy="18" r="1.7" /><circle cx="15" cy="18" r="1.7" /></svg>
 );
 
-function BrandRow({ r, onOpen, onEditBudget, onNotes }) {
+function BrandRow({ r, onOpen, onEditBudget, onNotes, noteCount = 0, onBrandNotes }) {
   // Usage bar color: below 80% red, 80%+ green.
   const usageColor = r.usage >= 80 ? 'var(--pc-success-fg)' : 'var(--pc-error-fg)';
   function edit(e) { e.stopPropagation(); onEditBudget(); }
-  function notes(e) { e.stopPropagation(); onNotes(); }
-  const hasNotes = !!(r.bm.notes && r.bm.notes.trim());
+  function keepNotes(e) { e.stopPropagation(); onBrandNotes && onBrandNotes(); }
+  const keepBtn = (
+    <button className={`pc-keepnote-btn ${noteCount > 0 ? 'has' : ''}`} onClick={keepNotes}
+      title={noteCount > 0 ? `${noteCount} brand note${noteCount === 1 ? '' : 's'}` : 'Brand notes'} aria-label="Brand notes">
+      <i className="bi bi-journal-text" />
+      {noteCount > 0 && <span className="pc-keepnote-count">{noteCount}</span>}
+    </button>
+  );
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: r.id });
   const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 50 : undefined, position: isDragging ? 'relative' : undefined };
   const handle = (
@@ -1092,9 +1138,7 @@ function BrandRow({ r, onOpen, onEditBudget, onNotes }) {
           <div className="pc-brandname">{r.brand}</div>
           <div className="pc-brandsub">{r.creators} creator{r.creators === 1 ? '' : 's'} · {r.delivered}/{r.videos} delivered</div>
         </div>
-        <button className={`pc-note-btn ${hasNotes ? 'has' : ''}`} onClick={notes} title={hasNotes ? r.bm.notes.trim() : 'Add notes'} aria-label="Notes">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="8" y1="13" x2="16" y2="13" /><line x1="8" y1="17" x2="13" y2="17" /></svg>
-        </button>
+        {keepBtn}
       </div>
       <div className="pc-cell pc-budget-cell" data-label="Budget">
         <button className={`pc-budget-btn ${r.budget ? '' : 'empty'}`} onClick={edit} title="Edit budget">{r.budget ? fmt$(r.budget) : '+ set'}</button>
@@ -1124,9 +1168,7 @@ function BrandRow({ r, onOpen, onEditBudget, onNotes }) {
             <div className="pc-mc-name">{r.brand}</div>
             <div className="pc-mc-subline">{r.creators} creator{r.creators === 1 ? '' : 's'} · {r.delivered}/{r.videos} delivered</div>
           </div>
-          <button className={`pc-note-btn ${hasNotes ? 'has' : ''}`} onClick={notes} title={hasNotes ? r.bm.notes.trim() : 'Add notes'} aria-label="Notes">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="8" y1="13" x2="16" y2="13" /><line x1="8" y1="17" x2="13" y2="17" /></svg>
-          </button>
+          {keepBtn}
         </div>
         {r.budget ? (
           <div className="pc-mc-usage">
