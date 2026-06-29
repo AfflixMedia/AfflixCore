@@ -55,9 +55,9 @@ export default function WeeklyReportEdit() {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Auto-save state for the Insights section (debounced).
-  const lastSavedInsights = useRef<string | null>(null);
-  const [insightsSave, setInsightsSave] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  // Auto-save state (debounced) — persists the whole report content as it's edited.
+  const lastSavedContent = useRef<string | null>(null);
+  const [autoSave, setAutoSave] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   const [showComments, setShowComments] = useState(false);
   const [priorReports, setPriorReports] = useState<ReportRow[]>([]);
@@ -147,7 +147,7 @@ export default function WeeklyReportEdit() {
       setReport(r);
       const normalized = normalizeContent(r.content);
       setC(normalized);
-      lastSavedInsights.current = normalized.insights.summary;
+      lastSavedContent.current = JSON.stringify(normalized);
       const { data: bd } = await supabase.from('brands').select('id,name,client,client_status').eq('id', r.brand_id).single();
       setBrand(bd as Brand);
       const { data: pcp } = await supabase.from('paid_creator_programs')
@@ -173,23 +173,24 @@ export default function WeeklyReportEdit() {
     })();
   }, [id]);
 
-  // Debounced auto-save of the Insights section. Saves the full report content
-  // (status untouched) ~1s after the user stops typing in Insights.
+  // Debounced auto-save of the whole report content (status untouched) ~1s
+  // after the user stops editing — covers Insights, Approval and every other
+  // section (rich-text Quill editors included).
+  const contentKey = JSON.stringify(c);
   useEffect(() => {
-    if (loading || !report || lastSavedInsights.current === null) return;
+    if (loading || !report || lastSavedContent.current === null) return;
     if (brand?.client_status === 'closed') return;
-    const summary = c.insights.summary;
-    if (summary === lastSavedInsights.current) return;
-    setInsightsSave('saving');
+    if (contentKey === lastSavedContent.current) return;
+    setAutoSave('saving');
     const t = setTimeout(async () => {
       const { error } = await supabase.from('weekly_reports')
         .update({ content: c }).eq('id', id);
-      if (error) { setInsightsSave('error'); return; }
-      lastSavedInsights.current = summary;
-      setInsightsSave('saved');
+      if (error) { setAutoSave('error'); return; }
+      lastSavedContent.current = contentKey;
+      setAutoSave('saved');
     }, 1000);
     return () => clearTimeout(t);
-  }, [c.insights.summary]);
+  }, [contentKey]);
 
   const addCustomFromPreset = (preset: PresetRow) => {
     const p = preset.payload ?? {};
@@ -448,6 +449,18 @@ export default function WeeklyReportEdit() {
         <i className="bi bi-chat-left-text" />
         <Badge bg="primary" pill>{n}</Badge>
       </Button>
+    );
+  };
+
+  // Small "Saving… / Saved" badge shown on auto-saved (rich-text) sections.
+  const AutoSaveBadge = () => {
+    if (autoSave === 'idle') return null;
+    return (
+      <span className={`small ${autoSave === 'error' ? 'text-danger' : 'text-muted'}`}>
+        {autoSave === 'saving' && (<><Spinner animation="border" size="sm" className="me-1" />Saving…</>)}
+        {autoSave === 'saved' && (<><i className="bi bi-check2 me-1" />Saved</>)}
+        {autoSave === 'error' && (<><i className="bi bi-exclamation-triangle me-1" />Save failed</>)}
+      </span>
     );
   };
 
@@ -933,13 +946,7 @@ export default function WeeklyReportEdit() {
       <Card className="mb-4">
         <Card.Header className="d-flex justify-content-between align-items-center">
           <HeaderWithFeedback title="Insights" section="insights" sectionId="insights" />
-          {insightsSave !== 'idle' && (
-            <span className={`small ${insightsSave === 'error' ? 'text-danger' : 'text-muted'}`}>
-              {insightsSave === 'saving' && (<><Spinner animation="border" size="sm" className="me-1" />Saving…</>)}
-              {insightsSave === 'saved' && (<><i className="bi bi-check2 me-1" />Saved</>)}
-              {insightsSave === 'error' && (<><i className="bi bi-exclamation-triangle me-1" />Save failed</>)}
-            </span>
-          )}
+          <AutoSaveBadge />
         </Card.Header>
         <Card.Body>
           <RichTextEditor
@@ -959,13 +966,16 @@ export default function WeeklyReportEdit() {
             <i className="bi bi-shield-check me-2 text-warning" />
             Approval Needed / Action Items
           </span>
-          <Form.Check
-            type="switch"
-            id="approval-needed-toggle"
-            checked={!!c.approval?.enabled}
-            onChange={e => setC(prev => ({ ...prev, approval: { ...prev.approval, enabled: e.target.checked } }))}
-            label={c.approval?.enabled ? 'On — client will see approval prompt' : 'Off'}
-          />
+          <div className="d-flex align-items-center gap-3">
+            <AutoSaveBadge />
+            <Form.Check
+              type="switch"
+              id="approval-needed-toggle"
+              checked={!!c.approval?.enabled}
+              onChange={e => setC(prev => ({ ...prev, approval: { ...prev.approval, enabled: e.target.checked } }))}
+              label={c.approval?.enabled ? 'On — client will see approval prompt' : 'Off'}
+            />
+          </div>
         </Card.Header>
         {c.approval?.enabled && (
           <Card.Body>
