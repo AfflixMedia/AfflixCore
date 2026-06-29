@@ -4,6 +4,7 @@ import DOMPurify from 'dompurify';
 import { supabase } from '../../lib/supabase';
 import * as store from './store';
 import RichTextEditor from '../../components/RichTextEditor';
+import { requestNotificationPermission } from '../../notifications/swSetup';
 
 /* ════════════════════════════════════════════════════════════
    NOTES — Google Keep-style board for the handler workspace.
@@ -90,13 +91,8 @@ export default function NotesBoard({ brands = [], brandById = {}, month }) {
   useEffect(() => { (async () => { setLoading(true); await reload(); setLoading(false); })(); }, [reload]);
   useEffect(() => { busyRef.current = !!editor; }, [editor]);
 
-  // Convert any due reminders into notifications now, then every minute while open.
-  useEffect(() => {
-    const tick = () => { store.fireDueNoteReminders().catch(() => {}); };
-    tick();
-    const iv = setInterval(tick, 60000);
-    return () => clearInterval(iv);
-  }, []);
+  // (Due-reminder firing runs workspace-wide in HandlerCollabApp, so it works on
+  // any tab — not only while the Notes board is mounted.)
 
   // Live sync across devices/tabs.
   useEffect(() => {
@@ -436,10 +432,10 @@ export function NoteEditor({ editor, brands, brandById, month, onClose, onPersis
         <div className="pc-field"><label>Reminder</label>
           <div className="pc-nrem-row">
             <input className="pc-input" type="datetime-local" value={reminderInput}
-              onChange={e => setReminderInput(e.target.value)} />
+              onChange={e => { setReminderInput(e.target.value); if (e.target.value) requestNotificationPermission(); }} />
             {reminderInput && <button className="pc-btn pc-btn-ghost pc-btn-sm" onClick={() => setReminderInput('')}>Clear</button>}
           </div>
-          <div className="pc-nrem-hint">Fires an in-app notification (and push, if enabled) when due.</div>
+          <div className="pc-nrem-hint">Shows a browser + in-app notification when due. Allow notifications when prompted.</div>
         </div>
 
         {/* color swatches */}

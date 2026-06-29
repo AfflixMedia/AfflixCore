@@ -72,9 +72,13 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
         (p) => {
           const n = p.new as Notification;
           setNotifications(prev => [n, ...prev].slice(0, PAGE_SIZE));
-          // Foreground OS notification — only when web push ISN'T delivering one
-          // (otherwise the service-worker push + this would duplicate).
-          if (!hasPushSub.current && 'Notification' in window && Notification.permission === 'granted') {
+          // Foreground OS notification — normally only when web push ISN'T delivering
+          // one (otherwise the SW push + this would duplicate). Note reminders are an
+          // exception: they're inserted directly by the front-end RPC and are NOT sent
+          // through send-push unless the pg_cron job is configured, so always show them
+          // in the foreground regardless of push subscription.
+          const isReminder = n.type === 'note_reminder';
+          if ((isReminder || !hasPushSub.current) && 'Notification' in window && Notification.permission === 'granted') {
             try {
               const ni = new Notification(n.title, { body: n.body ?? undefined, tag: n.id, icon: '/icon-192.png' });
               ni.onclick = () => { window.focus(); if (n.link) window.location.assign(n.link); };

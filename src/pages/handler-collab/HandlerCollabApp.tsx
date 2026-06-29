@@ -10,7 +10,7 @@ import * as store from './store';
 import { useAuth } from '../../auth/AuthContext';
 import { PayChip, PayoutDetail } from '../paid-collab/handlerCollabReadonly';
 import PaidCollabComments from '../../components/paidcollab/PaidCollabComments';
-import NotesBoard, { BrandNotesDrawer, AllNotesDrawer } from './NotesBoard';
+import NotesBoard, { BrandNotesDrawer, AllNotesDrawer, NoteEditor } from './NotesBoard';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -262,6 +262,8 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
   const [notesBrand, setNotesBrand] = useState(null);     // { id, name } — quick month note drawer
   const [keepBrand, setKeepBrand] = useState(null);       // { id, name } — Keep-notes list drawer
   const [allNotesOpen, setAllNotesOpen] = useState(false); // global notes drawer (floating button)
+  const [openNote, setOpenNote] = useState(null);          // a single note opened directly (deep link)
+  const [pendingNoteId, setPendingNoteId] = useState(null); // ?note=<id> waiting for notes to load
   const [confirmDel, setConfirmDel] = useState(null);     // { message, onYes }
   const [undo, setUndo] = useState(null);                 // { label, restore, commit }
   const undoRef = useRef(null);
@@ -315,6 +317,16 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
   }, [reconcileShared]);
 
   useEffect(() => { (async () => { setLoading(true); await reload(); setLoading(false); })(); }, [reload]);
+
+  // Fire due note reminders workspace-wide (any tab): converts due reminders into
+  // notifications (in-app + browser via NotificationsContext). Runs on load + every
+  // minute; reloads so badges/counts refresh when something fired.
+  useEffect(() => {
+    const tick = () => { store.fireDueNoteReminders().then(c => { if (c > 0) reload(); }).catch(() => {}); };
+    tick();
+    const iv = setInterval(tick, 60000);
+    return () => clearInterval(iv);
+  }, [reload]);
 
   /* lookups */
   const brandById = useMemo(() => { const m = {}; brands.forEach(b => { m[b.id] = b; }); return m; }, [brands]);
@@ -606,6 +618,8 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
     if (loading || deepLinked.current) return;
     deepLinked.current = true;
     const sp = new URLSearchParams(window.location.search);
+    const noteId = sp.get('note');
+    if (noteId) setPendingNoteId(noteId); // opened once the notes list is in state
     const b = sp.get('brand');
     if (!b) return;
     if (sp.get('pay') === '1') {
@@ -618,6 +632,32 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
       setCommentDrawer({ brandId: b, tt: sp.get('tt') || 'brand', tk: sp.get('tk') || '', highlight: sp.get('pcc') || null });
     }
   }, [loading]);
+
+  // Open the note from a ?note=<id> deep link (e.g. a reminder notification) once
+  // the notes list has loaded; if it's missing locally, fetch it directly.
+  useEffect(() => {
+    if (!pendingNoteId) return;
+    const local = notes.find(n => n.id === pendingNoteId);
+    if (local) { setOpenNote(local); setPendingNoteId(null); return; }
+    let cancelled = false;
+    store.loadNotes()
+      .then(list => { if (cancelled) return; const n = (list || []).find(x => x.id === pendingNoteId); if (n) setOpenNote(n); })
+      .finally(() => { if (!cancelled) setPendingNoteId(null); });
+    return () => { cancelled = true; };
+  }, [pendingNoteId, notes]);
+
+  // Persist / delete for a directly-opened note (deep link), kept in sync with the workspace.
+  const persistOpenNote = useCallback(async (payload) => {
+    const { id, ...rest } = payload;
+    if (id) { try { await store.updateNote(id, rest); } catch (e) { setErr(e.message || 'Save failed'); } reload(); return id; }
+    try { const row = await store.createNote(rest); reload(); return row.id; }
+    catch (e) { setErr(e.message || 'Save failed'); return null; }
+  }, [reload]);
+  const deleteOpenNote = useCallback(async (n) => {
+    if (!window.confirm('Delete this note?')) return;
+    try { await store.deleteNote(n.id); } catch {}
+    setOpenNote(null); reload();
+  }, [reload]);
   // notes (per brand, per month) — optimistic + persist
   const saveNotes = useCallback((brandId, notesText) => {
     setBrandMonths(prev => {
@@ -757,6 +797,12 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
       {allNotesOpen && (
         <AllNotesDrawer notes={notes} brands={brands} brandById={brandById} month={month}
           onClose={() => setAllNotesOpen(false)} onChanged={reload} />
+      )}
+      {openNote && (
+        <NoteEditor editor={{ mode: 'edit', note: openNote }} brands={brands} brandById={brandById} month={month}
+          overlayClass="pc-overlay-top"
+          onClose={() => setOpenNote(null)} onPersist={persistOpenNote}
+          onDelete={() => deleteOpenNote(openNote)} />
       )}
       {confirmDel && <ConfirmModal message={confirmDel.message} onYes={confirmDel.onYes} onCancel={() => setConfirmDel(null)} />}
       {undo && <UndoToast label={undo.label} onUndo={doUndo} />}
