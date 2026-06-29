@@ -63,6 +63,7 @@ export default function Tasks() {
   const [saving, setSaving] = useState(false);
   const [reminded, setReminded] = useState<Set<string>>(new Set());
   const [showOrg, setShowOrg] = useState(false);
+  const [query, setQuery] = useState('');
 
   const load = async () => {
     setLoading(true); setErr(null);
@@ -116,16 +117,45 @@ export default function Tasks() {
     return p ? (p.full_name || p.email) : '—';
   };
 
-  // Apply folder + label filters before splitting open/done.
-  const visibleTasks = useMemo(() => tasks.filter(t => {
-    if (folderFilter === 'none' && t.folder_id) return false;
-    if (folderFilter !== 'all' && folderFilter !== 'none' && t.folder_id !== folderFilter) return false;
-    if (labelFilter.size > 0 && !t.label_ids?.some(id => labelFilter.has(id))) return false;
-    return true;
-  }), [tasks, folderFilter, labelFilter]);
+  // Apply folder + label + text filters before splitting open/done.
+  const visibleTasks = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return tasks.filter(t => {
+      if (folderFilter === 'none' && t.folder_id) return false;
+      if (folderFilter !== 'all' && folderFilter !== 'none' && t.folder_id !== folderFilter) return false;
+      if (labelFilter.size > 0 && !t.label_ids?.some(id => labelFilter.has(id))) return false;
+      if (q) {
+        const brand = t.brand_id ? (brandMap.get(t.brand_id) ?? '') : '';
+        const hay = `${t.title} ${t.description ?? ''} ${brand}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [tasks, folderFilter, labelFilter, query, brandMap]);
 
   const openTasks = visibleTasks.filter(t => t.status === 'open');
   const doneTasks = visibleTasks.filter(t => t.status === 'done');
+
+  // Open-task counts for the rail badges + header stats.
+  const stats = useMemo(() => {
+    const open = tasks.filter(t => t.status === 'open');
+    const today = new Date().toISOString().slice(0, 10);
+    const folder = new Map<string, number>();
+    const label = new Map<string, number>();
+    let noFolder = 0;
+    open.forEach(t => {
+      if (t.folder_id) folder.set(t.folder_id, (folder.get(t.folder_id) ?? 0) + 1); else noFolder++;
+      (t.label_ids ?? []).forEach(id => label.set(id, (label.get(id) ?? 0) + 1));
+    });
+    return {
+      total: open.length,
+      noFolder,
+      folder,
+      label,
+      high: open.filter(t => t.priority === 'high').length,
+      overdue: open.filter(t => t.due_date && t.due_date < today).length,
+    };
+  }, [tasks]);
 
   const openAdd = () => {
     setForm({
@@ -238,20 +268,23 @@ export default function Tasks() {
         </div>
         <div className="ac-row-actions">
           {canRemind && t.status === 'open' && (
-            <button className={`ac-icon-btn ${reminded.has(t.id) ? 'text-success' : ''}`}
+            <button className={`ac-icon-btn remind ${reminded.has(t.id) ? 'sent' : ''}`}
               title={reminded.has(t.id) ? 'Reminder sent' : 'Send blocking reminder'}
+              aria-label={reminded.has(t.id) ? 'Reminder sent' : 'Send blocking reminder to assignee'}
+              disabled={reminded.has(t.id)}
               onClick={() => sendReminder(t)}>
               <i className={`bi ${reminded.has(t.id) ? 'bi-check2-circle' : 'bi-alarm'}`} />
             </button>
           )}
           {canComplete && (
             <button className="ac-icon-btn" title={t.status === 'done' ? 'Reopen' : 'Mark done'}
+              aria-label={t.status === 'done' ? 'Reopen task' : 'Mark task done'}
               onClick={() => setDone(t, t.status !== 'done')}>
               <i className={`bi ${t.status === 'done' ? 'bi-arrow-counterclockwise' : 'bi-check2-circle'}`} />
             </button>
           )}
           {canDelete && (
-            <button className="ac-icon-btn danger" title="Delete task" onClick={() => remove(t)}>
+            <button className="ac-icon-btn danger" title="Delete task" aria-label="Delete task" onClick={() => remove(t)}>
               <i className="bi bi-trash" />
             </button>
           )}
@@ -265,16 +298,25 @@ export default function Tasks() {
       <div className="ac-page-header">
         <div className="d-flex align-items-center gap-3 flex-wrap">
           <h2>{isApc ? 'My Tasks' : 'Tasks'}</h2>
-          <span className="ac-stat-pill">
-            <span className="ac-stat-num">{openTasks.length}</span>
-            <span className="ac-stat-label">open</span>
-          </span>
+          <div className="ac-task-stats">
+            <span className="ac-task-stat"><span className="ac-task-stat-num">{stats.total}</span> open</span>
+            {stats.high > 0 && <span className="ac-task-stat high"><i className="bi bi-flag-fill" />{stats.high} high</span>}
+            {stats.overdue > 0 && <span className="ac-task-stat over"><i className="bi bi-exclamation-triangle-fill" />{stats.overdue} overdue</span>}
+          </div>
         </div>
-        {canAssign && (
-          <Button onClick={openAdd}>
-            <i className="bi bi-plus-lg me-1" /> New Task
-          </Button>
-        )}
+        <div className="d-flex align-items-center gap-2 flex-wrap">
+          <div className="ac-task-search">
+            <i className="bi bi-search" />
+            <input
+              type="search" value={query} onChange={e => setQuery(e.target.value)}
+              placeholder="Search tasks…" aria-label="Search tasks" />
+          </div>
+          {canAssign && (
+            <Button onClick={openAdd}>
+              <i className="bi bi-plus-lg me-1" /> New Task
+            </Button>
+          )}
+        </div>
       </div>
 
       {loading ? (
@@ -288,21 +330,26 @@ export default function Tasks() {
             <div className="ac-rail-head">
               <span>Folders</span>
               {canAssign && (
-                <button className="ac-icon-btn sm" title="Manage folders & labels" onClick={() => setShowOrg(true)}>
+                <button className="ac-icon-btn sm" title="Manage folders & labels"
+                  aria-label="Manage folders and labels" onClick={() => setShowOrg(true)}>
                   <i className="bi bi-gear" />
                 </button>
               )}
             </div>
             <button className={`ac-rail-item ${folderFilter === 'all' ? 'active' : ''}`} onClick={() => setFolderFilter('all')}>
-              <i className="bi bi-collection me-2" />All tasks
+              <i className="bi bi-collection" /><span className="ac-rail-label">All tasks</span>
+              <span className="ac-rail-count">{stats.total}</span>
             </button>
             {folders.map(f => (
               <button key={f.id} className={`ac-rail-item ${folderFilter === f.id ? 'active' : ''}`} onClick={() => setFolderFilter(f.id)}>
-                <i className="bi bi-folder-fill me-2" style={{ color: f.color ?? undefined }} />{f.name}
+                <i className="bi bi-folder-fill" style={{ color: f.color ?? undefined }} />
+                <span className="ac-rail-label">{f.name}</span>
+                {(stats.folder.get(f.id) ?? 0) > 0 && <span className="ac-rail-count">{stats.folder.get(f.id)}</span>}
               </button>
             ))}
             <button className={`ac-rail-item ${folderFilter === 'none' ? 'active' : ''}`} onClick={() => setFolderFilter('none')}>
-              <i className="bi bi-folder me-2" />No folder
+              <i className="bi bi-folder" /><span className="ac-rail-label">No folder</span>
+              {stats.noFolder > 0 && <span className="ac-rail-count">{stats.noFolder}</span>}
             </button>
 
             {labels.length > 0 && (
@@ -312,12 +359,19 @@ export default function Tasks() {
                   {labels.map(l => (
                     <button key={l.id}
                       className={`ac-label-chip btn-reset ${labelFilter.has(l.id) ? 'on' : ''}`}
+                      aria-pressed={labelFilter.has(l.id)}
                       style={{ background: (l.color ?? '#64748b') + (labelFilter.has(l.id) ? '' : '22'), color: labelFilter.has(l.id) ? '#fff' : (l.color ?? '#64748b') }}
                       onClick={() => toggleLabelFilter(l.id)}>
                       <i className="bi bi-tag-fill me-1" />{l.name}
+                      {(stats.label.get(l.id) ?? 0) > 0 && <span className="ac-label-count">{stats.label.get(l.id)}</span>}
                     </button>
                   ))}
                 </div>
+                {labelFilter.size > 0 && (
+                  <button className="ac-rail-clear" onClick={() => setLabelFilter(new Set())}>
+                    <i className="bi bi-x-circle me-1" />Clear labels
+                  </button>
+                )}
               </>
             )}
           </aside>
@@ -339,15 +393,21 @@ export default function Tasks() {
               </Card>
             ) : (
               <>
-                <h6 className="text-muted mb-2">Open ({openTasks.length})</h6>
+                <div className="ac-task-section">
+                  <span className="ac-task-section-dot open" />Open
+                  <span className="ac-task-section-count">{openTasks.length}</span>
+                </div>
                 {openTasks.length === 0 ? (
-                  <Card body className="text-muted text-center py-3 mb-4">Nothing open. 🎉</Card>
+                  <Card body className="text-muted text-center py-3 mb-4">Nothing open here. 🎉</Card>
                 ) : (
                   <div className="ac-list mb-4">{openTasks.map(t => <TaskCard key={t.id} t={t} />)}</div>
                 )}
                 {doneTasks.length > 0 && (
                   <>
-                    <h6 className="text-muted mb-2">Done ({doneTasks.length})</h6>
+                    <div className="ac-task-section">
+                      <span className="ac-task-section-dot done" />Done
+                      <span className="ac-task-section-count">{doneTasks.length}</span>
+                    </div>
                     <div className="ac-list">{doneTasks.map(t => <TaskCard key={t.id} t={t} />)}</div>
                   </>
                 )}

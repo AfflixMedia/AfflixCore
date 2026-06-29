@@ -2334,17 +2334,90 @@ input[type="number"] {
   color: var(--ac-text-muted); margin-bottom: 8px;
 }
 .ac-rail-item {
-  display: flex; align-items: center; width: 100%;
+  display: flex; align-items: center; gap: 8px; width: 100%;
   border: none; background: transparent; text-align: left;
-  padding: 8px 10px; border-radius: 9px; margin-bottom: 2px;
+  padding: 8px 10px; border-radius: 10px; margin-bottom: 2px;
   color: var(--ac-text-dark); font-weight: 600; font-size: .9rem;
-  transition: background-color .12s ease, color .12s ease;
+  transition: background-color .18s ease, color .18s ease;
+  cursor: pointer;
+}
+.ac-rail-item .bi { flex-shrink: 0; width: 16px; text-align: center; }
+.ac-rail-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ac-rail-count {
+  flex-shrink: 0; min-width: 22px; text-align: center;
+  background: rgba(20,22,32,.06); color: var(--ac-text-muted);
+  border-radius: var(--ac-radius-pill); font-size: .72rem; font-weight: 700;
+  padding: 1px 7px;
 }
 .ac-rail-item:hover { background: var(--ac-primary-soft); }
 .ac-rail-item.active { background: var(--ac-primary); color: #fff; }
 .ac-rail-item.active .bi { color: #fff !important; }
+.ac-rail-item.active .ac-rail-count { background: rgba(255,255,255,.25); color: #fff; }
+.ac-rail-clear {
+  border: none; background: transparent; color: var(--ac-text-muted);
+  font-size: .78rem; font-weight: 600; padding: 6px 2px 0; cursor: pointer;
+}
+.ac-rail-clear:hover { color: var(--ac-primary); }
+.ac-label-count {
+  margin-left: 5px; font-size: .66rem; font-weight: 800; opacity: .85;
+}
 
 .ac-icon-btn.sm { width: 28px; height: 28px; font-size: .8rem; }
+
+/* Header stats + search */
+.ac-task-stats { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ac-task-stat {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 12px; border-radius: var(--ac-radius-pill);
+  background: #fff; border: 1px solid var(--ac-line-l);
+  font-size: .82rem; font-weight: 600; color: var(--ac-text-dark);
+}
+.ac-task-stat-num { font-family: var(--ac-font-heading); font-weight: 800; color: var(--ac-primary); }
+.ac-task-stat.high { background: rgba(239,68,68,.10); border-color: rgba(239,68,68,.22); color: #dc2626; }
+.ac-task-stat.over { background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.26); color: #b45309; }
+.ac-task-search {
+  display: flex; align-items: center; gap: 8px;
+  background: #fff; border: 1px solid var(--ac-line-l);
+  border-radius: var(--ac-radius-pill); padding: 7px 14px;
+  color: var(--ac-text-muted); transition: border-color .15s ease, box-shadow .15s ease;
+}
+.ac-task-search:focus-within { border-color: var(--ac-primary); box-shadow: 0 0 0 3px var(--ac-primary-soft); }
+.ac-task-search input {
+  border: none; outline: none; background: transparent; min-width: 160px;
+  font-size: .9rem; color: var(--ac-text-dark);
+}
+.ac-task-search input::placeholder { color: var(--ac-text-muted); }
+
+/* Open / Done section headers */
+.ac-task-section {
+  display: flex; align-items: center; gap: 8px; margin: 4px 0 10px;
+  font-family: var(--ac-font-heading); font-weight: 700; font-size: .82rem;
+  text-transform: uppercase; letter-spacing: .6px; color: var(--ac-text-muted);
+}
+.ac-task-section-dot { width: 8px; height: 8px; border-radius: 50%; }
+.ac-task-section-dot.open { background: var(--ac-primary); }
+.ac-task-section-dot.done { background: #10b981; }
+.ac-task-section-count {
+  background: rgba(20,22,32,.06); color: var(--ac-text-muted);
+  border-radius: var(--ac-radius-pill); font-size: .72rem; font-weight: 700; padding: 1px 8px;
+}
+
+/* Accented "remind" action */
+.ac-icon-btn.remind:hover:not(:disabled) {
+  background: rgba(245,158,11,.12); color: #d97706; border-color: rgba(245,158,11,.4);
+}
+.ac-icon-btn.remind.sent { background: rgba(16,185,129,.12); color: #059669; border-color: rgba(16,185,129,.3); }
+.ac-icon-btn:disabled { cursor: default; }
+
+/* Visible keyboard focus across task controls */
+.ac-rail-item:focus-visible,
+.ac-icon-btn:focus-visible,
+.ac-label-chip.btn-reset:focus-visible,
+.ac-reminder-ack:focus-visible,
+.ac-color-dot:focus-visible {
+  outline: 2px solid var(--ac-primary);
+  outline-offset: 2px;
+}
 
 @media (max-width: 820px) {
   .ac-tasks-layout { flex-direction: column; }
@@ -2497,3 +2570,19 @@ input[type="number"] {
   color: var(--ac-primary); font-weight: 700; padding: 8px 16px; border-radius: var(--ac-radius-pill);
 }
 .ac-reminder-more { margin-top: 16px; color: var(--ac-text-muted); font-size: .82rem; font-weight: 600; }
+
+/* Respect users who prefer reduced motion (a11y) — keep the alarm visible but calm */
+@media (prefers-reduced-motion: reduce) {
+  .ac-reminder-overlay,
+  .ac-reminder-card { animation: none; }
+  .ac-reminder-bell { animation: none; }
+  .ac-list-row,
+  .ac-rail-item,
+  .ac-icon-btn,
+  .ac-label-chip.btn-reset,
+  .ac-reminder-ack,
+  .ac-task-search { transition: none; }
+  .ac-list-row:hover,
+  .ac-label-chip.btn-reset:hover,
+  .ac-reminder-ack:hover:not(:disabled) { transform: none; }
+}
