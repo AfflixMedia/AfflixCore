@@ -396,6 +396,7 @@ export function NoteEditor({ editor, brands, brandById, month, onClose, onPersis
     <div className={`pc-overlay ${overlayClass}`} onClick={close}>
       <div className="pc-modal pc-modal-scroll pc-note-modal" onClick={e => e.stopPropagation()}
         style={{ background: colorBg(f.color) }}>
+        <div className="pc-modal-body">
         <input className="pc-ntitle-in" placeholder="Title" value={f.title}
           onChange={e => set('title', e.target.value)} autoFocus />
         <div className="pc-nbody-rte">
@@ -446,6 +447,7 @@ export function NoteEditor({ editor, brands, brandById, month, onClose, onPersis
               style={{ background: c.bg }} onClick={() => set('color', c.key)} />
           ))}
         </div>
+        </div>{/* /pc-modal-body */}
 
         <div className="pc-modal-actions">
           <label className="pc-npin-toggle">
