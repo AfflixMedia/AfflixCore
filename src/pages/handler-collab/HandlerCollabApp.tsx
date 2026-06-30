@@ -1485,7 +1485,7 @@ function CreatorsView({ rows, onEdit, onSetStatus, onToggleVisible }) {
           <p>Creators you onboard inside brands show up here automatically.</p>
         </div></div>
       ) : (
-        <div className="pc-card pc-list" style={{ paddingBottom: sel.size ? 8 : 0 }}>
+        <div className="pc-card pc-list pc-cv-list" style={{ paddingBottom: sel.size ? 8 : 0 }}>
           <div className="pc-cv-head">
             <div className="pc-cv-check"><input type="checkbox" className="pc-check" checked={allSelected} onChange={toggleAll} title="Select all" /></div>
             <div className="pc-num pc-idxcell">#</div><div>Name</div><div>Category</div>

@@ -431,6 +431,9 @@
 .pc-appr-amt{ font-size:13px; font-weight:800; font-variant-numeric:tabular-nums; white-space:nowrap; }
 
 /* ── Creators tab table (compact, month-grouped) ── */
+/* horizontal scroll instead of squishing/clipping when the viewport is narrow or content grows */
+.pc-cv-list{ overflow-x:auto; }
+.pc-cv-head, .pc-cv-row, .pc-cv-monthhead{ min-width:760px; }
 .pc-cv-head, .pc-cv-row{ display:grid; grid-template-columns:34px 30px 1.5fr .9fr 1fr .7fr .6fr 1.05fr; align-items:center; gap:14px; text-align:left; }
 .pc-cv-namecell{ display:flex; flex-direction:column; align-items:flex-start; gap:1px; }
 .pc-cv-dealcell{ display:flex; flex-direction:column; align-items:flex-end; gap:1px; }
@@ -943,6 +946,8 @@ a.pc-vx-prod:hover{ text-decoration:none; filter:brightness(.97); }
   /* list wrappers float their cards on the page background */
   .pc-card.pc-list{ background:transparent; border:0; box-shadow:none; border-radius:0; overflow:visible; }
 
+  /* mobile shows cards, not the wide grid — drop the desktop scroll min-width */
+  .pc-cv-row, .pc-cv-monthhead{ min-width:0; }
   /* each data row → a standalone card */
   .pc-bt-row, .pc-cv-row, .pc-pf-row, .pc-ct-row{
     display:block; padding:0; margin-bottom:11px; position:relative; overflow:hidden; text-align:left;
