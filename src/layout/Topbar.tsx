@@ -87,6 +87,9 @@ export default function Topbar({ collapsed, onToggleSidebar }: { collapsed: bool
           <Dropdown.Menu>
             <Dropdown.ItemText>Role: <strong>{profile?.role}</strong></Dropdown.ItemText>
             <Dropdown.Divider />
+            <Dropdown.Item as="button" onClick={() => nav('/profile')}>
+              <i className="bi bi-person me-2" />My Profile
+            </Dropdown.Item>
             <Dropdown.Item as="button" onClick={signOut}>Sign out</Dropdown.Item>
           </Dropdown.Menu>
         </Dropdown>

@@ -13,6 +13,7 @@ import Clients from './pages/Clients';
 import ClientAccess from './pages/ClientAccess';
 import Resources from './pages/Resources';
 import NotificationsPage from './pages/Notifications';
+import Profile from './pages/Profile';
 import SharedReports from './pages/SharedReports';
 import Reporting from './pages/Reporting';
 import BudgetManager from './pages/BudgetManager';
@@ -86,6 +87,7 @@ export default function App() {
         <Route path="budget/brands" element={<ProtectedRoute roles={['bob']}><BudgetManager /></ProtectedRoute>} />
         <Route path="budget/company" element={<ProtectedRoute roles={['bob']}><CompanyBudget /></ProtectedRoute>} />
         <Route path="notifications" element={<NotificationsPage />} />
+        <Route path="profile" element={<Profile />} />
         <Route path="chats" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead']}><GlobalChat /></ProtectedRoute>} />
         <Route path="reporting/weekly" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead']}><WeeklyReports /></ProtectedRoute>} />
         <Route path="reporting/weekly/:id" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead']}><WeeklyReportView /></ProtectedRoute>} />
