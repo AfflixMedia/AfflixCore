@@ -26,6 +26,7 @@ import ProgramProgress from '../components/paidcollab/ProgramProgress';
 import { CumulativeChart, MonthlyStackedChart } from '../components/paidcollab/Charts';
 import Avatar from '../components/Avatar';
 import SharedHandlerCollabPane from '../components/share/SharedHandlerCollabPane';
+import { isPendingVisible } from './paid-collab/handlerCollabReadonly';
 import type { HandlerBrandMonth, HandlerCreator } from './handler-collab/store';
 
 interface ApprovalDecisionRow {
@@ -154,8 +155,9 @@ export default function SharedReports() {
         if (data.brands?.length > 0) setActiveBrandId(data.brands[0].id);
 
         // Brand-mode entry flow: approvals popup first (if any pending across
-        // weekly OR monthly), then month picker.
-        if (mode === 'brand' && (ir || im)) {
+        // weekly OR monthly), then the welcome popup (latest reports + any pending
+        // Paid Collab payments). The welcome popup also shows on PC-only links.
+        if (mode === 'brand') {
           const decisionsList: ApprovalDecisionRow[] = data.approval_decisions ?? [];
           const decidedKey = (rt: 'weekly' | 'monthly', rid: string) => `${rt}:${rid}`;
           const decided = new Set<string>(decisionsList.map(d => decidedKey(d.report_type, d.report_id)));
@@ -177,10 +179,12 @@ export default function SharedReports() {
             ? (data.monthly_reports ?? []).filter((r: any) =>
                 isAutoPromptEligible(r) && !decided.has(decidedKey('monthly', r.id))
               ).length : 0;
-          if (weeklyPending + monthlyPending > 0) {
+          const pcPaymentsPending = ipc
+            ? (data.handler_creators ?? []).filter((c: any) => isPendingVisible(c)).length : 0;
+          if ((ir || im) && weeklyPending + monthlyPending > 0) {
             setShowApprovals(true);
             setPickerAfterApprovals(true);
-          } else {
+          } else if (ir || im || pcPaymentsPending > 0) {
             setShowLatestReports(true);
           }
         }
@@ -646,6 +650,18 @@ export default function SharedReports() {
   const brandMonthlyCount = (brandId: string) => monthlyReports.filter(r => r.brand_id === brandId).length;
   const brandResourceCount = (brandId: string) =>
     resources.filter(r => (r.scope === 'brand' && r.brand_id === brandId) || r.scope === 'general').length;
+  // Paid Collab: program (month) count + count of creators with a payment still pending.
+  const brandPcCount = (brandId: string) => pcMonths.filter(m => m.brand_id === brandId).length;
+  const brandPcPending = (brandId: string) =>
+    pcHandlerCreators.filter(c => c.brand_id === brandId && isPendingVisible(c)).length;
+
+  // Brands (with PC enabled) that have at least one pending payment — drives the
+  // welcome-popup alert + lets the client jump straight to that brand's Paid Collab tab.
+  // Plain compute (not a hook) — this sits after the loading/err early returns.
+  const pcPendingByBrand = (includePaidCollab ? brands : []).map(b => ({
+    brandId: b.id, brandName: b.name,
+    count: pcHandlerCreators.filter(c => c.brand_id === b.id && isPendingVisible(c)).length,
+  })).filter(x => x.count > 0);
 
   // General-mode: a flat shared-files page (no brand tiles, no tabs).
   if (linkMode === 'general') {
@@ -752,24 +768,43 @@ export default function SharedReports() {
                 onClick={() => { setActiveBrandId(b.id); setOpenId(null); }}
                 className="border-0"
                 style={{
+                  position: 'relative',
                   background: active ? 'linear-gradient(135deg, #2563eb, #7c3aed)' : 'white',
                   color: active ? 'white' : '#111827',
                   border: active ? 'none' : '1px solid #e5e7eb',
                   borderRadius: 12,
-                  padding: '12px 20px',
-                  minWidth: 180,
+                  padding: '12px 18px',
+                  width: 248,
+                  height: 104,
+                  overflow: 'visible',
                   textAlign: 'left',
                   cursor: 'pointer',
                   boxShadow: active ? '0 8px 20px rgba(37,99,235,.25)' : 'none',
                   transition: 'all .15s',
                 }}
               >
+                {includePaidCollab && brandPcPending(b.id) > 0 && (
+                  <span
+                    title={`${brandPcPending(b.id)} payment${brandPcPending(b.id) === 1 ? '' : 's'} pending`}
+                    style={{
+                      position: 'absolute', top: -8, right: -8,
+                      minWidth: 22, height: 22, padding: '0 6px',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      borderRadius: 999, background: '#DC2626', color: '#fff',
+                      fontSize: '.72rem', fontWeight: 800, lineHeight: 1,
+                      border: '2px solid #fff', boxShadow: '0 2px 6px rgba(220,38,38,.45)',
+                    }}
+                  >
+                    {brandPcPending(b.id)}
+                  </span>
+                )}
                 <div className="small" style={{ opacity: active ? .8 : .55, fontSize: '.7rem', letterSpacing: '.5px' }}>BRAND</div>
-                <div className="fw-semibold" style={{ fontSize: '1.05rem' }}>{b.name}</div>
-                <div className="small mt-1" style={{ opacity: active ? .85 : .6 }}>
+                <div className="fw-semibold text-truncate" style={{ fontSize: '1.05rem', maxWidth: '100%' }}>{b.name}</div>
+                <div className="small mt-1" style={{ opacity: active ? .85 : .6, fontSize: '.78rem', lineHeight: 1.3 }}>
                   {includeReports && <>{brandReportCount(b.id)} weekly · </>}
                   {includeMonthlyReports && <>{brandMonthlyCount(b.id)} monthly · </>}
                   {brandResourceCount(b.id)} resource{brandResourceCount(b.id) !== 1 ? 's' : ''}
+                  {includePaidCollab && <> · {brandPcCount(b.id)} PC</>}
                 </div>
               </button>
             );
@@ -808,9 +843,15 @@ export default function SharedReports() {
                 )}
                 {includePaidCollab && (
                   <Nav.Item>
-                    <Nav.Link eventKey="new-paid-collab" className="d-flex align-items-center gap-2 px-3">
+                    <Nav.Link eventKey="new-paid-collab" className="d-flex align-items-center gap-2 px-3 position-relative">
                       <i className="bi bi-people" /> Paid Collab
                       <Badge bg="secondary">{pcMonths.filter(m => m.brand_id === activeBrandId).length}</Badge>
+                      {brandPcPending(activeBrandId) > 0 && (
+                        <Badge bg="danger" pill title={`${brandPcPending(activeBrandId)} payment${brandPcPending(activeBrandId) === 1 ? '' : 's'} pending`}>
+                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff', display: 'inline-block', marginRight: 4, verticalAlign: 'middle' }} />
+                          {brandPcPending(activeBrandId)}
+                        </Badge>
+                      )}
                     </Nav.Link>
                   </Nav.Item>
                 )}
@@ -1154,6 +1195,14 @@ export default function SharedReports() {
           setActiveTab('monthly');
           setOpenMonthlyId(r.id);
           setOpenId(null);
+          setShowLatestReports(false);
+        }}
+        pcPending={pcPendingByBrand}
+        onPickPaidCollab={(brandId) => {
+          setActiveBrandId(brandId);
+          setActiveTab('new-paid-collab');
+          setOpenId(null);
+          setOpenMonthlyId(null);
           setShowLatestReports(false);
         }}
         onClose={() => setShowLatestReports(false)}
