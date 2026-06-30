@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, FormEvent } from 'react';
 import { Button, Card, Modal, Form, Spinner, Alert, Badge } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/AuthContext';
@@ -45,7 +45,11 @@ export default function Tasks() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [people, setPeople] = useState<Map<string, PersonLite>>(new Map());
   const [myApcs, setMyApcs] = useState<PersonLite[]>([]);
+  const [teamLeads, setTeamLeads] = useState<PersonLite[]>([]);
   const [brands, setBrands] = useState<BrandLite[]>([]);
+  // brand → its APC / Team Lead, so a brand chip can auto-fill the assignee.
+  const [brandApc, setBrandApc] = useState<Map<string, string>>(new Map());
+  const [brandLead, setBrandLead] = useState<Map<string, string>>(new Map());
   const [folders, setFolders] = useState<OrgItem[]>([]);
   const [labels, setLabels] = useState<OrgItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -56,6 +60,11 @@ export default function Tasks() {
   const [labelFilter, setLabelFilter] = useState<Set<string>>(new Set());
 
   const [show, setShow] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null); // task open in detail popup
+  const brandBarRef = useRef<HTMLDivElement>(null);
+  const tlRailRef = useRef<HTMLDivElement>(null);
+  const [tlOverflow, setTlOverflow] = useState(false); // show up/down arrows on the Team Lead rail
   const [form, setForm] = useState({
     assignee_id: '', brand_id: '', title: '', description: '', due_date: '',
     priority: 'mid' as Priority, folder_id: '', label_ids: [] as string[],
@@ -67,20 +76,26 @@ export default function Tasks() {
 
   const load = async () => {
     setLoading(true); setErr(null);
-    const [tRes, brRes, apcRes, fRes, lRes] = await Promise.all([
+    const [tRes, brRes, apcRes, tlRes, fRes, lRes, abRes, tlbRes] = await Promise.all([
       supabase.from('tasks').select('*').order('status').order('due_date', { nullsFirst: false }).order('created_at', { ascending: false }),
       canAssign ? supabase.from('brands').select('id,name').order('name') : Promise.resolve({ data: [], error: null }),
       canAssign ? supabase.from('profiles').select('id,full_name,email').eq('role', 'apc').order('full_name') : Promise.resolve({ data: [], error: null }),
+      isBob ? supabase.from('profiles').select('id,full_name,email').eq('role', 'team_lead').order('full_name') : Promise.resolve({ data: [], error: null }),
       supabase.from('task_folders').select('id,name,color,owner_id').order('name'),
       supabase.from('task_labels').select('id,name,color,owner_id').order('name'),
+      canAssign ? supabase.from('apc_brands').select('apc_id,brand_id') : Promise.resolve({ data: [], error: null }),
+      isBob ? supabase.from('team_lead_brands').select('team_lead_id,brand_id') : Promise.resolve({ data: [], error: null }),
     ]);
     if (tRes.error) { setErr(tRes.error.message); setLoading(false); return; }
     const ts = (tRes.data as Task[]) ?? [];
     setTasks(ts);
     setBrands(((brRes as any).data ?? []) as BrandLite[]);
     setMyApcs(((apcRes as any).data ?? []) as PersonLite[]);
+    setTeamLeads(((tlRes as any).data ?? []) as PersonLite[]);
     setFolders(((fRes as any).data ?? []) as OrgItem[]);
     setLabels(((lRes as any).data ?? []) as OrgItem[]);
+    setBrandApc(new Map(((abRes as any).data ?? []).map((r: any) => [r.brand_id, r.apc_id])));
+    setBrandLead(new Map(((tlbRes as any).data ?? []).map((r: any) => [r.brand_id, r.team_lead_id])));
 
     // Resolve names for assignees + creators (RLS returns what each role may see).
     const ids = Array.from(new Set(ts.flatMap(t => [t.assignee_id, t.created_by]).filter(Boolean) as string[]));
@@ -107,14 +122,37 @@ export default function Tasks() {
     // eslint-disable-next-line
   }, [myId]);
 
+  // Show the Team Lead rail's up/down arrows only when its avatars overflow.
+  useEffect(() => {
+    const el = tlRailRef.current;
+    if (!el) { setTlOverflow(false); return; }
+    const check = () => setTlOverflow(el.scrollHeight > el.clientHeight + 2);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [teamLeads.length, loading]);
+
   const brandMap = useMemo(() => new Map(brands.map(b => [b.id, b.name])), [brands]);
   const folderMap = useMemo(() => new Map(folders.map(f => [f.id, f])), [folders]);
   const labelMap = useMemo(() => new Map(labels.map(l => [l.id, l])), [labels]);
+  // Every person we might need a name for (assignees, creators, brand owners).
+  const allPeople = useMemo(() => {
+    const m = new Map<string, string>();
+    people.forEach((p, id) => m.set(id, p.full_name || p.email));
+    myApcs.forEach(p => m.set(p.id, p.full_name || p.email));
+    teamLeads.forEach(p => m.set(p.id, p.full_name || p.email));
+    return m;
+  }, [people, myApcs, teamLeads]);
   const personName = (id: string | null) => {
     if (!id) return '—';
     if (id === myId) return 'You';
-    const p = people.get(id);
-    return p ? (p.full_name || p.email) : '—';
+    return allPeople.get(id) ?? '—';
+  };
+  // Who owns a brand: its APC, else (Bob's view) its Team Lead.
+  const brandOwnerName = (brandId: string): string | null => {
+    const id = brandApc.get(brandId) ?? (isBob ? brandLead.get(brandId) : undefined);
+    return id ? (allPeople.get(id) ?? null) : null;
   };
 
   // Apply folder + label + text filters before splitting open/done.
@@ -135,6 +173,11 @@ export default function Tasks() {
 
   const openTasks = visibleTasks.filter(t => t.status === 'open');
   const doneTasks = visibleTasks.filter(t => t.status === 'done');
+
+  // Ordered list the detail popup arrows step through (open first, then done).
+  const ordered = useMemo(() => [...openTasks, ...doneTasks], [openTasks, doneTasks]);
+  const detailIdx = detailId ? ordered.findIndex(t => t.id === detailId) : -1;
+  const detailTask = detailIdx >= 0 ? ordered[detailIdx] : null;
 
   // Open-task counts for the rail badges + header stats.
   const stats = useMemo(() => {
@@ -157,12 +200,53 @@ export default function Tasks() {
     };
   }, [tasks]);
 
-  const openAdd = () => {
+  const openAdd = (assigneeId?: string) => {
+    setEditingId(null);
     setForm({
-      assignee_id: '', brand_id: '', title: '', description: '', due_date: '',
+      assignee_id: assigneeId ?? '', brand_id: '', title: '', description: '', due_date: '',
       priority: 'mid',
       folder_id: folderFilter !== 'all' && folderFilter !== 'none' ? folderFilter : '',
       label_ids: [],
+    });
+    setErr(null);
+    setShow(true);
+  };
+
+  // Click a brand chip → New Task with the brand + its owner pre-filled.
+  // APC owns the brand (apc_brands); Bob also falls back to the brand's Team Lead.
+  const openAddForBrand = (brandId: string) => {
+    setEditingId(null);
+    const apc = brandApc.get(brandId);
+    const lead = brandLead.get(brandId);
+    setForm({
+      assignee_id: apc ?? (isBob ? (lead ?? '') : ''),
+      brand_id: brandId, title: '', description: '', due_date: '',
+      priority: 'mid',
+      folder_id: folderFilter !== 'all' && folderFilter !== 'none' ? folderFilter : '',
+      label_ids: [],
+    });
+    setErr(null);
+    setShow(true);
+  };
+
+  const scrollBrandBar = (dir: -1 | 1) => {
+    brandBarRef.current?.scrollBy({ left: dir * 260, behavior: 'smooth' });
+  };
+  const scrollTlRail = (dir: -1 | 1) => {
+    tlRailRef.current?.scrollBy({ top: dir * 180, behavior: 'smooth' });
+  };
+
+  const openEdit = (t: Task) => {
+    setEditingId(t.id);
+    setForm({
+      assignee_id: t.assignee_id,
+      brand_id: t.brand_id ?? '',
+      title: t.title,
+      description: t.description ?? '',
+      due_date: t.due_date ?? '',
+      priority: t.priority,
+      folder_id: t.folder_id ?? '',
+      label_ids: t.label_ids ?? [],
     });
     setErr(null);
     setShow(true);
@@ -173,8 +257,7 @@ export default function Tasks() {
     if (!myId) return;
     setSaving(true); setErr(null);
     try {
-      const { error } = await supabase.from('tasks').insert({
-        created_by: myId,
+      const payload = {
         assignee_id: form.assignee_id,
         brand_id: form.brand_id || null,
         title: form.title.trim(),
@@ -183,12 +266,18 @@ export default function Tasks() {
         priority: form.priority,
         folder_id: form.folder_id || null,
         label_ids: form.label_ids,
-      });
-      if (error) throw error;
+      };
+      if (editingId) {
+        const { error } = await supabase.from('tasks').update(payload).eq('id', editingId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('tasks').insert({ created_by: myId, ...payload });
+        if (error) throw error;
+      }
       setShow(false);
       await load();
     } catch (e: any) {
-      setErr(e?.message ?? 'Failed to create task');
+      setErr(e?.message ?? (editingId ? 'Failed to update task' : 'Failed to create task'));
     } finally {
       setSaving(false);
     }
@@ -234,13 +323,17 @@ export default function Tasks() {
     const overdue = t.status === 'open' && t.due_date && t.due_date < new Date().toISOString().slice(0, 10);
     const canComplete = t.assignee_id === myId || t.created_by === myId || isBob;
     const canDelete = t.created_by === myId || isBob;
+    const canEditTask = canAssign && (t.created_by === myId || isBob);
     const canRemind = !isApc && (t.created_by === myId || isBob);
     const folder = t.folder_id ? folderMap.get(t.folder_id) : null;
     const taskLabels = (t.label_ids ?? []).map(id => labelMap.get(id)).filter(Boolean) as OrgItem[];
     return (
       <div className={`ac-list-row ac-task ac-task--${t.priority} ${t.status === 'done' ? 'opacity-75' : ''}`}>
         <Avatar name={personName(t.assignee_id)} size="lg" />
-        <div className="ac-row-main">
+        <div className="ac-row-main ac-task-open" role="button" tabIndex={0}
+          title="Open task"
+          onClick={() => setDetailId(t.id)}
+          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDetailId(t.id); } }}>
           <div className="ac-row-name d-flex align-items-center gap-2 flex-wrap">
             <span className={t.status === 'done' ? 'text-decoration-line-through text-muted' : ''}>{t.title}</span>
             <span className={`ac-prio-pill prio-${t.priority}`}>{t.priority}</span>
@@ -248,21 +341,17 @@ export default function Tasks() {
               ? <Badge bg="success"><i className="bi bi-check2 me-1" />Done</Badge>
               : overdue && <Badge bg="danger">Overdue</Badge>}
           </div>
-          {t.description && <div className="ac-row-sub">{t.description}</div>}
-          {(folder || taskLabels.length > 0) && (
-            <div className="d-flex align-items-center flex-wrap gap-1 mt-1">
-              {folder && <span className="ac-chip" style={{ borderColor: folder.color ?? undefined, color: folder.color ?? undefined }}><i className="bi bi-folder me-1" />{folder.name}</span>}
-              {taskLabels.map(l => (
-                <span key={l.id} className="ac-label-chip" style={{ background: (l.color ?? '#64748b') + '22', color: l.color ?? '#64748b' }}>
-                  <i className="bi bi-tag-fill me-1" />{l.name}
-                </span>
-              ))}
-            </div>
-          )}
+          {t.description && <div className="ac-row-sub ac-clamp1">{t.description}</div>}
           <div className="ac-row-sub d-flex align-items-center flex-wrap gap-2 mt-1">
             {!isApc && <span><i className="bi bi-person me-1" />{personName(t.assignee_id)}</span>}
             {isApc && t.created_by && <span><i className="bi bi-person-badge me-1" />from {personName(t.created_by)}</span>}
             {t.brand_id && <span className="ac-chip neutral"><i className="bi bi-shop" /> {brandMap.get(t.brand_id) ?? 'Brand'}</span>}
+            {folder && <span className="ac-chip" style={{ borderColor: folder.color ?? undefined, color: folder.color ?? undefined }}><i className="bi bi-folder me-1" />{folder.name}</span>}
+            {taskLabels.map(l => (
+              <span key={l.id} className="ac-label-chip" style={{ background: (l.color ?? '#64748b') + '22', color: l.color ?? '#64748b' }}>
+                <i className="bi bi-tag-fill me-1" />{l.name}
+              </span>
+            ))}
             {t.due_date && <span><i className="bi bi-calendar-event me-1" />due {new Date(t.due_date).toLocaleDateString()}</span>}
           </div>
         </div>
@@ -274,6 +363,12 @@ export default function Tasks() {
               disabled={reminded.has(t.id)}
               onClick={() => sendReminder(t)}>
               <i className={`bi ${reminded.has(t.id) ? 'bi-check2-circle' : 'bi-alarm'}`} />
+            </button>
+          )}
+          {canEditTask && (
+            <button className="ac-icon-btn" title="Edit task" aria-label="Edit task"
+              onClick={() => openEdit(t)}>
+              <i className="bi bi-pencil" />
             </button>
           )}
           {canComplete && (
@@ -312,12 +407,43 @@ export default function Tasks() {
               placeholder="Search tasks…" aria-label="Search tasks" />
           </div>
           {canAssign && (
-            <Button onClick={openAdd}>
+            <Button onClick={() => openAdd()}>
               <i className="bi bi-plus-lg me-1" /> New Task
             </Button>
           )}
         </div>
       </div>
+
+      {/* Brand quick-assign bar — click a brand to start a task with its
+          APC (and Team Lead, for Bob) auto-filled. Team Leads see only their brands. */}
+      {canAssign && brands.length > 0 && (
+        <div className="ac-brandbar">
+          <button type="button" className="ac-brandbar-arrow" aria-label="Scroll brands left"
+            onClick={() => scrollBrandBar(-1)}>
+            <i className="bi bi-chevron-left" />
+          </button>
+          <div className="ac-brandbar-track" ref={brandBarRef}>
+            {brands.map(b => {
+              const owner = brandOwnerName(b.id);
+              return (
+                <button key={b.id} type="button" className="ac-brand-chip"
+                  onClick={() => openAddForBrand(b.id)}
+                  title={`New task for ${b.name}${owner ? ` · ${owner}` : ''}`}>
+                  <Avatar name={b.name} size="sm" variant="dark" />
+                  <span className="ac-brand-chip-text">
+                    <span className="ac-brand-chip-name">{b.name}</span>
+                    {owner && <span className="ac-brand-chip-owner">{owner}</span>}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <button type="button" className="ac-brandbar-arrow" aria-label="Scroll brands right"
+            onClick={() => scrollBrandBar(1)}>
+            <i className="bi bi-chevron-right" />
+          </button>
+        </div>
+      )}
 
       {loading ? (
         <div className="text-center py-4"><Spinner animation="border" /></div>
@@ -386,7 +512,7 @@ export default function Tasks() {
                     <h5>No tasks {isApc ? 'assigned to you' : 'here'}</h5>
                     <p>{canAssign ? 'Create a task and assign it to one of your APCs.' : 'Tasks your Team Lead assigns will appear here.'}</p>
                     {canAssign && (
-                      <Button className="mt-3" onClick={openAdd}><i className="bi bi-plus-lg me-1" /> New Task</Button>
+                      <Button className="mt-3" onClick={() => openAdd()}><i className="bi bi-plus-lg me-1" /> New Task</Button>
                     )}
                   </div>
                 </Card.Body>
@@ -414,6 +540,37 @@ export default function Tasks() {
               </>
             )}
           </div>
+
+          {/* Right rail: Team Leads (Bob only) — click an avatar to assign a task.
+              Native scrollbar hidden; up/down arrows appear when the list overflows. */}
+          {isBob && teamLeads.length > 0 && (
+            <aside className="ac-tl-rail" aria-label="Assign a task to a Team Lead">
+              <div className="ac-tl-rail-head">Team Leads</div>
+              {tlOverflow && (
+                <button type="button" className="ac-tl-arrow" aria-label="Scroll team leads up"
+                  onClick={() => scrollTlRail(-1)}><i className="bi bi-chevron-up" /></button>
+              )}
+              <div className="ac-tl-track" ref={tlRailRef}>
+                {teamLeads.map(tl => {
+                  const name = tl.full_name || tl.email;
+                  const open = tasks.filter(t => t.assignee_id === tl.id && t.status === 'open').length;
+                  return (
+                    <button key={tl.id} type="button" className="ac-tl-avatar-btn"
+                      onClick={() => openAdd(tl.id)}
+                      aria-label={`Assign a new task to ${name}`}>
+                      <Avatar name={name} size="lg" variant="dark" />
+                      {open > 0 && <span className="ac-tl-badge">{open}</span>}
+                      <span className="ac-tl-tip">Assign task to {name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {tlOverflow && (
+                <button type="button" className="ac-tl-arrow" aria-label="Scroll team leads down"
+                  onClick={() => scrollTlRail(1)}><i className="bi bi-chevron-down" /></button>
+              )}
+            </aside>
+          )}
         </div>
       )}
 
@@ -421,17 +578,26 @@ export default function Tasks() {
       <Modal show={show} onHide={() => setShow(false)} centered>
         <Form onSubmit={submit}>
           <Modal.Header closeButton>
-            <Modal.Title>New Task</Modal.Title>
+            <Modal.Title>{editingId ? 'Edit Task' : 'New Task'}</Modal.Title>
           </Modal.Header>
           <Modal.Body>
             {err && <Alert variant="danger">{err}</Alert>}
             <Form.Group className="mb-3">
               <Form.Label>Assign to</Form.Label>
               <Form.Select required value={form.assignee_id} onChange={e => setForm({ ...form, assignee_id: e.target.value })}>
-                <option value="">Choose an APC…</option>
-                {myApcs.map(a => <option key={a.id} value={a.id}>{a.full_name || a.email}</option>)}
+                <option value="">Choose…</option>
+                {isBob && teamLeads.length > 0 && (
+                  <optgroup label="Team Leads">
+                    {teamLeads.map(a => <option key={a.id} value={a.id}>{a.full_name || a.email}</option>)}
+                  </optgroup>
+                )}
+                {myApcs.length > 0 && (
+                  isBob
+                    ? <optgroup label="APCs">{myApcs.map(a => <option key={a.id} value={a.id}>{a.full_name || a.email}</option>)}</optgroup>
+                    : myApcs.map(a => <option key={a.id} value={a.id}>{a.full_name || a.email}</option>)
+                )}
               </Form.Select>
-              {myApcs.length === 0 && <Form.Text className="text-danger">You have no APCs yet.</Form.Text>}
+              {myApcs.length === 0 && teamLeads.length === 0 && <Form.Text className="text-danger">You have no APCs yet.</Form.Text>}
             </Form.Group>
             <Form.Group className="mb-3">
               <Form.Label>Title</Form.Label>
@@ -488,10 +654,82 @@ export default function Tasks() {
           <Modal.Footer>
             <Button variant="secondary" onClick={() => setShow(false)} disabled={saving}>Cancel</Button>
             <Button type="submit" disabled={saving || !form.assignee_id || !form.title.trim()}>
-              {saving ? 'Creating…' : 'Assign task'}
+              {saving ? (editingId ? 'Saving…' : 'Creating…') : (editingId ? 'Save changes' : 'Assign task')}
             </Button>
           </Modal.Footer>
         </Form>
+      </Modal>
+
+      {/* Task detail popup — full content + prev/next through the visible list */}
+      <Modal show={!!detailTask} onHide={() => setDetailId(null)} centered size="lg">
+        {detailTask && (() => {
+          const t = detailTask;
+          const today = new Date().toISOString().slice(0, 10);
+          const overdue = t.status === 'open' && t.due_date && t.due_date < today;
+          const canComplete = t.assignee_id === myId || t.created_by === myId || isBob;
+          const canDelete = t.created_by === myId || isBob;
+          const canEditTask = canAssign && (t.created_by === myId || isBob);
+          const canRemind = !isApc && (t.created_by === myId || isBob);
+          const folder = t.folder_id ? folderMap.get(t.folder_id) : null;
+          const taskLabels = (t.label_ids ?? []).map(id => labelMap.get(id)).filter(Boolean) as OrgItem[];
+          const goPrev = () => { if (detailIdx > 0) setDetailId(ordered[detailIdx - 1].id); };
+          const goNext = () => { if (detailIdx >= 0 && detailIdx < ordered.length - 1) setDetailId(ordered[detailIdx + 1].id); };
+          return (
+            <>
+              <Modal.Header closeButton>
+                <div className="ac-task-detail-nav">
+                  <button className="ac-icon-btn" disabled={detailIdx <= 0} onClick={goPrev}
+                    title="Previous task" aria-label="Previous task"><i className="bi bi-chevron-left" /></button>
+                  <span className="ac-task-detail-pos">{detailIdx + 1} / {ordered.length}</span>
+                  <button className="ac-icon-btn" disabled={detailIdx >= ordered.length - 1} onClick={goNext}
+                    title="Next task" aria-label="Next task"><i className="bi bi-chevron-right" /></button>
+                </div>
+              </Modal.Header>
+              <Modal.Body>
+                <div className="ac-task-detail-title">
+                  <span className={`ac-prio-pill prio-${t.priority}`}>{t.priority}</span>
+                  <h4 className={t.status === 'done' ? 'text-decoration-line-through text-muted mb-0' : 'mb-0'}>{t.title}</h4>
+                  {t.status === 'done'
+                    ? <Badge bg="success"><i className="bi bi-check2 me-1" />Done</Badge>
+                    : overdue && <Badge bg="danger">Overdue</Badge>}
+                </div>
+                {t.description && <p className="ac-task-detail-desc">{t.description}</p>}
+                <div className="ac-task-detail-meta">
+                  <div><span className="lbl">Assignee</span><span className="val"><Avatar name={personName(t.assignee_id)} size="sm" /> {personName(t.assignee_id)}</span></div>
+                  {t.created_by && <div><span className="lbl">Assigned by</span><span className="val">{personName(t.created_by)}</span></div>}
+                  {t.brand_id && <div><span className="lbl">Brand</span><span className="val"><i className="bi bi-shop me-1" />{brandMap.get(t.brand_id) ?? 'Brand'}</span></div>}
+                  {t.due_date && <div><span className="lbl">Due</span><span className="val"><i className="bi bi-calendar-event me-1" />{new Date(t.due_date).toLocaleDateString()}</span></div>}
+                  {folder && <div><span className="lbl">Folder</span><span className="val"><i className="bi bi-folder me-1" style={{ color: folder.color ?? undefined }} />{folder.name}</span></div>}
+                  {taskLabels.length > 0 && (
+                    <div><span className="lbl">Labels</span>
+                      <span className="val d-flex flex-wrap gap-1">
+                        {taskLabels.map(l => (
+                          <span key={l.id} className="ac-label-chip" style={{ background: (l.color ?? '#64748b') + '22', color: l.color ?? '#64748b' }}>
+                            <i className="bi bi-tag-fill me-1" />{l.name}
+                          </span>
+                        ))}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </Modal.Body>
+              <Modal.Footer className="justify-content-between">
+                <div>
+                  {canRemind && t.status === 'open' && (
+                    <Button variant="outline-warning" size="sm" disabled={reminded.has(t.id)} onClick={() => sendReminder(t)}>
+                      <i className={`bi ${reminded.has(t.id) ? 'bi-check2-circle' : 'bi-alarm'} me-1`} />{reminded.has(t.id) ? 'Reminder sent' : 'Remind'}
+                    </Button>
+                  )}
+                </div>
+                <div className="d-flex gap-2">
+                  {canEditTask && <Button variant="outline-secondary" size="sm" onClick={() => { setDetailId(null); openEdit(t); }}><i className="bi bi-pencil me-1" />Edit</Button>}
+                  {canComplete && <Button variant={t.status === 'done' ? 'outline-secondary' : 'success'} size="sm" onClick={() => setDone(t, t.status !== 'done')}><i className={`bi ${t.status === 'done' ? 'bi-arrow-counterclockwise' : 'bi-check2-circle'} me-1`} />{t.status === 'done' ? 'Reopen' : 'Mark done'}</Button>}
+                  {canDelete && <Button variant="outline-danger" size="sm" onClick={() => { remove(t); setDetailId(null); }}><i className="bi bi-trash me-1" />Delete</Button>}
+                </div>
+              </Modal.Footer>
+            </>
+          );
+        })()}
       </Modal>
 
       {/* Manage folders & labels */}

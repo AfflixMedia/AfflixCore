@@ -2419,9 +2419,124 @@ input[type="number"] {
   outline-offset: 2px;
 }
 
+/* Brand quick-assign bar (Bob + Team Lead) — horizontal, scrollable */
+.ac-brandbar {
+  display: flex; align-items: center; gap: 8px;
+  background: #fff; border: 1px solid var(--ac-line-l);
+  border-radius: var(--ac-radius); padding: 10px; margin-bottom: 16px;
+}
+.ac-brandbar-arrow {
+  flex: 0 0 auto; width: 32px; height: 32px; border-radius: 50%;
+  border: 1px solid var(--ac-line-l); background: #fff; color: var(--ac-text-dark);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  transition: background-color .15s ease, color .15s ease, border-color .15s ease;
+}
+.ac-brandbar-arrow:hover { background: var(--ac-primary); color: #fff; border-color: var(--ac-primary); }
+.ac-brandbar-track {
+  flex: 1; min-width: 0; display: flex; gap: 8px;
+  overflow-x: auto; scroll-behavior: smooth; padding: 2px;
+  scrollbar-width: none; -ms-overflow-style: none; /* hide native scrollbar; use arrows */
+}
+.ac-brandbar-track::-webkit-scrollbar { display: none; }
+.ac-brand-chip {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+  border: 1px solid var(--ac-line-l); background: #fff;
+  border-radius: var(--ac-radius-pill); padding: 5px 14px 5px 6px; cursor: pointer;
+  transition: border-color .15s ease, box-shadow .15s ease, transform .12s ease;
+}
+.ac-brand-chip:hover { border-color: var(--ac-primary); box-shadow: 0 2px 8px rgba(20,22,32,.08); transform: translateY(-1px); }
+.ac-brand-chip:focus-visible { outline: 2px solid var(--ac-primary); outline-offset: 2px; }
+.ac-brand-chip-text { display: flex; flex-direction: column; line-height: 1.1; text-align: left; }
+.ac-brand-chip-name { font-weight: 700; font-size: .86rem; color: var(--ac-text-dark); white-space: nowrap; }
+.ac-brand-chip-owner { font-size: .68rem; color: var(--ac-text-muted); white-space: nowrap; }
+
+/* Right rail: Team Lead quick-assign avatars (Bob only) — vertical, scrollable.
+   Native scrollbar hidden; up/down arrows appear when avatars overflow. */
+.ac-tl-rail {
+  flex: 0 0 84px; width: 84px;
+  position: sticky; top: 12px;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  background: #fff; border: 1px solid var(--ac-line-l);
+  border-radius: var(--ac-radius); padding: 14px 10px;
+  max-height: calc(100vh - 90px);
+}
+.ac-tl-rail-head {
+  flex: 0 0 auto;
+  font-family: var(--ac-font-heading); font-weight: 700;
+  font-size: .6rem; text-transform: uppercase; letter-spacing: .5px;
+  color: var(--ac-text-muted); text-align: center; line-height: 1.2;
+}
+.ac-tl-arrow {
+  flex: 0 0 auto; width: 30px; height: 30px; border-radius: 50%;
+  border: 1px solid var(--ac-line-l); background: #fff; color: var(--ac-text-dark);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  transition: background-color .15s ease, color .15s ease, border-color .15s ease;
+}
+.ac-tl-arrow:hover { background: var(--ac-primary); color: #fff; border-color: var(--ac-primary); }
+.ac-tl-track {
+  flex: 1; min-height: 0; width: 100%;
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  overflow-y: auto; scroll-behavior: smooth; padding: 4px 0;
+  scrollbar-width: none; -ms-overflow-style: none; /* hide native scrollbar; use arrows */
+}
+.ac-tl-track::-webkit-scrollbar { display: none; }
+.ac-tl-avatar-btn {
+  position: relative; border: none; background: transparent; padding: 0;
+  border-radius: 50%; cursor: pointer; line-height: 0;
+  transition: transform .15s ease;
+}
+.ac-tl-avatar-btn:hover { transform: translateY(-2px); }
+.ac-tl-avatar-btn:hover .ac-avatar { box-shadow: 0 0 0 3px var(--ac-primary-soft); }
+.ac-tl-avatar-btn:focus-visible { outline: none; }
+.ac-tl-avatar-btn:focus-visible .ac-avatar { box-shadow: 0 0 0 3px var(--ac-primary); }
+.ac-tl-badge {
+  position: absolute; top: -4px; right: -4px;
+  min-width: 18px; height: 18px; padding: 0 4px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--ac-primary); color: #fff;
+  border: 2px solid #fff; border-radius: var(--ac-radius-pill);
+  font-size: .64rem; font-weight: 800; line-height: 1;
+}
+.ac-tl-tip {
+  position: absolute; right: calc(100% + 10px); top: 50%; transform: translateY(-50%);
+  white-space: nowrap; pointer-events: none;
+  background: var(--ac-text-dark, #14161f); color: #fff;
+  padding: 5px 10px; border-radius: 8px; font-size: .76rem; font-weight: 600;
+  opacity: 0; transition: opacity .15s ease; z-index: 20;
+}
+.ac-tl-avatar-btn:hover .ac-tl-tip,
+.ac-tl-avatar-btn:focus-visible .ac-tl-tip { opacity: 1; }
+
+/* Compact task cards: clickable body + single-line description */
+.ac-task-open { cursor: pointer; }
+.ac-clamp1 {
+  display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical;
+  overflow: hidden; text-overflow: ellipsis;
+}
+
+/* Task detail popup */
+.ac-task-detail-nav { display: flex; align-items: center; gap: 10px; }
+.ac-task-detail-pos { font-size: .8rem; font-weight: 700; color: var(--ac-text-muted); }
+.ac-task-detail-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.ac-task-detail-desc { white-space: pre-wrap; color: var(--ac-text-dark); margin-bottom: 16px; }
+.ac-task-detail-meta { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px 18px; }
+.ac-task-detail-meta > div { display: flex; flex-direction: column; gap: 3px; }
+.ac-task-detail-meta .lbl {
+  font-size: .68rem; text-transform: uppercase; letter-spacing: .5px;
+  font-weight: 700; color: var(--ac-text-muted);
+}
+.ac-task-detail-meta .val { display: flex; align-items: center; gap: 6px; font-weight: 600; color: var(--ac-text-dark); }
+
 @media (max-width: 820px) {
   .ac-tasks-layout { flex-direction: column; }
   .ac-tasks-rail { position: static; width: 100%; flex-basis: auto; }
+  .ac-tl-rail {
+    position: static; width: 100%; flex-basis: auto;
+    flex-direction: row; flex-wrap: wrap; max-height: none;
+  }
+  .ac-tl-track { flex-direction: row; flex-wrap: wrap; overflow: visible; }
+  .ac-tl-arrow { display: none; }
+  .ac-tl-tip { display: none; }
 }
 
 /* Priority background tints on task rows (red / amber / blue) */
@@ -2460,7 +2575,7 @@ input[type="number"] {
   font-size: .76rem; font-weight: 600; font-family: var(--ac-font-heading);
   white-space: nowrap; border: none; line-height: 1.4;
 }
-.ac-label-chip.btn-reset { cursor: pointer; transition: filter .12s ease, transform .12s ease; }
+.ac-label-chip.btn-reset {padding: 3px 10px; cursor: pointer; transition: filter .12s ease, transform .12s ease; }
 .ac-label-chip.btn-reset:hover { filter: brightness(.95); transform: translateY(-1px); }
 .ac-label-chip.on { box-shadow: 0 2px 8px rgba(20,22,32,.18); }
 
