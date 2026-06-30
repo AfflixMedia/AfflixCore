@@ -1,5 +1,6 @@
 import { Button, Dropdown, Badge } from 'react-bootstrap';
 import { useNavigate } from 'react-router-dom';
+import Avatar from '../components/Avatar';
 import { useAuth } from '../auth/AuthContext';
 import { useNotifications } from '../notifications/NotificationsContext';
 import { requestNotificationPermission, subscribePush } from '../notifications/swSetup';
@@ -80,9 +81,12 @@ export default function Topbar({ collapsed, onToggleSidebar }: { collapsed: bool
         </Dropdown>
 
         <Dropdown align="end">
-          <Dropdown.Toggle variant="light" size="sm">
-            <i className="bi bi-person-circle me-2" />
-            {profile?.email}
+          <Dropdown.Toggle variant="light" size="sm" className="d-flex align-items-center" title={profile?.email}>
+            <Avatar
+              name={profile?.full_name || profile?.email || 'User'}
+              src={profile?.avatar_url}
+              size="sm"
+            />
           </Dropdown.Toggle>
           <Dropdown.Menu>
             <Dropdown.ItemText>Role: <strong>{profile?.role}</strong></Dropdown.ItemText>

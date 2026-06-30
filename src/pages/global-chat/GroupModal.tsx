@@ -80,7 +80,7 @@ export default function GroupModal(p: Props) {
           <div className="ac-contact-list">
             {filtered.map(c => (
               <div key={c.id} className="ac-contact-row" style={{ cursor: 'default' }}>
-                <Avatar name={contactName(c)} />
+                <Avatar name={contactName(c)} src={c.avatar_url} />
                 <div className="flex-grow-1 min-w-0">
                   <div className="d-flex align-items-center gap-2">
                     <span className="fw-semibold text-truncate">{contactName(c)}{c.id === p.myId && ' (you)'}</span>
@@ -118,7 +118,7 @@ export default function GroupModal(p: Props) {
           <div className="ac-contact-list">
             {addable.map(c => (
               <button key={c.id} type="button" className="ac-contact-row" onClick={() => toggle(c.id)}>
-                <Avatar name={contactName(c)} />
+                <Avatar name={contactName(c)} src={c.avatar_url} />
                 <div className="flex-grow-1 min-w-0 text-start">
                   <div className="d-flex align-items-center gap-2">
                     <span className="fw-semibold text-truncate">{contactName(c)}</span>
@@ -164,7 +164,7 @@ export default function GroupModal(p: Props) {
             const isCreatorRow = c.id === p.creatorId;
             return (
               <div key={c.id} className="ac-contact-row" style={{ cursor: 'default' }}>
-                <Avatar name={contactName(c)} />
+                <Avatar name={contactName(c)} src={c.avatar_url} />
                 <div className="flex-grow-1 min-w-0">
                   <div className="d-flex align-items-center gap-2">
                     <span className="fw-semibold text-truncate">{contactName(c)}{c.id === p.myId && ' (you)'}</span>
@@ -211,7 +211,7 @@ export default function GroupModal(p: Props) {
               {addable.map(c => (
                 <button key={c.id} type="button" className="ac-contact-row" disabled={busy}
                   onClick={() => run(() => p.onAdd(c.id, showHistory))}>
-                  <Avatar name={contactName(c)} />
+                  <Avatar name={contactName(c)} src={c.avatar_url} />
                   <div className="flex-grow-1 min-w-0 text-start">
                     <span className="fw-semibold text-truncate">{contactName(c)}</span>
                   </div>

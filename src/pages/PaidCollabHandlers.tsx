@@ -9,6 +9,7 @@ interface Handler {
   full_name: string | null;
   role: string;
   created_at: string;
+  avatar_url?: string | null;
   brand_ids?: string[];
   brand_names?: string[];
 }
@@ -41,7 +42,7 @@ export default function PaidCollabHandlers() {
   const load = async () => {
     setLoading(true); setErr(null);
     const [{ data: hRows, error: e1 }, { data: brandRows, error: e2 }, { data: assigns, error: e3 }] = await Promise.all([
-      supabase.from('profiles').select('id,email,full_name,role,created_at').eq('role', 'paid_collab_handler').order('created_at', { ascending: false }),
+      supabase.from('profiles').select('id,email,full_name,role,created_at,avatar_url').eq('role', 'paid_collab_handler').order('created_at', { ascending: false }),
       supabase.from('brands').select('id,name').order('name'),
       supabase.from('paid_collab_handler_brands').select('handler_id,brand_id'),
     ]);
@@ -208,7 +209,7 @@ export default function PaidCollabHandlers() {
             const display = h.full_name || h.email;
             return (
               <div className="ac-list-row" key={h.id}>
-                <Avatar name={display} size="lg" />
+                <Avatar name={display} src={h.avatar_url} size="lg" />
                 <div className="ac-row-main">
                   <div className="ac-row-name">{h.full_name || <span className="text-muted">No name</span>}</div>
                   <div className="ac-row-sub d-flex align-items-center flex-wrap gap-2">

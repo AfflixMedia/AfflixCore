@@ -12,6 +12,7 @@ export interface Profile {
   can_edit_brands?: boolean;
   can_manage_gmv_max?: boolean;
   team_lead_id?: string | null;
+  avatar_url?: string | null;
 }
 
 interface AuthCtx {
@@ -22,6 +23,7 @@ interface AuthCtx {
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (email: string, password: string, fullName: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
+  refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthCtx | undefined>(undefined);
@@ -81,9 +83,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
   };
 
+  // Re-pull the current user's profile row (e.g. after they change their photo
+  // or name) so the new value reflects everywhere the context is consumed.
+  const refreshProfile = async () => {
+    const uid = session?.user?.id;
+    if (!uid) return;
+    const { data } = await supabase.from('profiles').select('*').eq('id', uid).single();
+    if (data) setProfile(data as Profile);
+  };
+
   return (
     <AuthContext.Provider
-      value={{ session, user: session?.user ?? null, profile, loading, signIn, signUp, signOut }}
+      value={{ session, user: session?.user ?? null, profile, loading, signIn, signUp, signOut, refreshProfile }}
     >
       {children}
     </AuthContext.Provider>

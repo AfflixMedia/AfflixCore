@@ -5,6 +5,7 @@ export interface ChatContact {
   full_name: string | null;
   email: string;
   role: string;
+  avatar_url?: string | null;
 }
 
 export interface Conversation {

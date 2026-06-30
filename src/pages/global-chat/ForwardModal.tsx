@@ -61,7 +61,7 @@ export default function ForwardModal({ show, message, contacts, onForward, onClo
               disabled={busyId !== null}
               onClick={() => handlePick(c)}
             >
-              <Avatar name={contactName(c)} />
+              <Avatar name={contactName(c)} src={c.avatar_url} />
               <div className="flex-grow-1 min-w-0 text-start">
                 <div className="d-flex align-items-center gap-2">
                   <span className="fw-semibold text-truncate">{contactName(c)}</span>

@@ -12,6 +12,7 @@ interface APC {
   created_at: string;
   can_edit_brands: boolean;
   can_manage_gmv_max: boolean;
+  avatar_url?: string | null;
   brand_ids?: string[];
   brand_names?: string[];
 }
@@ -23,7 +24,7 @@ export default function APCs() {
   const isBob = profile?.role === 'bob';
   const isTeamLead = profile?.role === 'team_lead';
   const [apcs, setApcs] = useState<APC[]>([]);
-  const [availableApcs, setAvailableApcs] = useState<{ id: string; email: string; full_name: string | null }[]>([]);
+  const [availableApcs, setAvailableApcs] = useState<{ id: string; email: string; full_name: string | null; avatar_url?: string | null }[]>([]);
   const [claimBusy, setClaimBusy] = useState<string | null>(null);
   const [brands, setBrands] = useState<BrandLite[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,7 +55,7 @@ export default function APCs() {
     // A Team Lead can now also read unassigned APCs (to claim them), so scope the
     // "my team" list explicitly to their own APCs; Bob sees everyone.
     let apcQuery = supabase.from('profiles')
-      .select('id,email,full_name,role,created_at,can_edit_brands,can_manage_gmv_max')
+      .select('id,email,full_name,role,created_at,can_edit_brands,can_manage_gmv_max,avatar_url')
       .eq('role', 'apc').order('created_at', { ascending: false });
     if (isTeamLead && profile?.id) apcQuery = apcQuery.eq('team_lead_id', profile.id);
     const [{ data: apcRows, error: e1 }, { data: brandRows, error: e2 }, { data: assigns, error: e3 }] = await Promise.all([
@@ -69,7 +70,7 @@ export default function APCs() {
     // Team Leads: list of APCs not on any team, offered as "add to my team".
     if (isTeamLead) {
       const { data: avail } = await supabase.from('profiles')
-        .select('id,email,full_name').eq('role', 'apc').is('team_lead_id', null).order('full_name');
+        .select('id,email,full_name,avatar_url').eq('role', 'apc').is('team_lead_id', null).order('full_name');
       setAvailableApcs(avail ?? []);
     } else {
       setAvailableApcs([]);
@@ -239,7 +240,7 @@ export default function APCs() {
             const display = a.full_name || a.email;
             return (
               <div className="ac-list-row" key={a.id}>
-                <Avatar name={display} size="lg" />
+                <Avatar name={display} src={a.avatar_url} size="lg" />
                 <div className="ac-row-main">
                   <div className="ac-row-name">{a.full_name || <span className="text-muted">No name</span>}</div>
                   <div className="ac-row-sub d-flex align-items-center flex-wrap gap-2">
@@ -303,7 +304,7 @@ export default function APCs() {
           <div className="ac-list">
             {availableApcs.map(a => (
               <div className="ac-list-row" key={a.id}>
-                <Avatar name={a.full_name || a.email} size="lg" />
+                <Avatar name={a.full_name || a.email} src={a.avatar_url} size="lg" />
                 <div className="ac-row-main">
                   <div className="ac-row-name">{a.full_name || <span className="text-muted">No name</span>}</div>
                   <div className="ac-row-sub"><i className="bi bi-envelope me-1" />{a.email}</div>

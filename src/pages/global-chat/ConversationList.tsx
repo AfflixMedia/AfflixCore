@@ -96,7 +96,11 @@ export default function ConversationList({ views, activeId, myId, onSelect, onSt
                 className={`ac-chat-row ${isActive ? 'active' : ''}`}
                 onClick={() => onSelect(v.conversation.id)}
               >
-                <Avatar name={v.title} variant={v.conversation.is_group ? 'dark' : 'brand'} />
+                <Avatar
+                  name={v.title}
+                  src={v.conversation.is_group ? undefined : v.otherUser?.avatar_url}
+                  variant={v.conversation.is_group ? 'dark' : 'brand'}
+                />
                 <div className="flex-grow-1 min-w-0">
                   <div className="d-flex align-items-center gap-2">
                     <span className="ac-chat-row-name text-truncate">{v.title}</span>

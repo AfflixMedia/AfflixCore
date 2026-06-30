@@ -3,6 +3,8 @@ import { NavLink } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { useNotifications } from '../notifications/NotificationsContext';
 import { Badge } from 'react-bootstrap';
+import Avatar from '../components/Avatar';
+import { color } from 'html2canvas/dist/types/css/types/color';
 
 export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) {
   const [reportingOpen, setReportingOpen] = useState(true);
@@ -168,8 +170,20 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
         </NavLink>
       </nav>
       <div className="footer">
-        <div className="ac-nav-label">{profile?.full_name ?? profile?.email}</div>
-        <small className="text-muted ac-nav-label">Role: {profile?.role ?? '—'}</small>
+        <NavLink to="/profile" title="My Profile" className="ac-profile-link d-flex align-items-center gap-2">
+          <Avatar
+            name={profile?.full_name || profile?.email || 'User'}
+            src={profile?.avatar_url}
+            size="sm"
+          />
+          <div className="min-w-0 ac-nav-label">
+            <div className="text-truncate" >
+              {profile?.full_name ?? profile?.email}
+            </div>
+            <small className="text-muted">Role: {profile?.role ?? '—'}</small>
+          </div>
+          <i className="bi bi-chevron-right ms-auto ac-nav-label" />
+        </NavLink>
       </div>
     </aside>
   );

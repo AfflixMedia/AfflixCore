@@ -187,7 +187,11 @@ export default function ChatPanel({
         <button type="button" className="ac-chat-back" onClick={onBack} title="Back">
           <i className="bi bi-arrow-left" />
         </button>
-        <Avatar name={view.title} variant={isGroup || isAnnouncement ? 'dark' : 'brand'} />
+        <Avatar
+          name={view.title}
+          src={isGroup || isAnnouncement ? undefined : view.otherUser?.avatar_url}
+          variant={isGroup || isAnnouncement ? 'dark' : 'brand'}
+        />
         <div className="min-w-0 flex-grow-1">
           <div className="d-flex align-items-center gap-2">
             {isAnnouncement && <i className="bi bi-megaphone-fill text-warning" />}

@@ -109,7 +109,7 @@ export default function GlobalChat() {
     const m = new Map<string, ChatContact>();
     contacts.forEach(c => m.set(c.id, c));
     if (myId && profile) {
-      m.set(myId, { id: myId, full_name: profile.full_name, email: profile.email, role: profile.role });
+      m.set(myId, { id: myId, full_name: profile.full_name, email: profile.email, role: profile.role, avatar_url: profile.avatar_url });
     }
     return m;
   }, [contacts, myId, profile]);
@@ -118,7 +118,7 @@ export default function GlobalChat() {
   // the announcement roster + member count, which are role-based not row-based.
   const allStaff = useMemo<ChatContact[]>(() => {
     const arr = [...contacts];
-    if (myId && profile) arr.push({ id: myId, full_name: profile.full_name, email: profile.email, role: profile.role });
+    if (myId && profile) arr.push({ id: myId, full_name: profile.full_name, email: profile.email, role: profile.role, avatar_url: profile.avatar_url });
     return arr;
   }, [contacts, myId, profile]);
 

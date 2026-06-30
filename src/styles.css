@@ -222,6 +222,20 @@ a:hover { color: var(--ac-primary-2); }
   font-size: .82rem;
   color: var(--ac-text-muted);
 }
+/* Clickable user block in the sidebar footer → opens the Profile page. */
+.ac-sidebar .footer .ac-profile-link {
+  color: inherit;
+  text-decoration: none;
+  padding: 6px 8px;
+  margin: -6px -8px;
+  border-radius: var(--ac-radius, 10px);
+  transition: background .15s ease;
+}
+.ac-sidebar .footer .ac-profile-link:hover,
+.ac-sidebar .footer .ac-profile-link.active {
+  background: var(--ac-primary-soft, rgba(232,134,46,.10));
+}
+.ac-sidebar .footer .ac-profile-link .bi-chevron-right { font-size: .7rem; opacity: .5; }
 
 .ac-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .ac-topbar {
@@ -432,6 +446,9 @@ a:hover { color: var(--ac-primary-2); }
 }
 .ac-avatar.lg { width: 52px; height: 52px; font-size: 1.05rem; }
 .ac-avatar.sm { width: 32px; height: 32px; font-size: .8rem; }
+/* When a profile photo is present, the image fills the circle (no gradient/shadow tint needed). */
+.ac-avatar.has-img { background: var(--ac-bg-card-2, #e9ecef); overflow: hidden; padding: 0; }
+.ac-avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
 /* Variant — dark/cream tone for clients */
 .ac-avatar.dark {
   background: linear-gradient(135deg, var(--ac-bg-card) 0%, var(--ac-bg-card-2) 100%);
@@ -2700,4 +2717,178 @@ input[type="number"] {
   .ac-list-row:hover,
   .ac-label-chip.btn-reset:hover,
   .ac-reminder-ack:hover:not(:disabled) { transform: none; }
+}
+
+/* =========================================================
+   Profile page (My Profile) — minimal/Swiss layout on brand
+   ========================================================= */
+.ac-profile-page { max-width: 1040px; }
+
+/* --- Hero header --- */
+.ac-profile-hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--ac-radius);
+  padding: 30px 32px;
+  background:
+    radial-gradient(1100px 280px at 88% -40%, rgba(232,134,46,.30), transparent 60%),
+    linear-gradient(135deg, var(--ac-bg-dark) 0%, var(--ac-bg-card) 100%);
+  box-shadow: 0 14px 40px rgba(20,22,32,.22);
+}
+.ac-profile-hero-glow {
+  position: absolute; inset: 0;
+  background: radial-gradient(420px 160px at 18% 130%, rgba(245,161,66,.16), transparent 70%);
+  pointer-events: none;
+}
+.ac-profile-identity {
+  position: relative; z-index: 1;
+  display: flex; align-items: center; gap: 22px; flex-wrap: wrap;
+}
+
+/* Avatar w/ camera edit overlay */
+.ac-profile-avatar-wrap { position: relative; flex-shrink: 0; }
+.ac-profile-avatar {
+  position: relative;
+  width: 104px; height: 104px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-family: var(--ac-font-heading); font-weight: 700;
+  font-size: 2.2rem; letter-spacing: .5px;
+  background: linear-gradient(135deg, var(--ac-primary) 0%, var(--ac-primary-2) 100%);
+  box-shadow: 0 0 0 4px rgba(255,255,255,.12), 0 10px 26px rgba(232,134,46,.34);
+  overflow: hidden;
+}
+.ac-profile-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ac-profile-avatar-loading {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(20,22,32,.45); color: #fff;
+}
+.ac-profile-avatar-edit {
+  position: absolute; bottom: 2px; right: 2px;
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 3px solid var(--ac-bg-dark);
+  background: var(--ac-primary); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: .9rem; cursor: pointer;
+  transition: background .2s ease, transform .2s ease;
+}
+.ac-profile-avatar-edit:hover:not(:disabled) { background: var(--ac-primary-2); transform: translateY(-1px); }
+.ac-profile-avatar-edit:disabled { opacity: .6; cursor: default; }
+.ac-profile-avatar-edit:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+/* Identity text */
+.ac-profile-id-text { min-width: 0; }
+.ac-profile-name {
+  color: #fff; font-size: 1.7rem; margin: 0 0 6px; line-height: 1.1;
+}
+.ac-profile-email {
+  display: flex; align-items: center; gap: 7px;
+  color: #cfd0dc; font-size: .92rem; margin-bottom: 10px; word-break: break-all;
+}
+.ac-profile-email .bi { color: var(--ac-primary-2); }
+.ac-profile-role-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 13px; border-radius: var(--ac-radius-pill);
+  background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.16);
+  color: #fff; font-size: .76rem; font-weight: 700; font-family: var(--ac-font-heading);
+  letter-spacing: .2px;
+}
+.ac-profile-role-pill .bi { color: var(--ac-primary-2); }
+
+.ac-profile-photo-actions {
+  margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap;
+}
+.ac-profile-hero-btn { font-weight: 600; }
+
+/* --- Cards --- */
+.ac-profile-card {
+  background: #fff;
+  border: 1px solid var(--ac-line-l);
+  border-radius: var(--ac-radius);
+  padding: 22px 24px;
+  box-shadow: 0 6px 22px rgba(20,22,32,.05);
+}
+.ac-profile-card-head {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 18px; padding-bottom: 14px;
+  border-bottom: 1px solid var(--ac-line-l);
+}
+.ac-profile-card-head .bi {
+  width: 34px; height: 34px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 9px; background: var(--ac-primary-soft); color: var(--ac-primary);
+  font-size: 1rem;
+}
+.ac-profile-card-head h2 { font-size: 1.05rem; margin: 0; }
+
+/* Definition list (account details) */
+.ac-profile-dl { display: flex; flex-direction: column; }
+.ac-profile-dl-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 0; border-bottom: 1px dashed var(--ac-line-l);
+}
+.ac-profile-dl-row:last-of-type { border-bottom: none; }
+.ac-profile-dl dt {
+  display: flex; align-items: center; gap: 8px;
+  width: 110px; flex-shrink: 0; margin: 0;
+  font-size: .72rem; text-transform: uppercase; letter-spacing: .5px;
+  font-weight: 700; color: var(--ac-text-muted);
+}
+.ac-profile-dl dt .bi { color: var(--ac-primary); font-size: .85rem; }
+.ac-profile-dl dd {
+  margin: 0; font-weight: 600; color: var(--ac-text-dark);
+  word-break: break-word; min-width: 0;
+}
+.ac-profile-role-chip {
+  display: inline-block; padding: 3px 11px; border-radius: var(--ac-radius-pill);
+  background: var(--ac-primary-soft); color: var(--ac-primary);
+  font-size: .8rem; font-weight: 700;
+}
+.ac-profile-hint {
+  display: flex; align-items: flex-start; gap: 7px;
+  margin-top: 16px; font-size: .8rem; color: var(--ac-text-muted);
+}
+.ac-profile-hint .bi { margin-top: 2px; }
+
+/* Password form */
+.ac-profile-label {
+  font-size: .72rem; text-transform: uppercase; letter-spacing: .5px;
+  font-weight: 700; color: var(--ac-text-muted); margin-bottom: 5px;
+}
+.ac-profile-pw { position: relative; }
+.ac-profile-pw .form-control { padding-right: 42px; }
+.ac-profile-pw-toggle {
+  position: absolute; top: 0; right: 0; height: 100%; width: 40px;
+  border: none; background: transparent; color: var(--ac-text-muted);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  transition: color .2s ease;
+}
+.ac-profile-pw-toggle:hover { color: var(--ac-primary); }
+.ac-profile-pw-toggle:focus-visible { outline: 2px solid var(--ac-primary); outline-offset: -2px; border-radius: 6px; }
+.ac-profile-match-warn {
+  display: flex; align-items: center; gap: 6px;
+  color: #c0392b; font-size: .82rem; font-weight: 600; margin: -4px 0 10px;
+}
+
+.ac-profile-callout {
+  display: flex; align-items: flex-start; gap: 12px;
+  margin-top: 22px; padding: 14px 16px;
+  background: var(--ac-bg-light); border: 1px solid var(--ac-line-l);
+  border-left: 3px solid var(--ac-primary);
+  border-radius: 10px; font-size: .86rem;
+}
+.ac-profile-callout > .bi { color: var(--ac-primary); font-size: 1.1rem; margin-top: 1px; }
+
+@media (max-width: 640px) {
+  .ac-profile-hero { padding: 24px 20px; }
+  .ac-profile-identity { gap: 16px; }
+  .ac-profile-photo-actions { margin-left: 0; width: 100%; }
+  .ac-profile-name { font-size: 1.4rem; }
+  .ac-profile-avatar { width: 88px; height: 88px; font-size: 1.9rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ac-profile-avatar-edit,
+  .ac-profile-pw-toggle { transition: none; }
+  .ac-profile-avatar-edit:hover:not(:disabled) { transform: none; }
 }

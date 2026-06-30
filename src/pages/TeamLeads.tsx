@@ -9,6 +9,7 @@ interface TeamLead {
   full_name: string | null;
   role: string;
   created_at: string;
+  avatar_url?: string | null;
   brand_ids?: string[];
   brand_names?: string[];
   apc_count?: number;
@@ -50,7 +51,7 @@ export default function TeamLeads() {
   const load = async () => {
     setLoading(true); setErr(null);
     const [{ data: leadRows, error: e1 }, { data: brandRows, error: e2 }, { data: assigns, error: e3 }, { data: apcRows, error: e4 }] = await Promise.all([
-      supabase.from('profiles').select('id,email,full_name,role,created_at').eq('role', 'team_lead').order('created_at', { ascending: false }),
+      supabase.from('profiles').select('id,email,full_name,role,created_at,avatar_url').eq('role', 'team_lead').order('created_at', { ascending: false }),
       supabase.from('brands').select('id,name').order('name'),
       supabase.from('team_lead_brands').select('team_lead_id,brand_id'),
       supabase.from('profiles').select('id,email,full_name,team_lead_id').eq('role', 'apc').order('full_name'),
@@ -248,7 +249,7 @@ export default function TeamLeads() {
             const display = l.full_name || l.email;
             return (
               <div className="ac-list-row" key={l.id}>
-                <Avatar name={display} size="lg" />
+                <Avatar name={display} src={l.avatar_url} size="lg" />
                 <div className="ac-row-main">
                   <div className="ac-row-name">{l.full_name || <span className="text-muted">No name</span>}</div>
                   <div className="ac-row-sub d-flex align-items-center flex-wrap gap-2">
