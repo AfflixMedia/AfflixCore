@@ -431,8 +431,18 @@
 .pc-appr-amt{ font-size:13px; font-weight:800; font-variant-numeric:tabular-nums; white-space:nowrap; }
 
 /* ── Creators tab table (compact, month-grouped) ── */
-.pc-cv-head, .pc-cv-row{ display:grid; grid-template-columns:34px 0.32fr .9fr 1.12fr .98fr 1.05fr .8fr .72fr .76fr .58fr 1.18fr; align-items:center; gap:12px; text-align:center; }
+.pc-cv-head, .pc-cv-row{ display:grid; grid-template-columns:34px 30px 1.5fr .9fr 1fr .7fr .6fr 1.05fr; align-items:center; gap:14px; text-align:left; }
+.pc-cv-namecell{ display:flex; flex-direction:column; align-items:flex-start; gap:1px; }
+.pc-cv-dealcell{ display:flex; flex-direction:column; align-items:flex-end; gap:1px; }
+.pc-cv-head > div, .pc-cv-row > .pc-cell{ min-width:0; }
+.pc-cv-row > .pc-cell > .pc-cname, .pc-cv-row > .pc-cell > .pc-handle{ display:block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* numeric columns line up on their right edge */
+.pc-cv-head > .pc-num, .pc-cv-row > .pc-num{ text-align:right; justify-self:end; }
+/* checkbox + row index stay centered */
+.pc-cv-check, .pc-cv-row > .pc-idxcell, .pc-cv-head > .pc-idxcell{ justify-self:center; text-align:center; }
 .pc-cv-check{ display:flex; align-items:center; justify-content:center; }
+.pc-cv-brandcell{ display:flex; flex-direction:column; align-items:flex-start; gap:2px; }
+.pc-cv-sub{ font-size:11px; opacity:.7; line-height:1.2; color:var(--pc-text); }
 .pc-check{ width:17px; height:17px; accent-color:var(--pc-accent); cursor:pointer; margin:0; flex:0 0 auto; }
 .pc-cv-row.sel{ background:var(--pc-accent-light); box-shadow:inset 3px 0 0 var(--pc-accent); }
 .pc-cv-row.sel:hover{ background:var(--pc-accent-light); }

@@ -1488,8 +1488,8 @@ function CreatorsView({ rows, onEdit, onSetStatus, onToggleVisible }) {
         <div className="pc-card pc-list" style={{ paddingBottom: sel.size ? 8 : 0 }}>
           <div className="pc-cv-head">
             <div className="pc-cv-check"><input type="checkbox" className="pc-check" checked={allSelected} onChange={toggleAll} title="Select all" /></div>
-            <div className="pc-num">#</div><div>Name</div><div>Contact</div><div>TikTok</div><div>Category</div>
-            <div>Brand</div><div>Onboarded</div><div className="pc-num">Deal</div><div className="pc-num">Rate/Vid</div><div>Status</div>
+            <div className="pc-num pc-idxcell">#</div><div>Name</div><div>Category</div>
+            <div>Brand</div><div className="pc-num">Deal</div><div className="pc-num">Rate/Vid</div><div>Status</div>
           </div>
           {groups.map(g => (
             <React.Fragment key={g.key}>
@@ -1515,23 +1515,32 @@ function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, onToggleVisible, select
   const accounts = tiktokAccounts(c.tiktok_handle);
   const amount = Number(c.amount) || 0;
   const videos = parseInt(c.videos_count, 10) || 0;
+  const delivered = Array.isArray(c.video_codes) ? c.video_codes.filter(v => v?.video && String(v.video).trim()).length : 0;
   const avg = videos > 0 ? amount / videos : 0;
   const contact = c.phone || c.email || '';
   return (
     <div className={`pc-cv-row ${selected ? 'sel' : ''}`} onClick={onEdit} role="button" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter') onEdit(); }}>
       <div className="pc-cell pc-cv-check" data-label="" onClick={e => e.stopPropagation()}><input type="checkbox" className="pc-check" checked={selected} onChange={onToggleSelect} /></div>
       <div className="pc-cell pc-num pc-idxcell" data-label="#"><span className="pc-idx">#{idx}</span></div>
-      <div className="pc-cell" data-label="Name"><span className="pc-cname">{c.name}</span></div>
-      <div className="pc-cell" data-label="Contact"><span className="pc-handle" title={[c.phone, c.email].filter(Boolean).join('  ·  ')}>{contact || '—'}</span></div>
-      <div className="pc-cell" data-label="TikTok">
-        {accounts.length > 0
-          ? <span className="pc-tiktok"><a className="pc-handle" href={accounts[0].url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>{accounts[0].handle}</a>{accounts.length > 1 && <span className="pc-more" title={accounts.slice(1).map(a => a.handle).join(', ')}>+{accounts.length - 1}</span>}</span>
-          : <span className="pc-handle">—</span>}
+      <div className="pc-cell pc-cv-namecell" data-label="Name">
+        <span className="pc-cname">{c.name}</span>
+        {accounts.length > 0 && (
+          <span className="pc-tiktok pc-cv-sub">
+            <a className="pc-handle" href={accounts[0].url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>{accounts[0].handle}</a>
+            {accounts.length > 1 && <span className="pc-more" title={accounts.slice(1).map(a => a.handle).join(', ')}>+{accounts.length - 1}</span>}
+          </span>
+        )}
+        {contact && <span className="pc-cv-sub" title={[c.phone, c.email].filter(Boolean).join('  ·  ')}>{contact}</span>}
       </div>
       <div className="pc-cell" data-label="Category">{c.category ? <span className="pc-cat" title={c.category}>{c.category}</span> : <span className="pc-handle">—</span>}</div>
-      <div className="pc-cell" data-label="Brand"><span className="pc-brandtag">{c._brandName}</span></div>
-      <div className="pc-cell" data-label="Onboarded"><span className="pc-handle">{c.onboarded_on ? fmtDate(c.onboarded_on) : '—'}</span></div>
-      <div className="pc-cell pc-num" data-label="Deal"><span className="pc-dealwrap"><span className="pc-money">{fmt$(amount)}</span>{videos > 0 && <span className="pc-deal-vid"> · {videos}v</span>}</span></div>
+      <div className="pc-cell pc-cv-brandcell" data-label="Brand">
+        <span className="pc-brandtag">{c._brandName}</span>
+        {c.onboarded_on && <span className="pc-cv-sub">Onboarded {fmtDate(c.onboarded_on)}</span>}
+      </div>
+      <div className="pc-cell pc-num pc-cv-dealcell" data-label="Deal">
+        <span className="pc-money">{fmt$(amount)}</span>
+        {videos > 0 && <span className="pc-cv-sub">{delivered}/{videos} video{videos === 1 ? '' : 's'}</span>}
+      </div>
       <div className="pc-cell pc-num" data-label="Rate/Vid"><span className="pc-money">{avg ? fmt$(avg) : '—'}</span></div>
       <div className="pc-cell" data-label="Status">
         <StatusDropdown value={c.payment_status} onChange={v => onSetStatus(c.id, v)} />
