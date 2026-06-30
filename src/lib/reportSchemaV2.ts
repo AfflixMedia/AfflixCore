@@ -67,7 +67,7 @@ export interface SectionDef {
   /** fixed-table only: the row key that holds the locked label. */
   labelKey?: string;
   /** Special handling flags consumed by the editor/dashboard. */
-  special?: 'gmv_max' | 'product_traffic';
+  special?: 'gmv_max' | 'product_traffic' | 'product_gmv_max';
   /** Auto-generated section — no manual editor input; the dashboard derives it. */
   derived?: boolean;
   /** Note shown in the editor in place of inputs for a derived section. */
@@ -260,6 +260,8 @@ export const WEEKLY_SECTIONS: SectionDef[] = [
   // 11.2 ───────────────────────────────────────────────────────────────────
   {
     id: 'ad_by_product', num: '11.2', title: 'Ad Spend by Product', kind: 'table',
+    special: 'product_gmv_max',
+    blurb: 'Pull per-product spend from the brand’s GMV Max page, or add rows manually.',
     fields: [
       { key: 'product', label: 'Product', format: 'text' },
       { key: 'product_id', label: 'Product ID', format: 'text' },

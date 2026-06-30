@@ -62,6 +62,8 @@ export default function WeeklyReportEdit() {
 
   const [fetchingGmv, setFetchingGmv] = useState(false);
   const [gmvFetchMsg, setGmvFetchMsg] = useState<{ kind: 'success' | 'warning' | 'danger'; text: string } | null>(null);
+  const [fetchingProductGmv, setFetchingProductGmv] = useState(false);
+  const [productGmvMsg, setProductGmvMsg] = useState<{ kind: 'success' | 'warning' | 'danger'; text: string } | null>(null);
 
   interface PresetRow {
     id: string; name: string; payload: any;
@@ -273,6 +275,44 @@ export default function WeeklyReportEdit() {
       ad_overall: { ...prev.ad_overall, not_started: false, ad_spend: adSpend, total_orders_paid: orders, gmv_generated: gmv },
     }));
     setGmvFetchMsg({ kind: 'success', text: `Pulled GMV Max for ${label}. Don't forget to save.` });
+  };
+
+  // §11.2 — pull per-product GMV Max rows for this report's week (exact match,
+  // else any rows overlapping the window) and replace the Ad-Spend-by-Product table.
+  const fetchProductGmvMaxFromBrand = async () => {
+    if (!report) return;
+    setFetchingProductGmv(true); setProductGmvMsg(null);
+    const { data: exact, error } = await supabase
+      .from('brand_gmv_max_product_weekly').select('*')
+      .eq('brand_id', report.brand_id).eq('week_start', report.week_start)
+      .order('product', { ascending: true });
+    if (error) { setFetchingProductGmv(false); setProductGmvMsg({ kind: 'danger', text: error.message }); return; }
+
+    let rows: any[] = exact ?? [];
+    let label = formatRange(report.week_start, report.week_end);
+    if (rows.length === 0) {
+      const { data: overlap } = await supabase
+        .from('brand_gmv_max_product_weekly').select('*')
+        .eq('brand_id', report.brand_id)
+        .lte('week_start', report.week_end).gte('week_end', report.week_start)
+        .order('product', { ascending: true });
+      rows = (overlap as any[]) ?? [];
+      if (rows.length > 0) label += ` (${rows.length} product row${rows.length === 1 ? '' : 's'} from overlapping weeks)`;
+    }
+    setFetchingProductGmv(false);
+    if (rows.length === 0) {
+      setProductGmvMsg({ kind: 'warning', text: `No product-level GMV Max entries for ${label} on this brand. Add them on the brand's GMV Max tab, or enter rows manually.` });
+      return;
+    }
+    const adRows = rows.map(r => ({
+      product: String(r.product ?? ''),
+      product_id: String(r.product_id ?? ''),
+      spend: numOrNull(r.spend),
+      total_orders: numOrNull(r.orders),
+      gmv_generated: numOrNull(r.gmv),
+    }));
+    setC(prev => ({ ...prev, ad_by_product: adRows }));
+    setProductGmvMsg({ kind: 'success', text: `Pulled ${adRows.length} product row${adRows.length === 1 ? '' : 's'} from GMV Max for ${label}. Don't forget to save.` });
   };
 
   const submit = async (e: FormEvent, status: 'draft' | 'submitted') => {
@@ -503,6 +543,31 @@ export default function WeeklyReportEdit() {
     }
     if (def.kind === 'scalar') {
       return <ScalarSectionBody def={def} data={(c as any)[def.id]} onField={(k, v) => setSec(def.id, k, v)} />;
+    }
+    // §11.2 — Ad Spend by Product, with a "Pull from GMV Max" auto-fill.
+    if (def.special === 'product_gmv_max') {
+      return (
+        <>
+          <div className="d-flex justify-content-end mb-2">
+            <Button size="sm" variant="outline-info" disabled={fetchingProductGmv} onClick={fetchProductGmvMaxFromBrand}
+              title={`Pull per-product spend from the brand's GMV Max page for ${formatRange(report.week_start, report.week_end)}`}>
+              <i className="bi bi-cloud-download me-1" />{fetchingProductGmv ? 'Fetching…' : 'Pull from GMV Max'}
+            </Button>
+          </div>
+          {productGmvMsg && (
+            <Alert variant={productGmvMsg.kind} className="py-2 small mb-3" onClose={() => setProductGmvMsg(null)} dismissible>
+              {productGmvMsg.text}
+            </Alert>
+          )}
+          <TableSectionBody
+            def={def}
+            rows={(c as any)[def.id]}
+            onCell={(i, k, v) => setCell(def.id, i, k, v)}
+            onAddRow={() => addRow(def)}
+            onDelRow={(i) => delRow(def.id, i)}
+          />
+        </>
+      );
     }
     // table / fixed
     return (
