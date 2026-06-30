@@ -518,13 +518,22 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
     try {
       let savedId = data.id;
       if (mode === 'add') { const row = await store.addCreator(data); savedId = row?.id; }
-      else await store.updateCreator(data.id, {
-        name: data.name, tiktok_handle: data.tiktok_handle, amount: Number(data.amount) || 0,
-        videos_count: parseInt(data.videos_count, 10) || 0, zelle: data.zelle, paypal: data.paypal,
-        phone: data.phone, email: data.email, category: data.category,
-        onboarded_on: data.onboarded_on,
-        products: Array.isArray(data.products) ? data.products : [],
-      });
+      else {
+        const newCount = parseInt(data.videos_count, 10) || 0;
+        const patch = {
+          name: data.name, tiktok_handle: data.tiktok_handle, amount: Number(data.amount) || 0,
+          videos_count: newCount, zelle: data.zelle, paypal: data.paypal,
+          phone: data.phone, email: data.email, category: data.category,
+          onboarded_on: data.onboarded_on,
+          products: Array.isArray(data.products) ? data.products : [],
+        };
+        // lowering the video count drops the extra video-link / ad-code rows
+        const existing = creators.find(x => x.id === data.id);
+        if (existing && Array.isArray(existing.video_codes) && newCount < existing.video_codes.length) {
+          patch.video_codes = existing.video_codes.slice(0, newCount);
+        }
+        await store.updateCreator(data.id, patch);
+      }
       // keep the same creator's contact/identity in sync everywhere they appear
       await propagateShared(data.name, {
         tiktok_handle: data.tiktok_handle, paypal: data.paypal, zelle: data.zelle,
