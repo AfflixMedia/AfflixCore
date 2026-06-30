@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, FormEvent } from 'react';
-import { Card, Form, Button, Row, Col, Table, Modal, Spinner, Alert } from 'react-bootstrap';
+import { Card, Form, Button, Row, Col, Table, Modal, Spinner, Alert, Dropdown } from 'react-bootstrap';
 import { supabase } from '../../lib/supabase';
 import { addDays, formatRange, toISO, fromISO } from '../../lib/dates';
 import NumberInput from '../../components/NumberInput';
@@ -46,6 +46,7 @@ interface ProductWeekRow {
   gmv: number;
   notes: string;
 }
+interface BrandProduct { id: string; name: string; external_product_id: string | null; }
 
 const emptyMonth = (brandId: string, month: string): MonthRow => ({
   brand_id: brandId, month, allocated_budget: 0, spend_to_date: 0,
@@ -85,6 +86,13 @@ export default function BrandGmvMaxTab({ brandId, canEdit }: { brandId: string; 
   const [pEditing, setPEditing] = useState<ProductWeekRow | null>(null);
   const [pDraft, setPDraft] = useState<ProductWeekRow>(emptyProductWeek(brandId, ''));
   const [pSaving, setPSaving] = useState(false);
+  // The brand's catalogue — for the product picker (so APCs select, not type).
+  const [products, setProducts] = useState<BrandProduct[]>([]);
+  useEffect(() => {
+    supabase.from('brand_products').select('id,name,external_product_id')
+      .eq('brand_id', brandId).order('name', { ascending: true })
+      .then(({ data }) => setProducts((data as BrandProduct[]) ?? []));
+  }, [brandId]);
 
   const monthRange = useMemo(() => {
     const [y, m] = month.split('-').map(Number);
@@ -495,15 +503,12 @@ export default function BrandGmvMaxTab({ brandId, canEdit }: { brandId: string; 
                   {pDraft.week_start ? `Covers ${formatRange(pDraft.week_start, pDraft.week_end)}` : '7-day window starts here.'}
                 </Form.Text>
               </Col>
-              <Col md={4}>
+              <Col md={8}>
                 <Form.Label className="fw-bold">Product</Form.Label>
-                <Form.Control value={pDraft.product} placeholder="Product name"
-                  onChange={e => setPDraft({ ...pDraft, product: e.target.value })} />
-              </Col>
-              <Col md={4}>
-                <Form.Label className="fw-bold">Product ID</Form.Label>
-                <Form.Control value={pDraft.product_id} placeholder="e.g. P-101"
-                  onChange={e => setPDraft({ ...pDraft, product_id: e.target.value })} />
+                <ProductPicker products={products}
+                  value={{ product: pDraft.product, product_id: pDraft.product_id }}
+                  onPick={(name, pid) => setPDraft({ ...pDraft, product: name, product_id: pid })} />
+                <Form.Text className="text-muted">Pick from this brand’s products (add new ones on the Products tab).</Form.Text>
               </Col>
               <Col md={4}>
                 <Form.Label className="fw-bold">Spend ($)</Form.Label>
@@ -526,13 +531,56 @@ export default function BrandGmvMaxTab({ brandId, canEdit }: { brandId: string; 
           </Modal.Body>
           <Modal.Footer>
             <Button variant="secondary" onClick={() => setPShow(false)} disabled={pSaving}>Cancel</Button>
-            <Button type="submit" disabled={pSaving || !pDraft.week_start}>
+            <Button type="submit" disabled={pSaving || !pDraft.week_start || !pDraft.product}>
               {pSaving ? 'Saving…' : (pEditing ? 'Save' : 'Add entry')}
             </Button>
           </Modal.Footer>
         </Form>
       </Modal>
     </>
+  );
+}
+
+/** Searchable product picker — select from the brand's catalogue (name + SKU). */
+function ProductPicker({ products, value, onPick }: {
+  products: BrandProduct[];
+  value: { product: string; product_id: string };
+  onPick: (name: string, productId: string) => void;
+}) {
+  const [q, setQ] = useState('');
+  const ql = q.trim().toLowerCase();
+  const filtered = ql
+    ? products.filter(p => `${p.name} ${p.external_product_id ?? ''}`.toLowerCase().includes(ql))
+    : products;
+  return (
+    <Dropdown autoClose="outside" onToggle={(open) => { if (open) setQ(''); }}>
+      <Dropdown.Toggle as="div" role="button" tabIndex={0}
+        className="form-control d-flex justify-content-between align-items-center"
+        style={{ cursor: 'pointer', minHeight: 38 }}>
+        <span className={value.product ? 'text-truncate' : 'text-muted'}>
+          {value.product || 'Select a product…'}
+          {value.product && value.product_id && <small className="text-muted ms-2">{value.product_id}</small>}
+        </span>
+        <i className="bi bi-chevron-down text-muted ms-2" />
+      </Dropdown.Toggle>
+      <Dropdown.Menu style={{ width: '100%', maxHeight: 320, overflowY: 'auto' }}>
+        <div className="px-2 pb-2" onClick={e => e.stopPropagation()}>
+          <Form.Control size="sm" autoFocus placeholder="Search products…"
+            value={q} onChange={e => setQ(e.target.value)} />
+        </div>
+        {products.length === 0 ? (
+          <Dropdown.ItemText className="text-muted small">No products yet — add them on the Products tab.</Dropdown.ItemText>
+        ) : filtered.length === 0 ? (
+          <Dropdown.ItemText className="text-muted small">No match.</Dropdown.ItemText>
+        ) : filtered.map(p => (
+          <Dropdown.Item key={p.id} active={value.product === p.name}
+            onClick={() => onPick(p.name, p.external_product_id ?? '')}>
+            <div className="fw-semibold">{p.name}</div>
+            {p.external_product_id && <small className="text-muted">{p.external_product_id}</small>}
+          </Dropdown.Item>
+        ))}
+      </Dropdown.Menu>
+    </Dropdown>
   );
 }
 
