@@ -96,12 +96,22 @@ export default function TeamLeads() {
   const totalAssignments = leads.reduce((s, l) => s + (l.brand_ids?.length ?? 0), 0);
 
   // One brand → one Team Lead: map each assigned brand to its owning lead so the
-  // picker can disable brands already held by a different lead.
+  // picker can flag brands already held by a different lead.
   const brandOwner = useMemo(() => {
     const m = new Map<string, { id: string; name: string }>();
     leads.forEach(l => (l.brand_ids ?? []).forEach(bid => m.set(bid, { id: l.id, name: l.full_name || l.email })));
     return m;
   }, [leads]);
+
+  // Brands the current selection will pull off another team lead (so we can warn Bob
+  // and free them on save — one brand → one Team Lead, reassigned in place).
+  const movingBrands = useMemo(
+    () => form.brand_ids
+      .map(id => ({ id, name: brands.find(b => b.id === id)?.name ?? '?', owner: brandOwner.get(id) }))
+      .filter((x): x is { id: string; name: string; owner: { id: string; name: string } } =>
+        !!x.owner && x.owner.id !== editLead?.id),
+    [form.brand_ids, brands, brandOwner, editLead],
+  );
 
   // APCs that will be moved off another lead's team if this is saved.
   const movingApcs = useMemo(
@@ -144,6 +154,17 @@ export default function TeamLeads() {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setSaving(true); setErr(null);
+    // Brands pulled off another team lead by this save: free their old grant (and detach
+    // them from any APC no longer in the brand's team) before re-granting, so one
+    // brand → one Team Lead stays intact and reassignment happens in place.
+    const movedBrandIds = movingBrands.map(b => b.id);
+    const freeMovedBrands = async () => {
+      if (movedBrandIds.length === 0) return;
+      const { error: tErr } = await supabase.from('team_lead_brands').delete().in('brand_id', movedBrandIds);
+      if (tErr) throw tErr;
+      const { error: aErr } = await supabase.from('apc_brands').delete().in('brand_id', movedBrandIds);
+      if (aErr) throw aErr;
+    };
     try {
       let leadId: string;
       if (editLead) {
@@ -152,6 +173,7 @@ export default function TeamLeads() {
         if (pErr) throw pErr;
         const { error: dErr } = await supabase.from('team_lead_brands').delete().eq('team_lead_id', editLead.id);
         if (dErr) throw dErr;
+        await freeMovedBrands();
         if (form.brand_ids.length > 0) {
           const rows = form.brand_ids.map(bid => ({ team_lead_id: editLead.id, brand_id: bid }));
           const { error: iErr } = await supabase.from('team_lead_brands').insert(rows);
@@ -159,6 +181,7 @@ export default function TeamLeads() {
         }
         leadId = editLead.id;
       } else {
+        await freeMovedBrands();
         const { data: { session } } = await supabase.auth.getSession();
         const { data, error } = await supabase.functions.invoke('create-team-lead', {
           body: {
@@ -307,6 +330,15 @@ export default function TeamLeads() {
                 Team Lead will be notified.
               </Alert>
             )}
+            {movingBrands.length > 0 && (
+              <Alert variant="warning" className="py-2">
+                <i className="bi bi-shop me-1" />
+                <strong>{movingBrands.length} brand{movingBrands.length === 1 ? '' : 's'} will be reassigned</strong> here
+                from {Array.from(new Set(movingBrands.map(b => b.owner.name))).join(', ')}:{' '}
+                {movingBrands.map(b => b.name).join(', ')}. The previous Team Lead loses access, and any APC under them
+                holding {movingBrands.length === 1 ? 'it' : 'them'} is detached.
+              </Alert>
+            )}
             <Form.Group className="mb-3">
               <Form.Label>Full name</Form.Label>
               <Form.Control value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} />
@@ -340,18 +372,22 @@ export default function TeamLeads() {
                       {brands.map(b => {
                         const owner = brandOwner.get(b.id);
                         const takenByOther = owner && owner.id !== editLead?.id;
+                        const checked = form.brand_ids.includes(b.id);
                         return (
                           <Form.Check
                             key={b.id}
                             type="checkbox"
                             id={`tlb-${b.id}`}
-                            disabled={!!takenByOther}
-                            checked={form.brand_ids.includes(b.id)}
+                            checked={checked}
                             onChange={() => toggleBrand(b.id)}
                             label={
                               <span>
                                 {b.name}
-                                {takenByOther && <span className="text-muted small ms-1">· on {owner!.name}</span>}
+                                {takenByOther && (
+                                  <span className={`small ms-1 ${checked ? 'text-warning' : 'text-muted'}`}>
+                                    · {checked ? 'moving from' : 'on'} {owner!.name}
+                                  </span>
+                                )}
                               </span>
                             }
                           />
