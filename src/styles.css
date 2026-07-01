@@ -396,6 +396,7 @@ a:hover { color: var(--ac-primary-2); }
 /* ---------- Modern list rows (APCs / Clients / similar) ---------- */
 .ac-list { display: flex; flex-direction: column; gap: 10px; }
 .ac-list-row {
+  position: relative;
   display: flex; align-items: center; gap: 16px;
   padding: 14px 16px;
   background: #fff;
@@ -2344,6 +2345,14 @@ input[type="number"] {
   padding: 14px;
 }
 .ac-tasks-main { flex: 1; min-width: 0; }
+/* Folder / label lists scroll once they grow past a set height */
+.ac-rail-scroll {
+  max-height: 240px; overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: var(--ac-line-l) transparent;
+}
+.ac-rail-scroll.labels { max-height: 160px; padding-right: 2px; }
+.ac-rail-scroll::-webkit-scrollbar { width: 6px; }
+.ac-rail-scroll::-webkit-scrollbar-thumb { background: var(--ac-line-l); border-radius: 999px; }
 .ac-rail-head {
   display: flex; align-items: center; justify-content: space-between;
   font-family: var(--ac-font-heading); font-weight: 700;
@@ -2522,6 +2531,70 @@ input[type="number"] {
 .ac-ack.onit { background: rgba(245,158,11,.14); color: #b45309; }
 .ac-ack.done { background: rgba(16,185,129,.14); color: #059669; }
 .ac-ack.pending { background: rgba(20,22,32,.06); color: var(--ac-text-muted); }
+
+/* ---- Task status (Not started / In progress / Completed) ---- */
+/* Shared colour classes for pills, dropdown items, segmented + filter buttons */
+.ac-status-pill {
+  display: inline-flex; align-items: center; border: 1px solid transparent;
+  padding: 2px 9px; border-radius: var(--ac-radius-pill);
+  font-size: .72rem; font-weight: 700; white-space: nowrap; cursor: default;
+  background: rgba(100,116,139,.12); color: #475569;
+}
+.ac-status-pill.sm { font-size: .68rem; padding: 1px 8px; }
+.ac-status-pill.todo  { background: rgba(100,116,139,.12); color: #475569; }
+.ac-status-pill.doing { background: rgba(59,130,246,.14); color: #2563eb; }
+.ac-status-pill.done  { background: rgba(16,185,129,.14); color: #059669; }
+.ac-status-ico.todo { color: #64748b; }
+.ac-status-ico.doing { color: #3b82f6; }
+.ac-status-ico.done { color: #10b981; }
+
+/* Status pill acting as a dropdown toggle */
+.ac-status-dd { display: inline-block; }
+.ac-status-dd .dropdown-toggle { cursor: pointer; }
+.ac-status-dd .dropdown-toggle::after { display: none; } /* hide default caret */
+.ac-status-dd .ac-status-pill:hover { filter: brightness(.97); }
+.ac-status-caret { font-size: .6rem; opacity: .7; }
+.ac-status-dd .dropdown-menu { z-index: 1200; box-shadow: 0 12px 32px rgba(20,22,32,.18); }
+.ac-status-dd .dropdown-item.active,
+.ac-status-dd .dropdown-item:active { background: var(--ac-primary-soft); color: var(--ac-text-dark); }
+/* A row's :hover transform makes a stacking context that would paint the open
+   menu behind the rows below — lift the row while its status dropdown is open. */
+.ac-list-row:has(.ac-status-dd.show) { z-index: 30; }
+
+/* Segmented status control (task detail footer) */
+.ac-status-seg { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.ac-status-seg-opt {
+  display: inline-flex; align-items: center; border: 1.5px solid var(--ac-line-l);
+  background: #fff; color: var(--ac-text-muted);
+  border-radius: var(--ac-radius-pill); padding: 3px 10px;
+  font-size: .74rem; font-weight: 700; cursor: pointer;
+  transition: border-color .12s ease, background .12s ease, color .12s ease;
+}
+.ac-status-seg-opt:hover { border-color: var(--ac-text-muted); }
+.ac-status-seg-opt.todo.on  { background: rgba(100,116,139,.14); border-color: #64748b; color: #475569; }
+.ac-status-seg-opt.doing.on { background: rgba(59,130,246,.12); border-color: #3b82f6; color: #2563eb; }
+.ac-status-seg-opt.done.on  { background: rgba(16,185,129,.12); border-color: #10b981; color: #059669; }
+
+/* Status filter row (top of task list, all users) */
+.ac-status-filter { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+.ac-status-filter-opt {
+  display: inline-flex; align-items: center; border: 1px solid var(--ac-line-l);
+  background: #fff; color: var(--ac-text-dark);
+  border-radius: var(--ac-radius-pill); padding: 5px 12px;
+  font-size: .8rem; font-weight: 600; cursor: pointer;
+  transition: border-color .12s ease, background .12s ease, color .12s ease;
+}
+.ac-status-filter-opt:hover { border-color: var(--ac-text-muted); }
+.ac-status-filter-n {
+  margin-left: 6px; font-size: .7rem; font-weight: 800;
+  background: rgba(20,22,32,.06); border-radius: var(--ac-radius-pill); padding: 0 7px;
+}
+.ac-status-filter-opt.on { color: #fff; border-color: transparent; }
+.ac-status-filter-opt.on .ac-status-filter-n { background: rgba(255,255,255,.28); color: #fff; }
+.ac-status-filter-opt.on:not(.todo):not(.doing):not(.done) { background: var(--ac-primary); } /* All */
+.ac-status-filter-opt.todo.on  { background: #64748b; }
+.ac-status-filter-opt.doing.on { background: #3b82f6; }
+.ac-status-filter-opt.done.on  { background: #10b981; }
 
 /* Seen / read receipt tick (grey = delivered, blue = seen) */
 .ac-seen {
@@ -2724,6 +2797,27 @@ input[type="number"] {
 .ac-prio-pill.prio-high { background: rgba(239,68,68,.14); color: #dc2626; }
 .ac-prio-pill.prio-mid  { background: rgba(245,158,11,.16); color: #b45309; }
 .ac-prio-pill.prio-low  { background: rgba(59,130,246,.14); color: #2563eb; }
+
+/* Priority segmented picker (New Task modal) — three direct compact options */
+.ac-prio-choice { display: inline-flex; gap: 6px; }
+.ac-prio-opt {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  border: 1.5px solid var(--ac-line-l); background: #fff; color: var(--ac-text-muted);
+  border-radius: var(--ac-radius-pill); padding: 3px 10px;
+  font-size: .72rem; font-weight: 700; cursor: pointer; line-height: 1.4;
+  transition: border-color .12s ease, background .12s ease, color .12s ease;
+}
+.ac-prio-opt i { font-size: .68rem; opacity: .85; }
+.ac-prio-opt:hover { border-color: var(--ac-text-muted); }
+.ac-prio-opt.prio-high.on { background: rgba(239,68,68,.12); border-color: #ef4444; color: #dc2626; }
+.ac-prio-opt.prio-mid.on  { background: rgba(245,158,11,.14); border-color: #f59e0b; color: #b45309; }
+.ac-prio-opt.prio-low.on  { background: rgba(59,130,246,.12); border-color: #3b82f6; color: #2563eb; }
+
+/* Whole-modal tint that follows the chosen priority (instant) */
+.ac-task-modal .modal-content { transition: background-color .18s ease; }
+.ac-task-modal.ac-task--high .modal-content { background: #fff5f5; }
+.ac-task-modal.ac-task--mid  .modal-content { background: #fffbf2; }
+.ac-task-modal.ac-task--low  .modal-content { background: #f4f8ff; }
 
 /* Label chip (also used as toggle button) */
 .ac-label-chip {

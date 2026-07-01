@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, FormEvent } from 'react';
-import { Button, Card, Modal, Form, Spinner, Alert, Badge } from 'react-bootstrap';
+import { Button, Card, Modal, Form, Spinner, Alert, Badge, Dropdown } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/AuthContext';
 import Avatar from '../components/Avatar';
 
 type Priority = 'low' | 'mid' | 'high';
 type Repeat = 'none' | 'daily' | 'weekly' | 'monthly' | 'every_n_days';
+type Status = 'open' | 'in_progress' | 'done';
 
 interface Task {
   id: string;
@@ -14,7 +15,7 @@ interface Task {
   brand_id: string | null;
   title: string;
   description: string | null;
-  status: 'open' | 'done';
+  status: Status;
   priority: Priority;
   folder_id: string | null;
   label_ids: string[];
@@ -68,6 +69,12 @@ const PRIORITIES: { value: Priority; label: string }[] = [
   { value: 'mid', label: 'Medium' },
   { value: 'high', label: 'High' },
 ];
+const STATUS_ORDER: Status[] = ['open', 'in_progress', 'done'];
+const STATUS_META: Record<Status, { label: string; icon: string; cls: string }> = {
+  open:        { label: 'Not started', icon: 'bi-circle', cls: 'todo' },
+  in_progress: { label: 'In progress', icon: 'bi-hourglass-split', cls: 'doing' },
+  done:        { label: 'Completed', icon: 'bi-check2-circle', cls: 'done' },
+};
 const ORG_COLORS = ['#ef4444', '#f59e0b', '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#64748b'];
 
 // Task assignment. A Team Lead (or Bob) assigns tasks to APCs, sets a priority,
@@ -100,6 +107,7 @@ export default function Tasks() {
   // Filters (left rail)
   const [folderFilter, setFolderFilter] = useState<string>('all'); // 'all' | 'none' | folderId
   const [labelFilter, setLabelFilter] = useState<Set<string>>(new Set());
+  const [statusFilter, setStatusFilter] = useState<'all' | Status>('all'); // available to all users
 
   const [show, setShow] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -185,7 +193,7 @@ export default function Tasks() {
     // eslint-disable-next-line
   }, [myId]);
 
-  // Show the Team Lead rail's up/down arrows only when its avatars overflow.
+  // Show the right rail's up/down arrows only when its avatars overflow.
   useEffect(() => {
     const el = tlRailRef.current;
     if (!el) { setTlOverflow(false); return; }
@@ -194,11 +202,17 @@ export default function Tasks() {
     const ro = new ResizeObserver(check);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [teamLeads.length, loading]);
+  }, [teamLeads.length, myApcs.length, loading]);
 
   const brandMap = useMemo(() => new Map(brands.map(b => [b.id, b.name])), [brands]);
+  // Maps keep the FULL set so a task's folder/label chip renders even when the
+  // owner is someone else (e.g. an APC viewing a task their Team Lead filed).
   const folderMap = useMemo(() => new Map(folders.map(f => [f.id, f])), [folders]);
   const labelMap = useMemo(() => new Map(labels.map(l => [l.id, l])), [labels]);
+  // …but the rail / create form / organize modal only show what I OWN (Bob = all),
+  // since folders & labels are each assigner's own private organisation.
+  const myFolders = useMemo(() => folders.filter(f => isBob || f.owner_id === myId), [folders, isBob, myId]);
+  const myLabels = useMemo(() => labels.filter(l => isBob || l.owner_id === myId), [labels, isBob, myId]);
   // Every person we might need a name for (assignees, creators, brand owners).
   const allPeople = useMemo(() => {
     const m = new Map<string, string>();
@@ -218,8 +232,9 @@ export default function Tasks() {
     return id ? (allPeople.get(id) ?? null) : null;
   };
 
-  // Apply folder + label + text filters before splitting open/done.
-  const visibleTasks = useMemo(() => {
+  // Apply folder + label + text filters (but NOT the status filter yet — we
+  // need this set to compute the per-status counts on the filter control).
+  const scopedTasks = useMemo(() => {
     const q = query.trim().toLowerCase();
     return tasks.filter(t => {
       if (folderFilter === 'none' && t.folder_id) return false;
@@ -234,7 +249,21 @@ export default function Tasks() {
     });
   }, [tasks, folderFilter, labelFilter, query, brandMap]);
 
-  const openTasks = visibleTasks.filter(t => t.status === 'open');
+  // Counts for the status filter pills (over the folder/label/search scope).
+  const statusCounts = useMemo(() => ({
+    all: scopedTasks.length,
+    open: scopedTasks.filter(t => t.status === 'open').length,
+    in_progress: scopedTasks.filter(t => t.status === 'in_progress').length,
+    done: scopedTasks.filter(t => t.status === 'done').length,
+  }), [scopedTasks]);
+
+  const visibleTasks = useMemo(
+    () => statusFilter === 'all' ? scopedTasks : scopedTasks.filter(t => t.status === statusFilter),
+    [scopedTasks, statusFilter],
+  );
+
+  // "Active" = anything not completed (not started + in progress); "Done" = completed.
+  const openTasks = visibleTasks.filter(t => t.status !== 'done');
   const doneTasks = visibleTasks.filter(t => t.status === 'done');
 
   // Collapse rows sharing a group_id into one card (assigner view only — an APC
@@ -254,8 +283,8 @@ export default function Tasks() {
       return { key, tasks: ts, isGroup: ts.length > 1 };
     });
   }, [visibleTasks, canAssign]);
-  // A group is "open" while any member is open; "done" only when all are done.
-  const openGroups = groups.filter(g => g.tasks.some(t => t.status === 'open'));
+  // A group is "active" while any member isn't completed; "done" only when all are.
+  const openGroups = groups.filter(g => g.tasks.some(t => t.status !== 'done'));
   const doneGroups = groups.filter(g => g.tasks.every(t => t.status === 'done'));
 
   // Ordered list the detail popup arrows step through (open first, then done).
@@ -269,9 +298,9 @@ export default function Tasks() {
     // eslint-disable-next-line
   }, [detailId]);
 
-  // Open-task counts for the rail badges + header stats.
+  // Active-task counts (not completed) for the rail badges + header stats.
   const stats = useMemo(() => {
-    const open = tasks.filter(t => t.status === 'open');
+    const open = tasks.filter(t => t.status !== 'done');
     const today = new Date().toISOString().slice(0, 10);
     const folder = new Map<string, number>();
     const label = new Map<string, number>();
@@ -426,12 +455,13 @@ export default function Tasks() {
     }
   };
 
-  const setDone = async (t: Task, done: boolean) => {
+  // Move a task between the three states. completed_at only set when completed.
+  const setStatus = async (t: Task, status: Status) => {
+    if (t.status === status) return;
     const prev = tasks;
-    setTasks(tasks.map(x => x.id === t.id ? { ...x, status: done ? 'done' : 'open' } : x));
-    const { error } = await supabase.from('tasks')
-      .update({ status: done ? 'done' : 'open', completed_at: done ? new Date().toISOString() : null })
-      .eq('id', t.id);
+    const completed_at = status === 'done' ? new Date().toISOString() : null;
+    setTasks(tasks.map(x => x.id === t.id ? { ...x, status, completed_at } : x));
+    const { error } = await supabase.from('tasks').update({ status, completed_at }).eq('id', t.id);
     if (error) { setTasks(prev); alert(error.message); }
   };
 
@@ -550,8 +580,31 @@ export default function Tasks() {
     setLabelFilter(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   };
 
+  // Status control: a coloured pill that (for anyone allowed to update) opens a
+  // dropdown to switch between Not started / In progress / Completed. Otherwise
+  // it's a read-only pill. `size` "sm" is used inside grouped per-person rows.
+  const StatusControl = ({ t, canUpdate, size }: { t: Task; canUpdate: boolean; size?: 'sm' }) => {
+    const m = STATUS_META[t.status];
+    const pill = <><i className={`bi ${m.icon} me-1`} />{m.label}</>;
+    if (!canUpdate) return <span className={`ac-status-pill ${m.cls} ${size === 'sm' ? 'sm' : ''}`}>{pill}</span>;
+    return (
+      <Dropdown className="ac-status-dd" onClick={e => e.stopPropagation()}>
+        <Dropdown.Toggle as="button" type="button" className={`ac-status-pill ${m.cls} ${size === 'sm' ? 'sm' : ''}`}>
+          {pill}<i className="bi bi-chevron-down ms-1 ac-status-caret" />
+        </Dropdown.Toggle>
+        <Dropdown.Menu align="end">
+          {STATUS_ORDER.map(s => (
+            <Dropdown.Item key={s} active={t.status === s} onClick={() => setStatus(t, s)}>
+              <i className={`bi ${STATUS_META[s].icon} me-2 ac-status-ico ${STATUS_META[s].cls}`} />{STATUS_META[s].label}
+            </Dropdown.Item>
+          ))}
+        </Dropdown.Menu>
+      </Dropdown>
+    );
+  };
+
   const TaskCard = ({ t }: { t: Task }) => {
-    const overdue = t.status === 'open' && t.due_date && t.due_date < new Date().toISOString().slice(0, 10);
+    const overdue = t.status !== 'done' && t.due_date && t.due_date < new Date().toISOString().slice(0, 10);
     const canComplete = t.assignee_id === myId || t.created_by === myId || isBob;
     const canDelete = t.created_by === myId || isBob;
     const canEditTask = canAssign && (t.created_by === myId || isBob);
@@ -568,9 +621,8 @@ export default function Tasks() {
           <div className="ac-row-name d-flex align-items-center gap-2 flex-wrap">
             <span className={t.status === 'done' ? 'text-decoration-line-through text-muted' : ''}>{t.title}</span>
             <span className={`ac-prio-pill prio-${t.priority}`}>{t.priority}</span>
-            {t.status === 'done'
-              ? <Badge bg="success"><i className="bi bi-check2 me-1" />Done</Badge>
-              : overdue && <Badge bg="danger">Overdue</Badge>}
+            <StatusControl t={t} canUpdate={canComplete} />
+            {overdue && <Badge bg="danger">Overdue</Badge>}
           </div>
           {t.description && <div className="ac-row-sub ac-clamp1">{t.description}</div>}
           <div className="ac-row-sub d-flex align-items-center flex-wrap gap-2 mt-1">
@@ -588,7 +640,7 @@ export default function Tasks() {
           </div>
         </div>
         <div className="ac-row-actions">
-          {canRemind && t.status === 'open' && (
+          {canRemind && t.status !== 'done' && (
             <button className={`ac-icon-btn remind ${reminded.has(t.id) ? 'sent' : ''}`}
               title={reminded.has(t.id) ? 'Reminder sent' : 'Send blocking reminder'}
               aria-label={reminded.has(t.id) ? 'Reminder sent' : 'Send blocking reminder to assignee'}
@@ -601,13 +653,6 @@ export default function Tasks() {
             <button className="ac-icon-btn" title="Edit task" aria-label="Edit task"
               onClick={() => openEdit(t)}>
               <i className="bi bi-pencil" />
-            </button>
-          )}
-          {canComplete && (
-            <button className="ac-icon-btn" title={t.status === 'done' ? 'Reopen' : 'Mark done'}
-              aria-label={t.status === 'done' ? 'Reopen task' : 'Mark task done'}
-              onClick={() => setDone(t, t.status !== 'done')}>
-              <i className={`bi ${t.status === 'done' ? 'bi-arrow-counterclockwise' : 'bi-check2-circle'}`} />
             </button>
           )}
           {canDelete && (
@@ -629,7 +674,7 @@ export default function Tasks() {
     const doneCount = g.tasks.filter(t => t.status === 'done').length;
     const total = g.tasks.length;
     const allDone = doneCount === total;
-    const anyOverdue = g.tasks.some(t => t.status === 'open' && t.due_date && t.due_date < today);
+    const anyOverdue = g.tasks.some(t => t.status !== 'done' && t.due_date && t.due_date < today);
     const anyOpen = doneCount < total;
     const seenCount = g.tasks.filter(t => t.seen_at).length;
     const expanded = expandedGroups.has(g.key);
@@ -686,11 +731,8 @@ export default function Tasks() {
                   <div key={t.id} className="ac-group-person">
                     <Avatar name={personName(t.assignee_id)} size="sm" />
                     <span className="ac-group-person-name">{personName(t.assignee_id)}{seenTick(t)}</span>
-                    {done
-                      ? <span className="ac-group-status done"><i className="bi bi-check2-circle me-1" />Done</span>
-                      : overdue
-                        ? <span className="ac-group-status over"><i className="bi bi-exclamation-triangle me-1" />Overdue</span>
-                        : <span className="ac-group-status open">Open</span>}
+                    <StatusControl t={t} canUpdate={canManage} size="sm" />
+                    {overdue && <span className="ac-group-status over"><i className="bi bi-exclamation-triangle me-1" />Overdue</span>}
                     {ackChip(t.id)}
                     <div className="ac-group-person-actions">
                       {canRemind && !done && (
@@ -698,12 +740,6 @@ export default function Tasks() {
                           title={reminded.has(t.id) ? 'Reminder sent' : 'Remind this person'}
                           disabled={reminded.has(t.id)} onClick={() => sendReminder(t)}>
                           <i className={`bi ${reminded.has(t.id) ? 'bi-check2-circle' : 'bi-alarm'}`} />
-                        </button>
-                      )}
-                      {canManage && (
-                        <button className="ac-icon-btn sm" title={done ? 'Reopen' : 'Mark done'}
-                          onClick={() => setDone(t, !done)}>
-                          <i className={`bi ${done ? 'bi-arrow-counterclockwise' : 'bi-check2-circle'}`} />
                         </button>
                       )}
                       {canManage && (
@@ -826,23 +862,26 @@ export default function Tasks() {
               <i className="bi bi-collection" /><span className="ac-rail-label">All tasks</span>
               <span className="ac-rail-count">{stats.total}</span>
             </button>
-            {folders.map(f => (
-              <button key={f.id} className={`ac-rail-item ${folderFilter === f.id ? 'active' : ''}`} onClick={() => setFolderFilter(f.id)}>
-                <i className="bi bi-folder-fill" style={{ color: f.color ?? undefined }} />
-                <span className="ac-rail-label">{f.name}</span>
-                {(stats.folder.get(f.id) ?? 0) > 0 && <span className="ac-rail-count">{stats.folder.get(f.id)}</span>}
-              </button>
-            ))}
+            {/* Folder list scrolls once it grows past a few rows. */}
+            <div className="ac-rail-scroll">
+              {myFolders.map(f => (
+                <button key={f.id} className={`ac-rail-item ${folderFilter === f.id ? 'active' : ''}`} onClick={() => setFolderFilter(f.id)}>
+                  <i className="bi bi-folder-fill" style={{ color: f.color ?? undefined }} />
+                  <span className="ac-rail-label">{f.name}</span>
+                  {(stats.folder.get(f.id) ?? 0) > 0 && <span className="ac-rail-count">{stats.folder.get(f.id)}</span>}
+                </button>
+              ))}
+            </div>
             <button className={`ac-rail-item ${folderFilter === 'none' ? 'active' : ''}`} onClick={() => setFolderFilter('none')}>
               <i className="bi bi-folder" /><span className="ac-rail-label">No folder</span>
               {stats.noFolder > 0 && <span className="ac-rail-count">{stats.noFolder}</span>}
             </button>
 
-            {labels.length > 0 && (
+            {myLabels.length > 0 && (
               <>
                 <div className="ac-rail-head mt-3"><span>Labels</span></div>
-                <div className="d-flex flex-wrap gap-1">
-                  {labels.map(l => (
+                <div className="d-flex flex-wrap gap-1 ac-rail-scroll labels">
+                  {myLabels.map(l => (
                     <button key={l.id}
                       className={`ac-label-chip btn-reset ${labelFilter.has(l.id) ? 'on' : ''}`}
                       aria-pressed={labelFilter.has(l.id)}
@@ -875,6 +914,20 @@ export default function Tasks() {
 
           {/* Right pane: task list */}
           <div className="ac-tasks-main">
+            {/* Status filter — available to every user */}
+            <div className="ac-status-filter" role="group" aria-label="Filter by status">
+              <button className={`ac-status-filter-opt ${statusFilter === 'all' ? 'on' : ''}`} onClick={() => setStatusFilter('all')}>
+                All <span className="ac-status-filter-n">{statusCounts.all}</span>
+              </button>
+              {STATUS_ORDER.map(s => (
+                <button key={s}
+                  className={`ac-status-filter-opt ${STATUS_META[s].cls} ${statusFilter === s ? 'on' : ''}`}
+                  onClick={() => setStatusFilter(s)}>
+                  <i className={`bi ${STATUS_META[s].icon} me-1`} />{STATUS_META[s].label}
+                  <span className="ac-status-filter-n">{statusCounts[s]}</span>
+                </button>
+              ))}
+            </div>
             {visibleTasks.length === 0 ? (
               <Card>
                 <Card.Body>
@@ -912,16 +965,16 @@ export default function Tasks() {
             )}
           </div>
 
-          {/* Right rail: Team Leads (Bob only) — click an avatar to assign a task.
-              Native scrollbar hidden; up/down arrows appear when the list overflows. */}
-          {isBob && teamLeads.length > 0 && (
-            <aside className="ac-tl-rail" aria-label="Assign a task to a Team Lead">
-              <div className="ac-tl-rail-head">Team Leads</div>
+          {/* Right rail: Team Leads + APCs (Bob only) — click an avatar to assign
+              a task. Native scrollbar hidden; up/down arrows appear on overflow. */}
+          {isBob && (teamLeads.length > 0 || myApcs.length > 0) && (
+            <aside className="ac-tl-rail" aria-label="Assign a task to a Team Lead or APC">
               {tlOverflow && (
-                <button type="button" className="ac-tl-arrow" aria-label="Scroll team leads up"
+                <button type="button" className="ac-tl-arrow" aria-label="Scroll up"
                   onClick={() => scrollTlRail(-1)}><i className="bi bi-chevron-up" /></button>
               )}
               <div className="ac-tl-track" ref={tlRailRef}>
+                {teamLeads.length > 0 && <div className="ac-tl-rail-head">Team Leads</div>}
                 {teamLeads.map(tl => {
                   const name = tl.full_name || tl.email;
                   const open = tasks.filter(t => t.assignee_id === tl.id && t.status === 'open').length;
@@ -935,9 +988,23 @@ export default function Tasks() {
                     </button>
                   );
                 })}
+                {myApcs.length > 0 && <div className="ac-tl-rail-head mt-2">APCs</div>}
+                {myApcs.map(apc => {
+                  const name = apc.full_name || apc.email;
+                  const open = tasks.filter(t => t.assignee_id === apc.id && t.status === 'open').length;
+                  return (
+                    <button key={apc.id} type="button" className="ac-tl-avatar-btn"
+                      onClick={() => openAdd(apc.id)}
+                      aria-label={`Assign a new task to ${name}`}>
+                      <Avatar name={name} size="lg" />
+                      {open > 0 && <span className="ac-tl-badge">{open}</span>}
+                      <span className="ac-tl-tip">Assign task to {name}</span>
+                    </button>
+                  );
+                })}
               </div>
               {tlOverflow && (
-                <button type="button" className="ac-tl-arrow" aria-label="Scroll team leads down"
+                <button type="button" className="ac-tl-arrow" aria-label="Scroll down"
                   onClick={() => scrollTlRail(1)}><i className="bi bi-chevron-down" /></button>
               )}
             </aside>
@@ -946,7 +1013,8 @@ export default function Tasks() {
       )}
 
       {/* New task modal */}
-      <Modal show={show} onHide={() => setShow(false)} centered>
+      <Modal show={show} onHide={() => setShow(false)} centered
+        dialogClassName={`ac-task-modal ac-task--${form.priority}`}>
         <Form onSubmit={submit}>
           <Modal.Header closeButton>
             <Modal.Title>{editingId || editingGroupId ? 'Edit Task' : 'New Task'}</Modal.Title>
@@ -996,23 +1064,30 @@ export default function Tasks() {
             <div className="d-flex gap-3 flex-wrap mb-3">
               <Form.Group className="flex-grow-1">
                 <Form.Label>Priority</Form.Label>
-                <Form.Select value={form.priority} onChange={e => setForm({ ...form, priority: e.target.value as Priority })}>
-                  {PRIORITIES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-                </Form.Select>
+                <div className="ac-prio-choice" role="group" aria-label="Priority">
+                  {PRIORITIES.map(p => (
+                    <button type="button" key={p.value}
+                      className={`ac-prio-opt prio-${p.value} ${form.priority === p.value ? 'on' : ''}`}
+                      aria-pressed={form.priority === p.value}
+                      onClick={() => setForm({ ...form, priority: p.value })}>
+                      <i className="bi bi-flag-fill" />{p.label}
+                    </button>
+                  ))}
+                </div>
               </Form.Group>
               <Form.Group className="flex-grow-1">
                 <Form.Label>Folder <span className="text-muted">(optional)</span></Form.Label>
                 <Form.Select value={form.folder_id} onChange={e => setForm({ ...form, folder_id: e.target.value })}>
                   <option value="">No folder</option>
-                  {folders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                  {myFolders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
                 </Form.Select>
               </Form.Group>
             </div>
-            {labels.length > 0 && (
+            {myLabels.length > 0 && (
               <Form.Group className="mb-3">
                 <Form.Label>Labels <span className="text-muted">(optional)</span></Form.Label>
                 <div className="d-flex flex-wrap gap-1">
-                  {labels.map(l => (
+                  {myLabels.map(l => (
                     <button type="button" key={l.id}
                       className={`ac-label-chip btn-reset ${form.label_ids.includes(l.id) ? 'on' : ''}`}
                       style={{ background: (l.color ?? '#64748b') + (form.label_ids.includes(l.id) ? '' : '22'), color: form.label_ids.includes(l.id) ? '#fff' : (l.color ?? '#64748b') }}
@@ -1118,7 +1193,8 @@ export default function Tasks() {
         {detailTask && (() => {
           const t = detailTask;
           const today = new Date().toISOString().slice(0, 10);
-          const overdue = t.status === 'open' && t.due_date && t.due_date < today;
+          const overdue = t.status !== 'done' && t.due_date && t.due_date < today;
+          const sm = STATUS_META[t.status];
           const canComplete = t.assignee_id === myId || t.created_by === myId || isBob;
           const canDelete = t.created_by === myId || isBob;
           const canEditTask = canAssign && (t.created_by === myId || isBob);
@@ -1142,9 +1218,8 @@ export default function Tasks() {
                 <div className="ac-task-detail-title">
                   <span className={`ac-prio-pill prio-${t.priority}`}>{t.priority}</span>
                   <h4 className={t.status === 'done' ? 'text-decoration-line-through text-muted mb-0' : 'mb-0'}>{t.title}</h4>
-                  {t.status === 'done'
-                    ? <Badge bg="success"><i className="bi bi-check2 me-1" />Done</Badge>
-                    : overdue && <Badge bg="danger">Overdue</Badge>}
+                  <span className={`ac-status-pill ${sm.cls}`}><i className={`bi ${sm.icon} me-1`} />{sm.label}</span>
+                  {overdue && <Badge bg="danger">Overdue</Badge>}
                 </div>
                 {t.description && <p className="ac-task-detail-desc">{t.description}</p>}
                 <div className="ac-task-detail-meta">
@@ -1189,8 +1264,20 @@ export default function Tasks() {
                 </div>
               </Modal.Body>
               <Modal.Footer className="justify-content-between">
-                <div>
-                  {canRemind && t.status === 'open' && (
+                <div className="d-flex align-items-center gap-2 flex-wrap">
+                  {canComplete && (
+                    <div className="ac-status-seg" role="group" aria-label="Task status">
+                      {STATUS_ORDER.map(s => (
+                        <button type="button" key={s}
+                          className={`ac-status-seg-opt ${STATUS_META[s].cls} ${t.status === s ? 'on' : ''}`}
+                          aria-pressed={t.status === s}
+                          onClick={() => setStatus(t, s)}>
+                          <i className={`bi ${STATUS_META[s].icon} me-1`} />{STATUS_META[s].label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {canRemind && t.status !== 'done' && (
                     <Button variant="outline-warning" size="sm" disabled={reminded.has(t.id)} onClick={() => sendReminder(t)}>
                       <i className={`bi ${reminded.has(t.id) ? 'bi-check2-circle' : 'bi-alarm'} me-1`} />{reminded.has(t.id) ? 'Reminder sent' : 'Remind'}
                     </Button>
@@ -1198,7 +1285,6 @@ export default function Tasks() {
                 </div>
                 <div className="d-flex gap-2">
                   {canEditTask && <Button variant="outline-secondary" size="sm" onClick={() => { setDetailId(null); openEdit(t); }}><i className="bi bi-pencil me-1" />Edit</Button>}
-                  {canComplete && <Button variant={t.status === 'done' ? 'outline-secondary' : 'success'} size="sm" onClick={() => setDone(t, t.status !== 'done')}><i className={`bi ${t.status === 'done' ? 'bi-arrow-counterclockwise' : 'bi-check2-circle'} me-1`} />{t.status === 'done' ? 'Reopen' : 'Mark done'}</Button>}
                   {canDelete && <Button variant="outline-danger" size="sm" onClick={() => { remove(t); setDetailId(null); }}><i className="bi bi-trash me-1" />Delete</Button>}
                 </div>
               </Modal.Footer>
@@ -1211,7 +1297,7 @@ export default function Tasks() {
       {canAssign && (
         <ManageOrgModal
           show={showOrg} onHide={() => setShowOrg(false)}
-          folders={folders} labels={labels} myId={myId} isBob={isBob}
+          folders={myFolders} labels={myLabels} myId={myId} isBob={isBob}
           onChanged={() => load({ silent: true })}
         />
       )}
@@ -1423,17 +1509,25 @@ function ManageOrgModal({ show, onHide, folders, labels, myId, isBob, onChanged 
   const items = tab === 'folders' ? folders : labels;
   const canEdit = (it: OrgItem) => isBob || it.owner_id === myId;
 
+  const kind = tab === 'folders' ? 'folder' : 'label';
+  // A name I already own (case-insensitive), optionally ignoring one row (rename).
+  const isDuplicate = (name: string, ignoreId?: string) =>
+    items.some(it => canEdit(it) && it.id !== ignoreId && it.name.trim().toLowerCase() === name.trim().toLowerCase());
+
   const add = async (e: FormEvent) => {
     e.preventDefault();
-    if (!newName.trim()) return;
+    const name = newName.trim();
+    if (!name) return;
+    if (isDuplicate(name)) { setErr(`A ${kind} named "${name}" already exists.`); return; }
     setBusy(true); setErr(null);
-    const { error } = await supabase.from(table).insert({ name: newName.trim(), color: newColor });
+    const { error } = await supabase.from(table).insert({ name, color: newColor });
     setBusy(false);
     if (error) { setErr(error.message); return; }
     setNewName('');
     onChanged();
   };
   const rename = async (it: OrgItem, name: string) => {
+    if (isDuplicate(name, it.id)) { alert(`A ${kind} named "${name}" already exists.`); onChanged(); return; }
     const { error } = await supabase.from(table).update({ name }).eq('id', it.id);
     if (error) alert(error.message); else onChanged();
   };
