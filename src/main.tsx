@@ -8,6 +8,7 @@ import App from './App';
 import { AuthProvider } from './auth/AuthContext';
 import { NotificationsProvider } from './notifications/NotificationsContext';
 import { registerSW } from './notifications/swSetup';
+import InstallPrompt from './components/InstallPrompt';
 
 registerSW();
 
@@ -17,6 +18,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <AuthProvider>
         <NotificationsProvider>
           <App />
+          <InstallPrompt />
         </NotificationsProvider>
       </AuthProvider>
     </BrowserRouter>

@@ -1,14 +1,58 @@
-// Afflix Core service worker — handles web push (Phase 2).
-// Phase 1 (in-app realtime) works without this file's push handler firing.
+// Afflix Core service worker — PWA app shell (offline + installable) + web push.
+
+const CACHE = 'afflix-core-v1';
+const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
+  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => {}));
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)));
+    await self.clients.claim();
+  })());
 });
 
+// A fetch handler is required for installability, and gives basic offline support.
+self.addEventListener('fetch', (event) => {
+  const req = event.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  // Never intercept cross-origin requests (Supabase API/auth, fonts, etc.).
+  if (url.origin !== self.location.origin) return;
+
+  // SPA navigations: network-first, fall back to the cached shell when offline.
+  if (req.mode === 'navigate') {
+    event.respondWith((async () => {
+      try {
+        return await fetch(req);
+      } catch {
+        const cache = await caches.open(CACHE);
+        return (await cache.match('/index.html')) || (await cache.match('/')) || Response.error();
+      }
+    })());
+    return;
+  }
+
+  // Same-origin static assets (Vite hashes filenames, so cache-first is safe).
+  event.respondWith((async () => {
+    const cache = await caches.open(CACHE);
+    const cached = await cache.match(req);
+    if (cached) return cached;
+    try {
+      const res = await fetch(req);
+      if (res && res.ok && res.type === 'basic') cache.put(req, res.clone());
+      return res;
+    } catch {
+      return cached || Response.error();
+    }
+  })());
+});
+
+// ---- Web push (Phase 2) ----
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch (e) { data = { title: event.data ? event.data.text() : 'Notification' }; }
