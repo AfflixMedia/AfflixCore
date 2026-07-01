@@ -109,6 +109,7 @@ export default function Tasks() {
   const [reminderByTask, setReminderByTask] = useState<Map<string, ReminderLite>>(new Map());
   const [showRecur, setShowRecur] = useState(false);
   const [runHist, setRunHist] = useState<string | null>(null); // recurrence whose history is expanded
+  const [repeatOpen, setRepeatOpen] = useState(false); // Repeat section expanded in the New Task modal
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
@@ -351,7 +352,7 @@ export default function Tasks() {
   }, [tasks]);
 
   const openAdd = (assigneeId?: string) => {
-    setEditingId(null); setEditingGroupId(null);
+    setEditingId(null); setEditingGroupId(null); setRepeatOpen(false);
     setForm({
       assignee_ids: assigneeId ? [assigneeId] : [], brand_id: '', title: '', description: '', due_date: '',
       priority: 'mid',
@@ -366,7 +367,7 @@ export default function Tasks() {
   // Click a brand chip → New Task with the brand + its owner pre-filled.
   // APC owns the brand (apc_brands); Bob also falls back to the brand's Team Lead.
   const openAddForBrand = (brandId: string) => {
-    setEditingId(null); setEditingGroupId(null);
+    setEditingId(null); setEditingGroupId(null); setRepeatOpen(false);
     const apc = brandApc.get(brandId);
     const lead = brandLead.get(brandId);
     const owner = apc ?? (isBob ? lead : undefined);
@@ -1045,114 +1046,144 @@ export default function Tasks() {
       )}
 
       {/* New task modal */}
-      <Modal show={show} onHide={() => setShow(false)} centered
+      <Modal show={show} onHide={() => setShow(false)} centered size="lg"
         dialogClassName={`ac-task-modal ac-task--${form.priority}`}>
         <Form onSubmit={submit}>
           <Modal.Header closeButton>
-            <Modal.Title>{editingId || editingGroupId ? 'Edit Task' : 'New Task'}</Modal.Title>
+            <div className="ac-modal-head">
+              <div className="ac-modal-head-icon"><i className="bi bi-check2-square" /></div>
+              <div>
+                <Modal.Title>{editingId || editingGroupId ? 'Edit Task' : 'New Task'}</Modal.Title>
+                <div className="ac-modal-sub">
+                  {editingGroupId ? 'Update this task for everyone assigned'
+                    : editingId ? 'Update the task details'
+                    : 'Assign work to your team'}
+                </div>
+              </div>
+            </div>
           </Modal.Header>
           <Modal.Body>
             {err && <Alert variant="danger">{err}</Alert>}
-            <Form.Group className="mb-3">
-              <Form.Label>
-                Assign to
-                {!editingId && !editingGroupId && form.assignee_ids.length > 1 && (
-                  <span className="text-muted ms-2 small">{form.assignee_ids.length} selected</span>
-                )}
-              </Form.Label>
-              {editingGroupId ? (
-                // Group edit changes shared fields for a fixed set of people.
-                <>
-                  <div className="ac-assignee-chips">
-                    {form.assignee_ids.map(id => (
-                      <span key={id} className="ac-assignee-chip static">
-                        <Avatar name={personName(id)} src={personAvatar(id)} size="sm" /> {personName(id)}
-                      </span>
+            {/* Two side-by-side columns so the form doesn't need scrolling */}
+            <div className="ac-task-cols">
+              <div className="ac-task-col">
+                <div className="ac-form-eyebrow"><i className="bi bi-people me-1" />Assignment</div>
+                <Form.Group className="mb-3">
+                  <Form.Label>
+                    Assign to
+                    {!editingId && !editingGroupId && form.assignee_ids.length > 1 && (
+                      <span className="text-muted ms-2 small">{form.assignee_ids.length} selected</span>
+                    )}
+                  </Form.Label>
+                  {editingGroupId ? (
+                    // Group edit changes shared fields for a fixed set of people.
+                    <>
+                      <div className="ac-assignee-chips">
+                        {form.assignee_ids.map(id => (
+                          <span key={id} className="ac-assignee-chip static">
+                            <Avatar name={personName(id)} src={personAvatar(id)} size="sm" /> {personName(id)}
+                          </span>
+                        ))}
+                      </div>
+                      <Form.Text className="text-muted">Editing for all {form.assignee_ids.length} people. Changes apply to everyone; each keeps their own status.</Form.Text>
+                    </>
+                  ) : (
+                    <>
+                      <AssigneePicker
+                        apcs={myApcs} leads={teamLeads} isBob={isBob}
+                        multiple={!editingId}
+                        value={form.assignee_ids}
+                        onChange={ids => setForm({ ...form, assignee_ids: ids })}
+                      />
+                      {editingId && <Form.Text className="text-muted">A task has one assignee. To give it to more people, create a new task.</Form.Text>}
+                      {myApcs.length === 0 && teamLeads.length === 0 && <Form.Text className="text-danger d-block">You have no APCs yet.</Form.Text>}
+                    </>
+                  )}
+                </Form.Group>
+                <Form.Group className="mb-3">
+                  <Form.Label>Title</Form.Label>
+                  <Form.Control required value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="e.g. Upload week 3 creator videos" />
+                </Form.Group>
+                <Form.Group className="mb-3">
+                  <Form.Label>Details <span className="text-muted">(optional)</span></Form.Label>
+                  <Form.Control as="textarea" rows={5} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
+                </Form.Group>
+              </div>
+
+              <div className="ac-task-col">
+                <div className="ac-form-eyebrow"><i className="bi bi-sliders me-1" />Details</div>
+                <Form.Group className="mb-3">
+                  <Form.Label>Priority</Form.Label>
+                  <div className="ac-prio-choice" role="group" aria-label="Priority">
+                    {PRIORITIES.map(p => (
+                      <button type="button" key={p.value}
+                        className={`ac-prio-opt prio-${p.value} ${form.priority === p.value ? 'on' : ''}`}
+                        aria-pressed={form.priority === p.value}
+                        onClick={() => setForm({ ...form, priority: p.value })}>
+                        <i className="bi bi-flag-fill" />{p.label}
+                      </button>
                     ))}
                   </div>
-                  <Form.Text className="text-muted">Editing for all {form.assignee_ids.length} people. Changes apply to everyone; each keeps their own status.</Form.Text>
-                </>
-              ) : (
-                <>
-                  <AssigneePicker
-                    apcs={myApcs} leads={teamLeads} isBob={isBob}
-                    multiple={!editingId}
-                    value={form.assignee_ids}
-                    onChange={ids => setForm({ ...form, assignee_ids: ids })}
-                  />
-                  {editingId && <Form.Text className="text-muted">A task has one assignee. To give it to more people, create a new task.</Form.Text>}
-                  {myApcs.length === 0 && teamLeads.length === 0 && <Form.Text className="text-danger d-block">You have no APCs yet.</Form.Text>}
-                </>
-              )}
-            </Form.Group>
-            <Form.Group className="mb-3">
-              <Form.Label>Title</Form.Label>
-              <Form.Control required value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="e.g. Upload week 3 creator videos" />
-            </Form.Group>
-            <Form.Group className="mb-3">
-              <Form.Label>Details <span className="text-muted">(optional)</span></Form.Label>
-              <Form.Control as="textarea" rows={3} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
-            </Form.Group>
-            <div className="d-flex gap-3 flex-wrap mb-3">
-              <Form.Group className="flex-grow-1">
-                <Form.Label>Priority</Form.Label>
-                <div className="ac-prio-choice" role="group" aria-label="Priority">
-                  {PRIORITIES.map(p => (
-                    <button type="button" key={p.value}
-                      className={`ac-prio-opt prio-${p.value} ${form.priority === p.value ? 'on' : ''}`}
-                      aria-pressed={form.priority === p.value}
-                      onClick={() => setForm({ ...form, priority: p.value })}>
-                      <i className="bi bi-flag-fill" />{p.label}
-                    </button>
-                  ))}
-                </div>
-              </Form.Group>
-              <Form.Group className="flex-grow-1">
-                <Form.Label>Folder <span className="text-muted">(optional)</span></Form.Label>
-                <Form.Select value={form.folder_id} onChange={e => setForm({ ...form, folder_id: e.target.value })}>
-                  <option value="">No folder</option>
-                  {myFolders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-                </Form.Select>
-              </Form.Group>
-            </div>
-            {myLabels.length > 0 && (
-              <Form.Group className="mb-3">
-                <Form.Label>Labels <span className="text-muted">(optional)</span></Form.Label>
-                <div className="d-flex flex-wrap gap-1">
-                  {myLabels.map(l => (
-                    <button type="button" key={l.id}
-                      className={`ac-label-chip btn-reset ${form.label_ids.includes(l.id) ? 'on' : ''}`}
-                      style={{ background: (l.color ?? '#64748b') + (form.label_ids.includes(l.id) ? '' : '22'), color: form.label_ids.includes(l.id) ? '#fff' : (l.color ?? '#64748b') }}
-                      onClick={() => toggleFormLabel(l.id)}>
-                      <i className="bi bi-tag-fill me-1" />{l.name}
-                    </button>
-                  ))}
-                </div>
-              </Form.Group>
-            )}
-            <div className="d-flex gap-3 flex-wrap">
-              <Form.Group className="flex-grow-1">
-                <Form.Label>Brand <span className="text-muted">(optional)</span></Form.Label>
-                <Form.Select value={form.brand_id} onChange={e => setForm({ ...form, brand_id: e.target.value })}>
-                  <option value="">No specific brand</option>
-                  {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </Form.Select>
-              </Form.Group>
-              {/* One-off due date only when the task doesn't repeat. */}
-              {form.repeat === 'none' && (
-                <Form.Group>
-                  <Form.Label>Due date <span className="text-muted">(optional)</span></Form.Label>
-                  <Form.Control type="date" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })} />
                 </Form.Group>
-              )}
+                <div className="d-flex gap-3">
+                  <Form.Group className="mb-3 flex-grow-1">
+                    <Form.Label>Folder <span className="text-muted">(optional)</span></Form.Label>
+                    <Form.Select value={form.folder_id} onChange={e => setForm({ ...form, folder_id: e.target.value })}>
+                      <option value="">No folder</option>
+                      {myFolders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                    </Form.Select>
+                  </Form.Group>
+                  {/* One-off due date only when the task doesn't repeat. */}
+                  {form.repeat === 'none' && (
+                    <Form.Group className="mb-3">
+                      <Form.Label>Due date <span className="text-muted">(optional)</span></Form.Label>
+                      <Form.Control type="date" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })} />
+                    </Form.Group>
+                  )}
+                </div>
+                <Form.Group className="mb-3">
+                  <Form.Label>Brand <span className="text-muted">(optional)</span></Form.Label>
+                  <Form.Select value={form.brand_id} onChange={e => setForm({ ...form, brand_id: e.target.value })}>
+                    <option value="">No specific brand</option>
+                    {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </Form.Select>
+                </Form.Group>
+                {myLabels.length > 0 && (
+                  <Form.Group className="mb-3">
+                    <Form.Label>Labels <span className="text-muted">(optional)</span></Form.Label>
+                    <div className="d-flex flex-wrap gap-1">
+                      {myLabels.map(l => (
+                        <button type="button" key={l.id}
+                          className={`ac-label-chip btn-reset ${form.label_ids.includes(l.id) ? 'on' : ''}`}
+                          style={{ background: (l.color ?? '#64748b') + (form.label_ids.includes(l.id) ? '' : '22'), color: form.label_ids.includes(l.id) ? '#fff' : (l.color ?? '#64748b') }}
+                          onClick={() => toggleFormLabel(l.id)}>
+                          <i className="bi bi-tag-fill me-1" />{l.name}
+                        </button>
+                      ))}
+                    </div>
+                  </Form.Group>
+                )}
+              </div>
             </div>
 
             {/* Repeat / "alarm" — new one-off tasks only. Creates a schedule that
                 auto-assigns each period. */}
-            {!editingId && !editingGroupId && (
+            {!editingId && !editingGroupId && (() => {
+              const expanded = repeatOpen || form.repeat !== 'none';
+              return (
               <div className="ac-repeat mt-3">
+                <button type="button" className="ac-repeat-head" aria-expanded={expanded}
+                  onClick={() => setRepeatOpen(o => !o)}>
+                  <span className="ac-repeat-title"><i className="bi bi-arrow-repeat me-1" />Repeat</span>
+                  <span className="ac-repeat-sum">
+                    {form.repeat === 'none' ? 'Does not repeat' : recurrencePreview(form)}
+                    <i className={`bi bi-chevron-${expanded ? 'up' : 'down'} ms-2`} />
+                  </span>
+                </button>
+                {expanded && (
+                <div className="ac-repeat-body mt-2">
                 <Form.Group>
-                  <Form.Label><i className="bi bi-arrow-repeat me-1" />Repeat</Form.Label>
+                  <Form.Label className="small text-muted mb-1">Frequency</Form.Label>
                   <Form.Select value={form.repeat} onChange={e => setForm({ ...form, repeat: e.target.value as Repeat })}>
                     <option value="none">Does not repeat (one-off)</option>
                     <option value="daily">Daily</option>
@@ -1202,20 +1233,31 @@ export default function Tasks() {
                     A new task will be created automatically {recurrencePreview(form)} and assigned to the {form.assignee_ids.length || 'selected'} {form.assignee_ids.length === 1 ? 'person' : 'people'}. The first one is created now.
                   </Form.Text>
                 )}
+                </div>
+                )}
               </div>
-            )}
+              );
+            })()}
           </Modal.Body>
-          <Modal.Footer>
-            <Button variant="secondary" onClick={() => setShow(false)} disabled={saving}>Cancel</Button>
-            <Button type="submit" disabled={saving || form.assignee_ids.length === 0 || !form.title.trim()}>
-              {saving
-                ? (editingId || editingGroupId ? 'Saving…' : 'Creating…')
-                : editingId || editingGroupId
-                  ? 'Save changes'
-                  : form.assignee_ids.length > 1
-                    ? `Assign to ${form.assignee_ids.length} people`
-                    : 'Assign task'}
-            </Button>
+          <Modal.Footer className="justify-content-between">
+            <div className="ac-modal-foot-hint">
+              {!editingId && !editingGroupId && form.assignee_ids.length > 0 && (
+                <><i className="bi bi-person-check me-1" />{form.assignee_ids.length} {form.assignee_ids.length === 1 ? 'person' : 'people'} selected
+                  {form.repeat !== 'none' && <> · <i className="bi bi-arrow-repeat mx-1" />repeats {recurrencePreview(form)}</>}</>
+              )}
+            </div>
+            <div className="d-flex gap-2">
+              <Button variant="light" onClick={() => setShow(false)} disabled={saving}>Cancel</Button>
+              <Button type="submit" className="ac-modal-cta" disabled={saving || form.assignee_ids.length === 0 || !form.title.trim()}>
+                {saving
+                  ? (editingId || editingGroupId ? 'Saving…' : 'Creating…')
+                  : editingId || editingGroupId
+                    ? <><i className="bi bi-check2 me-1" />Save changes</>
+                    : form.assignee_ids.length > 1
+                      ? <><i className="bi bi-send me-1" />Assign to {form.assignee_ids.length} people</>
+                      : <><i className="bi bi-send me-1" />Assign task</>}
+              </Button>
+            </div>
           </Modal.Footer>
         </Form>
       </Modal>

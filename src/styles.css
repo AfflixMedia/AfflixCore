@@ -2610,8 +2610,20 @@ input[type="number"] {
 /* Repeat / recurrence block in the New Task modal */
 .ac-repeat {
   border: 1px dashed var(--ac-line-l); border-radius: var(--ac-radius-md, 10px);
-  padding: 12px; background: rgba(20,22,32,.02);
+  padding: 10px 12px; background: rgba(20,22,32,.02);
 }
+/* Collapsible header — compact one-liner until expanded */
+.ac-repeat-head {
+  display: flex; align-items: center; justify-content: space-between; width: 100%;
+  border: none; background: transparent; padding: 0; cursor: pointer;
+  color: var(--ac-text-dark); font-weight: 700; font-size: .9rem;
+}
+.ac-repeat-title { display: inline-flex; align-items: center; color: var(--ac-primary); }
+.ac-repeat-sum {
+  display: inline-flex; align-items: center;
+  color: var(--ac-text-muted); font-weight: 600; font-size: .82rem;
+}
+.ac-repeat-body { border-top: 1px dashed var(--ac-line-l); padding-top: 10px; }
 .ac-recur-icon {
   width: 42px; height: 42px; border-radius: 12px; flex: none;
   display: flex; align-items: center; justify-content: center;
@@ -2813,26 +2825,98 @@ input[type="number"] {
 .ac-prio-pill.prio-mid  { background: rgba(245,158,11,.16); color: #b45309; }
 .ac-prio-pill.prio-low  { background: rgba(59,130,246,.14); color: #2563eb; }
 
-/* Priority segmented picker (New Task modal) — three direct compact options */
-.ac-prio-choice { display: inline-flex; gap: 6px; }
+/* Priority segmented picker (New Task modal) — three equal, compact options */
+.ac-prio-choice { display: flex; gap: 6px; }
 .ac-prio-opt {
-  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
   border: 1.5px solid var(--ac-line-l); background: #fff; color: var(--ac-text-muted);
-  border-radius: var(--ac-radius-pill); padding: 3px 10px;
-  font-size: .72rem; font-weight: 700; cursor: pointer; line-height: 1.4;
-  transition: border-color .12s ease, background .12s ease, color .12s ease;
+  border-radius: 9px; padding: 6px 8px;
+  font-size: .78rem; font-weight: 700; cursor: pointer; line-height: 1.3;
+  transition: border-color .12s ease, background .12s ease, color .12s ease, box-shadow .12s ease;
 }
-.ac-prio-opt i { font-size: .68rem; opacity: .85; }
+.ac-prio-opt i { font-size: .72rem; opacity: .7; }
 .ac-prio-opt:hover { border-color: var(--ac-text-muted); }
-.ac-prio-opt.prio-high.on { background: rgba(239,68,68,.12); border-color: #ef4444; color: #dc2626; }
-.ac-prio-opt.prio-mid.on  { background: rgba(245,158,11,.14); border-color: #f59e0b; color: #b45309; }
-.ac-prio-opt.prio-low.on  { background: rgba(59,130,246,.12); border-color: #3b82f6; color: #2563eb; }
+.ac-prio-opt.on i { opacity: 1; }
+.ac-prio-opt.prio-high.on { background: rgba(239,68,68,.10); border-color: #ef4444; color: #dc2626; box-shadow: 0 1px 6px rgba(239,68,68,.14); }
+.ac-prio-opt.prio-mid.on  { background: rgba(245,158,11,.12); border-color: #f59e0b; color: #b45309; box-shadow: 0 1px 6px rgba(245,158,11,.16); }
+.ac-prio-opt.prio-low.on  { background: rgba(59,130,246,.10); border-color: #3b82f6; color: #2563eb; box-shadow: 0 1px 6px rgba(59,130,246,.14); }
 
+/* ===== New Task modal — refined layout ===== */
+.ac-task-modal .modal-content {
+  border: none; border-radius: 18px;
+  box-shadow: 0 24px 60px rgba(20,22,32,.22);
+  transition: background-color .18s ease;
+}
 /* Whole-modal tint that follows the chosen priority (instant) */
-.ac-task-modal .modal-content { transition: background-color .18s ease; }
-.ac-task-modal.ac-task--high .modal-content { background: #fff5f5; }
-.ac-task-modal.ac-task--mid  .modal-content { background: #fffbf2; }
-.ac-task-modal.ac-task--low  .modal-content { background: #f4f8ff; }
+.ac-task-modal.ac-task--high .modal-content { background: #fff7f7; }
+.ac-task-modal.ac-task--mid  .modal-content { background: #fffcf5; }
+.ac-task-modal.ac-task--low  .modal-content { background: #f6f9ff; }
+
+/* Header: icon badge + title + subtitle */
+.ac-task-modal .modal-header {
+  align-items: center; padding: 18px 24px;
+  border-bottom: 1px solid var(--ac-line-l); background: rgba(255,255,255,.5);
+  border-top-left-radius: 18px; border-top-right-radius: 18px;
+}
+.ac-modal-head { display: flex; align-items: center; gap: 14px; }
+.ac-modal-head-icon {
+  width: 44px; height: 44px; border-radius: 13px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--ac-primary-soft); color: var(--ac-primary); font-size: 1.25rem;
+}
+.ac-task-modal .modal-title {
+  font-family: var(--ac-font-heading); font-weight: 800;
+  font-size: 1.22rem; letter-spacing: -.02em; line-height: 1.15; color: var(--ac-text-dark);
+}
+.ac-modal-sub { font-size: .82rem; color: var(--ac-text-muted); margin-top: 2px; }
+
+.ac-task-modal .modal-body { padding: 22px 24px; }
+.ac-task-modal .modal-footer {
+  padding: 14px 24px; border-top: 1px solid var(--ac-line-l); background: rgba(255,255,255,.5);
+  border-bottom-left-radius: 18px; border-bottom-right-radius: 18px;
+}
+.ac-modal-foot-hint { font-size: .82rem; color: var(--ac-text-muted); font-weight: 600; }
+.ac-modal-cta { font-weight: 700; padding-left: 18px; padding-right: 18px; }
+
+/* Refined inputs (scoped to the modal) */
+.ac-task-modal .form-label { font-weight: 600; font-size: .82rem; color: var(--ac-text-dark); margin-bottom: 5px; }
+.ac-task-modal .form-control,
+.ac-task-modal .form-select {
+  border-radius: 10px; border-color: var(--ac-line-l); padding: 9px 12px;
+  font-size: .9rem; background-color: #fff;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.ac-task-modal .form-control:focus,
+.ac-task-modal .form-select:focus {
+  border-color: var(--ac-primary); box-shadow: 0 0 0 3px var(--ac-primary-soft);
+}
+/* Visible keyboard focus for the custom pickers/pills inside the modal */
+.ac-task-modal .ac-prio-opt:focus-visible,
+.ac-task-modal .ac-label-chip:focus-visible,
+.ac-task-modal .ac-assignee-opt:focus-visible,
+.ac-task-modal .ac-repeat-head:focus-visible {
+  outline: none; box-shadow: 0 0 0 3px var(--ac-primary-soft); border-radius: 8px;
+}
+
+/* Two columns with a hairline divider on wide screens */
+.ac-task-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+.ac-task-col { min-width: 0; }
+@media (min-width: 641px) {
+  .ac-task-col:first-child { padding-right: 26px; }
+  .ac-task-col:last-child { padding-left: 26px; border-left: 1px solid var(--ac-line-l); }
+}
+@media (max-width: 640px) {
+  .ac-task-cols { grid-template-columns: 1fr; }
+  .ac-task-col:last-child { margin-top: 6px; padding-top: 14px; border-top: 1px solid var(--ac-line-l); }
+}
+
+/* Eyebrow section labels above each column */
+.ac-form-eyebrow {
+  display: flex; align-items: center;
+  font-family: var(--ac-font-heading); font-weight: 800;
+  font-size: .68rem; text-transform: uppercase; letter-spacing: .9px;
+  color: var(--ac-primary); margin-bottom: 14px;
+}
 
 /* Label chip (also used as toggle button) */
 .ac-label-chip {
