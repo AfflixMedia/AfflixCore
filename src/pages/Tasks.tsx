@@ -28,7 +28,7 @@ interface Task {
 // A card in the assigner's list: either a single task (isGroup=false) or a set
 // of rows sharing a group_id — one task assigned to several people.
 interface TaskGroup { key: string; tasks: Task[]; isGroup: boolean; }
-interface PersonLite { id: string; full_name: string | null; email: string; }
+interface PersonLite { id: string; full_name: string | null; email: string; avatar_url?: string | null; }
 interface BrandLite { id: string; name: string; }
 interface OrgItem { id: string; name: string; color: string | null; owner_id: string; }
 // A reminder row (used to surface acknowledgements in the task list).
@@ -141,8 +141,8 @@ export default function Tasks() {
     const [tRes, brRes, apcRes, tlRes, fRes, lRes, abRes, tlbRes, recRes, remRes] = await Promise.all([
       supabase.from('tasks').select('*').order('status').order('due_date', { nullsFirst: false }).order('created_at', { ascending: false }),
       canAssign ? supabase.from('brands').select('id,name').order('name') : Promise.resolve({ data: [], error: null }),
-      canAssign ? supabase.from('profiles').select('id,full_name,email').eq('role', 'apc').order('full_name') : Promise.resolve({ data: [], error: null }),
-      isBob ? supabase.from('profiles').select('id,full_name,email').eq('role', 'team_lead').order('full_name') : Promise.resolve({ data: [], error: null }),
+      canAssign ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('role', 'apc').order('full_name') : Promise.resolve({ data: [], error: null }),
+      isBob ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('role', 'team_lead').order('full_name') : Promise.resolve({ data: [], error: null }),
       supabase.from('task_folders').select('id,name,color,owner_id').order('name'),
       supabase.from('task_labels').select('id,name,color,owner_id').order('name'),
       canAssign ? supabase.from('apc_brands').select('apc_id,brand_id') : Promise.resolve({ data: [], error: null }),
@@ -169,7 +169,7 @@ export default function Tasks() {
     // Resolve names for assignees + creators (RLS returns what each role may see).
     const ids = Array.from(new Set(ts.flatMap(t => [t.assignee_id, t.created_by]).filter(Boolean) as string[]));
     if (ids.length > 0) {
-      const { data: ppl } = await supabase.from('profiles').select('id,full_name,email').in('id', ids);
+      const { data: ppl } = await supabase.from('profiles').select('id,full_name,email,avatar_url').in('id', ids);
       const m = new Map<string, PersonLite>();
       (ppl ?? []).forEach((p: PersonLite) => m.set(p.id, p));
       setPeople(m);
@@ -226,6 +226,16 @@ export default function Tasks() {
     if (id === myId) return 'You';
     return allPeople.get(id) ?? '—';
   };
+  // Profile photo per person (assignees, creators, brand owners).
+  const allAvatars = useMemo(() => {
+    const m = new Map<string, string | null | undefined>();
+    people.forEach((p, id) => m.set(id, p.avatar_url));
+    myApcs.forEach(p => m.set(p.id, p.avatar_url));
+    teamLeads.forEach(p => m.set(p.id, p.avatar_url));
+    if (myId && profile?.avatar_url) m.set(myId, profile.avatar_url);
+    return m;
+  }, [people, myApcs, teamLeads, myId, profile?.avatar_url]);
+  const personAvatar = (id: string | null) => (id ? allAvatars.get(id) ?? null : null);
   // Who owns a brand: its APC, else (Bob's view) its Team Lead.
   const brandOwnerName = (brandId: string): string | null => {
     const id = brandApc.get(brandId) ?? (isBob ? brandLead.get(brandId) : undefined);
@@ -613,7 +623,7 @@ export default function Tasks() {
     const taskLabels = (t.label_ids ?? []).map(id => labelMap.get(id)).filter(Boolean) as OrgItem[];
     return (
       <div className={`ac-list-row ac-task ac-task--${t.priority} ${t.status === 'done' ? 'opacity-75' : ''}`}>
-        <Avatar name={personName(t.assignee_id)} size="lg" />
+        <Avatar name={personName(t.assignee_id)} src={personAvatar(t.assignee_id)} size="lg" />
         <div className="ac-row-main ac-task-open" role="button" tabIndex={0}
           title="Open task"
           onClick={() => setDetailId(t.id)}
@@ -687,7 +697,7 @@ export default function Tasks() {
       <div className={`ac-list-row ac-task ac-task-group ac-task--${t0.priority} ${allDone ? 'opacity-75' : ''}`}>
         <button type="button" className="ac-group-avatars" onClick={() => toggleExpand(g.key)}
           aria-expanded={expanded} title={expanded ? 'Collapse' : 'Show people'}>
-          {g.tasks.slice(0, 3).map(t => <Avatar key={t.id} name={personName(t.assignee_id)} size="sm" />)}
+          {g.tasks.slice(0, 3).map(t => <Avatar key={t.id} name={personName(t.assignee_id)} src={personAvatar(t.assignee_id)} size="sm" />)}
           {total > 3 && <span className="ac-group-more">+{total - 3}</span>}
         </button>
         <div className="ac-row-main ac-task-open" role="button" tabIndex={0}
@@ -729,7 +739,7 @@ export default function Tasks() {
                 const overdue = !done && t.due_date && t.due_date < today;
                 return (
                   <div key={t.id} className="ac-group-person">
-                    <Avatar name={personName(t.assignee_id)} size="sm" />
+                    <Avatar name={personName(t.assignee_id)} src={personAvatar(t.assignee_id)} size="sm" />
                     <span className="ac-group-person-name">{personName(t.assignee_id)}{seenTick(t)}</span>
                     <StatusControl t={t} canUpdate={canManage} size="sm" />
                     {overdue && <span className="ac-group-status over"><i className="bi bi-exclamation-triangle me-1" />Overdue</span>}
@@ -977,12 +987,12 @@ export default function Tasks() {
                 {teamLeads.length > 0 && <div className="ac-tl-rail-head">Team Leads</div>}
                 {teamLeads.map(tl => {
                   const name = tl.full_name || tl.email;
-                  const open = tasks.filter(t => t.assignee_id === tl.id && t.status === 'open').length;
+                  const open = tasks.filter(t => t.assignee_id === tl.id && t.status !== 'done').length;
                   return (
                     <button key={tl.id} type="button" className="ac-tl-avatar-btn"
                       onClick={() => openAdd(tl.id)}
                       aria-label={`Assign a new task to ${name}`}>
-                      <Avatar name={name} size="lg" variant="dark" />
+                      <Avatar name={name} src={tl.avatar_url} size="lg" variant="dark" />
                       {open > 0 && <span className="ac-tl-badge">{open}</span>}
                       <span className="ac-tl-tip">Assign task to {name}</span>
                     </button>
@@ -991,12 +1001,12 @@ export default function Tasks() {
                 {myApcs.length > 0 && <div className="ac-tl-rail-head mt-2">APCs</div>}
                 {myApcs.map(apc => {
                   const name = apc.full_name || apc.email;
-                  const open = tasks.filter(t => t.assignee_id === apc.id && t.status === 'open').length;
+                  const open = tasks.filter(t => t.assignee_id === apc.id && t.status !== 'done').length;
                   return (
                     <button key={apc.id} type="button" className="ac-tl-avatar-btn"
                       onClick={() => openAdd(apc.id)}
                       aria-label={`Assign a new task to ${name}`}>
-                      <Avatar name={name} size="lg" />
+                      <Avatar name={name} src={apc.avatar_url} size="lg" />
                       {open > 0 && <span className="ac-tl-badge">{open}</span>}
                       <span className="ac-tl-tip">Assign task to {name}</span>
                     </button>
@@ -1034,7 +1044,7 @@ export default function Tasks() {
                   <div className="ac-assignee-chips">
                     {form.assignee_ids.map(id => (
                       <span key={id} className="ac-assignee-chip static">
-                        <Avatar name={personName(id)} size="sm" /> {personName(id)}
+                        <Avatar name={personName(id)} src={personAvatar(id)} size="sm" /> {personName(id)}
                       </span>
                     ))}
                   </div>
@@ -1223,7 +1233,7 @@ export default function Tasks() {
                 </div>
                 {t.description && <p className="ac-task-detail-desc">{t.description}</p>}
                 <div className="ac-task-detail-meta">
-                  <div><span className="lbl">Assignee</span><span className="val"><Avatar name={personName(t.assignee_id)} size="sm" /> {personName(t.assignee_id)}</span></div>
+                  <div><span className="lbl">Assignee</span><span className="val"><Avatar name={personName(t.assignee_id)} src={personAvatar(t.assignee_id)} size="sm" /> {personName(t.assignee_id)}</span></div>
                   {!isApc && (
                     <div><span className="lbl">Seen</span>
                       <span className="val">
@@ -1336,7 +1346,7 @@ export default function Tasks() {
                         <div className="ac-row-sub d-flex align-items-center flex-wrap gap-2 mt-1">
                           <span className="d-inline-flex align-items-center gap-1">
                             <i className="bi bi-people" />
-                            {r.assignee_ids.slice(0, 3).map(id => <Avatar key={id} name={personName(id)} size="sm" />)}
+                            {r.assignee_ids.slice(0, 3).map(id => <Avatar key={id} name={personName(id)} src={personAvatar(id)} size="sm" />)}
                             {r.assignee_ids.length > 3 && <span>+{r.assignee_ids.length - 3}</span>}
                           </span>
                           {r.brand_id && <span className="ac-chip neutral"><i className="bi bi-shop" /> {brandMap.get(r.brand_id) ?? 'Brand'}</span>}
@@ -1420,7 +1430,7 @@ function AssigneePicker({ apcs, leads, isBob, multiple, value, onChange }: {
       <button type="button" key={p.id}
         className={`ac-assignee-opt ${on ? 'on' : ''}`}
         aria-pressed={on} onClick={() => toggle(p.id)}>
-        <Avatar name={nameOf(p)} size="sm" />
+        <Avatar name={nameOf(p)} src={p.avatar_url} size="sm" />
         <span className="ac-assignee-opt-name">{nameOf(p)}</span>
         <i className={`bi ${on ? (multiple ? 'bi-check-square-fill' : 'bi-check-circle-fill') : (multiple ? 'bi-square' : 'bi-circle')}`} />
       </button>
