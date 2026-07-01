@@ -20,7 +20,11 @@ interface Task {
   due_date: string | null;
   created_at: string;
   completed_at: string | null;
+  group_id: string | null;
 }
+// A card in the assigner's list: either a single task (isGroup=false) or a set
+// of rows sharing a group_id — one task assigned to several people.
+interface TaskGroup { key: string; tasks: Task[]; isGroup: boolean; }
 interface PersonLite { id: string; full_name: string | null; email: string; }
 interface BrandLite { id: string; name: string; }
 interface OrgItem { id: string; name: string; color: string | null; owner_id: string; }
@@ -61,12 +65,14 @@ export default function Tasks() {
 
   const [show, setShow] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null); // editing a whole multi-assignee group
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [detailId, setDetailId] = useState<string | null>(null); // task open in detail popup
   const brandBarRef = useRef<HTMLDivElement>(null);
   const tlRailRef = useRef<HTMLDivElement>(null);
   const [tlOverflow, setTlOverflow] = useState(false); // show up/down arrows on the Team Lead rail
   const [form, setForm] = useState({
-    assignee_id: '', brand_id: '', title: '', description: '', due_date: '',
+    assignee_ids: [] as string[], brand_id: '', title: '', description: '', due_date: '',
     priority: 'mid' as Priority, folder_id: '', label_ids: [] as string[],
   });
   const [saving, setSaving] = useState(false);
@@ -74,8 +80,11 @@ export default function Tasks() {
   const [showOrg, setShowOrg] = useState(false);
   const [query, setQuery] = useState('');
 
-  const load = async () => {
-    setLoading(true); setErr(null);
+  // `silent` reloads refresh data in place (after a mutation or a realtime event)
+  // without flashing the full-page spinner — only the first load shows it.
+  const load = async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
+    setErr(null);
     const [tRes, brRes, apcRes, tlRes, fRes, lRes, abRes, tlbRes] = await Promise.all([
       supabase.from('tasks').select('*').order('status').order('due_date', { nullsFirst: false }).order('created_at', { ascending: false }),
       canAssign ? supabase.from('brands').select('id,name').order('name') : Promise.resolve({ data: [], error: null }),
@@ -116,7 +125,7 @@ export default function Tasks() {
   useEffect(() => {
     if (!myId) return;
     const ch = supabase.channel('tasks-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => load({ silent: true }))
       .subscribe();
     return () => { supabase.removeChannel(ch); };
     // eslint-disable-next-line
@@ -174,6 +183,27 @@ export default function Tasks() {
   const openTasks = visibleTasks.filter(t => t.status === 'open');
   const doneTasks = visibleTasks.filter(t => t.status === 'done');
 
+  // Collapse rows sharing a group_id into one card (assigner view only — an APC
+  // only ever holds their own single row). Rows created together share every
+  // shared field, so grouping after the folder/label/search filter is safe.
+  const groups = useMemo<TaskGroup[]>(() => {
+    if (!canAssign) return visibleTasks.map(t => ({ key: t.id, tasks: [t], isGroup: false }));
+    const map = new Map<string, Task[]>();
+    const order: string[] = [];
+    for (const t of visibleTasks) {
+      const key = t.group_id ?? t.id;
+      if (!map.has(key)) { map.set(key, []); order.push(key); }
+      map.get(key)!.push(t);
+    }
+    return order.map(key => {
+      const ts = map.get(key)!;
+      return { key, tasks: ts, isGroup: ts.length > 1 };
+    });
+  }, [visibleTasks, canAssign]);
+  // A group is "open" while any member is open; "done" only when all are done.
+  const openGroups = groups.filter(g => g.tasks.some(t => t.status === 'open'));
+  const doneGroups = groups.filter(g => g.tasks.every(t => t.status === 'done'));
+
   // Ordered list the detail popup arrows step through (open first, then done).
   const ordered = useMemo(() => [...openTasks, ...doneTasks], [openTasks, doneTasks]);
   const detailIdx = detailId ? ordered.findIndex(t => t.id === detailId) : -1;
@@ -201,9 +231,9 @@ export default function Tasks() {
   }, [tasks]);
 
   const openAdd = (assigneeId?: string) => {
-    setEditingId(null);
+    setEditingId(null); setEditingGroupId(null);
     setForm({
-      assignee_id: assigneeId ?? '', brand_id: '', title: '', description: '', due_date: '',
+      assignee_ids: assigneeId ? [assigneeId] : [], brand_id: '', title: '', description: '', due_date: '',
       priority: 'mid',
       folder_id: folderFilter !== 'all' && folderFilter !== 'none' ? folderFilter : '',
       label_ids: [],
@@ -215,11 +245,12 @@ export default function Tasks() {
   // Click a brand chip → New Task with the brand + its owner pre-filled.
   // APC owns the brand (apc_brands); Bob also falls back to the brand's Team Lead.
   const openAddForBrand = (brandId: string) => {
-    setEditingId(null);
+    setEditingId(null); setEditingGroupId(null);
     const apc = brandApc.get(brandId);
     const lead = brandLead.get(brandId);
+    const owner = apc ?? (isBob ? lead : undefined);
     setForm({
-      assignee_id: apc ?? (isBob ? (lead ?? '') : ''),
+      assignee_ids: owner ? [owner] : [],
       brand_id: brandId, title: '', description: '', due_date: '',
       priority: 'mid',
       folder_id: folderFilter !== 'all' && folderFilter !== 'none' ? folderFilter : '',
@@ -237,9 +268,28 @@ export default function Tasks() {
   };
 
   const openEdit = (t: Task) => {
-    setEditingId(t.id);
+    setEditingId(t.id); setEditingGroupId(null);
     setForm({
-      assignee_id: t.assignee_id,
+      assignee_ids: [t.assignee_id],
+      brand_id: t.brand_id ?? '',
+      title: t.title,
+      description: t.description ?? '',
+      due_date: t.due_date ?? '',
+      priority: t.priority,
+      folder_id: t.folder_id ?? '',
+      label_ids: t.label_ids ?? [],
+    });
+    setErr(null);
+    setShow(true);
+  };
+
+  // Edit every row of a multi-assignee group at once (shared fields only;
+  // the set of assignees stays fixed).
+  const openEditGroup = (g: TaskGroup) => {
+    const t = g.tasks[0];
+    setEditingId(null); setEditingGroupId(g.key);
+    setForm({
+      assignee_ids: g.tasks.map(x => x.assignee_id),
       brand_id: t.brand_id ?? '',
       title: t.title,
       description: t.description ?? '',
@@ -257,8 +307,7 @@ export default function Tasks() {
     if (!myId) return;
     setSaving(true); setErr(null);
     try {
-      const payload = {
-        assignee_id: form.assignee_id,
+      const base = {
         brand_id: form.brand_id || null,
         title: form.title.trim(),
         description: form.description.trim() || null,
@@ -267,17 +316,28 @@ export default function Tasks() {
         folder_id: form.folder_id || null,
         label_ids: form.label_ids,
       };
+      const ids = Array.from(new Set(form.assignee_ids)).filter(Boolean);
       if (editingId) {
-        const { error } = await supabase.from('tasks').update(payload).eq('id', editingId);
+        // A row targets one assignee; editing keeps the first selection.
+        const { error } = await supabase.from('tasks').update({ assignee_id: ids[0], ...base }).eq('id', editingId);
+        if (error) throw error;
+      } else if (editingGroupId) {
+        // Editing a whole group updates the shared fields on every member row.
+        const { error } = await supabase.from('tasks').update(base).eq('group_id', editingGroupId);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from('tasks').insert({ created_by: myId, ...payload });
+        // Create one task row per selected person (fan-out for multi-assign).
+        // Rows created together share a group_id so the assigner sees one card.
+        if (ids.length === 0) throw new Error('Pick at least one person to assign to.');
+        const gid = ids.length > 1 ? crypto.randomUUID() : null;
+        const rows = ids.map(id => ({ created_by: myId, assignee_id: id, group_id: gid, ...base }));
+        const { error } = await supabase.from('tasks').insert(rows);
         if (error) throw error;
       }
       setShow(false);
-      await load();
+      await load({ silent: true });
     } catch (e: any) {
-      setErr(e?.message ?? (editingId ? 'Failed to update task' : 'Failed to create task'));
+      setErr(e?.message ?? (editingId || editingGroupId ? 'Failed to update task' : 'Failed to create task'));
     } finally {
       setSaving(false);
     }
@@ -307,6 +367,30 @@ export default function Tasks() {
     if (error) { alert(error.message); return; }
     setReminded(prev => new Set(prev).add(t.id));
     setTimeout(() => setReminded(prev => { const n = new Set(prev); n.delete(t.id); return n; }), 2500);
+  };
+
+  // ---- Group-level actions (multi-assignee cards) ----
+  const toggleExpand = (key: string) => {
+    setExpandedGroups(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
+  };
+  // Remind every still-open assignee in the group at once.
+  const remindGroup = async (g: TaskGroup) => {
+    if (!myId) return;
+    const openIds = g.tasks.filter(t => t.status === 'open').map(t => t.id);
+    if (openIds.length === 0) return;
+    const { error } = await supabase.from('task_reminders').insert(openIds.map(id => ({ task_id: id, created_by: myId })));
+    if (error) { alert(error.message); return; }
+    setReminded(prev => { const n = new Set(prev); n.add(g.key); return n; });
+    setTimeout(() => setReminded(prev => { const n = new Set(prev); n.delete(g.key); return n; }), 2500);
+  };
+  // Delete the whole group (all member rows) in one go.
+  const removeGroup = async (g: TaskGroup) => {
+    if (!confirm(`Delete "${g.tasks[0].title}" for all ${g.tasks.length} people?`)) return;
+    const ids = new Set(g.tasks.map(t => t.id));
+    const prev = tasks;
+    setTasks(tasks.filter(x => !ids.has(x.id)));
+    const { error } = await supabase.from('tasks').delete().eq('group_id', g.key);
+    if (error) { setTasks(prev); alert(error.message); }
   };
 
   const toggleFormLabel = (id: string) => {
@@ -387,6 +471,129 @@ export default function Tasks() {
       </div>
     );
   };
+
+  // One combined card for a task assigned to several people. Shows aggregate
+  // progress + everyone's avatars; expands to per-person rows (each keeps its
+  // own status / complete / remind / delete).
+  const GroupCard = ({ g }: { g: TaskGroup }) => {
+    const t0 = g.tasks[0];
+    const today = new Date().toISOString().slice(0, 10);
+    const doneCount = g.tasks.filter(t => t.status === 'done').length;
+    const total = g.tasks.length;
+    const allDone = doneCount === total;
+    const anyOverdue = g.tasks.some(t => t.status === 'open' && t.due_date && t.due_date < today);
+    const anyOpen = doneCount < total;
+    const expanded = expandedGroups.has(g.key);
+    const canManage = t0.created_by === myId || isBob;
+    const canRemind = !isApc && canManage;
+    const folder = t0.folder_id ? folderMap.get(t0.folder_id) : null;
+    const taskLabels = (t0.label_ids ?? []).map(id => labelMap.get(id)).filter(Boolean) as OrgItem[];
+    const groupReminded = reminded.has(g.key);
+    return (
+      <div className={`ac-list-row ac-task ac-task-group ac-task--${t0.priority} ${allDone ? 'opacity-75' : ''}`}>
+        <button type="button" className="ac-group-avatars" onClick={() => toggleExpand(g.key)}
+          aria-expanded={expanded} title={expanded ? 'Collapse' : 'Show people'}>
+          {g.tasks.slice(0, 3).map(t => <Avatar key={t.id} name={personName(t.assignee_id)} size="sm" />)}
+          {total > 3 && <span className="ac-group-more">+{total - 3}</span>}
+        </button>
+        <div className="ac-row-main ac-task-open" role="button" tabIndex={0}
+          title={expanded ? 'Collapse' : 'Show people'}
+          onClick={() => toggleExpand(g.key)}
+          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExpand(g.key); } }}>
+          <div className="ac-row-name d-flex align-items-center gap-2 flex-wrap">
+            <i className={`bi bi-chevron-${expanded ? 'down' : 'right'} ac-group-caret`} />
+            <span className={allDone ? 'text-decoration-line-through text-muted' : ''}>{t0.title}</span>
+            <span className={`ac-prio-pill prio-${t0.priority}`}>{t0.priority}</span>
+            <span className="ac-group-badge"><i className="bi bi-people-fill me-1" />{total}</span>
+            {allDone
+              ? <Badge bg="success"><i className="bi bi-check2 me-1" />Done</Badge>
+              : anyOverdue && <Badge bg="danger">Overdue</Badge>}
+          </div>
+          {t0.description && <div className="ac-row-sub ac-clamp1">{t0.description}</div>}
+          <div className="ac-row-sub d-flex align-items-center flex-wrap gap-2 mt-1">
+            <span className="ac-group-progress">
+              <span className="ac-group-bar"><span style={{ width: `${(doneCount / total) * 100}%` }} /></span>
+              {doneCount} of {total} done
+            </span>
+            {t0.brand_id && <span className="ac-chip neutral"><i className="bi bi-shop" /> {brandMap.get(t0.brand_id) ?? 'Brand'}</span>}
+            {folder && <span className="ac-chip" style={{ borderColor: folder.color ?? undefined, color: folder.color ?? undefined }}><i className="bi bi-folder me-1" />{folder.name}</span>}
+            {taskLabels.map(l => (
+              <span key={l.id} className="ac-label-chip" style={{ background: (l.color ?? '#64748b') + '22', color: l.color ?? '#64748b' }}>
+                <i className="bi bi-tag-fill me-1" />{l.name}
+              </span>
+            ))}
+            {t0.due_date && <span><i className="bi bi-calendar-event me-1" />due {new Date(t0.due_date).toLocaleDateString()}</span>}
+          </div>
+
+          {expanded && (
+            <div className="ac-group-people" onClick={e => e.stopPropagation()}>
+              {g.tasks.map(t => {
+                const done = t.status === 'done';
+                const overdue = !done && t.due_date && t.due_date < today;
+                return (
+                  <div key={t.id} className="ac-group-person">
+                    <Avatar name={personName(t.assignee_id)} size="sm" />
+                    <span className="ac-group-person-name">{personName(t.assignee_id)}</span>
+                    {done
+                      ? <span className="ac-group-status done"><i className="bi bi-check2-circle me-1" />Done</span>
+                      : overdue
+                        ? <span className="ac-group-status over"><i className="bi bi-exclamation-triangle me-1" />Overdue</span>
+                        : <span className="ac-group-status open">Open</span>}
+                    <div className="ac-group-person-actions">
+                      {canRemind && !done && (
+                        <button className={`ac-icon-btn sm remind ${reminded.has(t.id) ? 'sent' : ''}`}
+                          title={reminded.has(t.id) ? 'Reminder sent' : 'Remind this person'}
+                          disabled={reminded.has(t.id)} onClick={() => sendReminder(t)}>
+                          <i className={`bi ${reminded.has(t.id) ? 'bi-check2-circle' : 'bi-alarm'}`} />
+                        </button>
+                      )}
+                      {canManage && (
+                        <button className="ac-icon-btn sm" title={done ? 'Reopen' : 'Mark done'}
+                          onClick={() => setDone(t, !done)}>
+                          <i className={`bi ${done ? 'bi-arrow-counterclockwise' : 'bi-check2-circle'}`} />
+                        </button>
+                      )}
+                      {canManage && (
+                        <button className="ac-icon-btn sm danger" title="Remove this person" onClick={() => remove(t)}>
+                          <i className="bi bi-x-lg" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <div className="ac-row-actions">
+          {canRemind && anyOpen && (
+            <button className={`ac-icon-btn remind ${groupReminded ? 'sent' : ''}`}
+              title={groupReminded ? 'Reminders sent' : 'Remind everyone still open'}
+              aria-label="Remind everyone still open"
+              disabled={groupReminded} onClick={() => remindGroup(g)}>
+              <i className={`bi ${groupReminded ? 'bi-check2-circle' : 'bi-alarm'}`} />
+            </button>
+          )}
+          {canManage && (
+            <button className="ac-icon-btn" title="Edit task for everyone" aria-label="Edit task for everyone"
+              onClick={() => openEditGroup(g)}>
+              <i className="bi bi-pencil" />
+            </button>
+          )}
+          {canManage && (
+            <button className="ac-icon-btn danger" title="Delete for everyone" aria-label="Delete for everyone"
+              onClick={() => removeGroup(g)}>
+              <i className="bi bi-trash" />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderItem = (g: TaskGroup) => g.isGroup
+    ? <GroupCard key={g.key} g={g} />
+    : <TaskCard key={g.tasks[0].id} t={g.tasks[0]} />;
 
   return (
     <>
@@ -521,20 +728,20 @@ export default function Tasks() {
               <>
                 <div className="ac-task-section">
                   <span className="ac-task-section-dot open" />Open
-                  <span className="ac-task-section-count">{openTasks.length}</span>
+                  <span className="ac-task-section-count">{openGroups.length}</span>
                 </div>
-                {openTasks.length === 0 ? (
+                {openGroups.length === 0 ? (
                   <Card body className="text-muted text-center py-3 mb-4">Nothing open here. 🎉</Card>
                 ) : (
-                  <div className="ac-list mb-4">{openTasks.map(t => <TaskCard key={t.id} t={t} />)}</div>
+                  <div className="ac-list mb-4">{openGroups.map(renderItem)}</div>
                 )}
-                {doneTasks.length > 0 && (
+                {doneGroups.length > 0 && (
                   <>
                     <div className="ac-task-section">
                       <span className="ac-task-section-dot done" />Done
-                      <span className="ac-task-section-count">{doneTasks.length}</span>
+                      <span className="ac-task-section-count">{doneGroups.length}</span>
                     </div>
-                    <div className="ac-list">{doneTasks.map(t => <TaskCard key={t.id} t={t} />)}</div>
+                    <div className="ac-list">{doneGroups.map(renderItem)}</div>
                   </>
                 )}
               </>
@@ -578,26 +785,41 @@ export default function Tasks() {
       <Modal show={show} onHide={() => setShow(false)} centered>
         <Form onSubmit={submit}>
           <Modal.Header closeButton>
-            <Modal.Title>{editingId ? 'Edit Task' : 'New Task'}</Modal.Title>
+            <Modal.Title>{editingId || editingGroupId ? 'Edit Task' : 'New Task'}</Modal.Title>
           </Modal.Header>
           <Modal.Body>
             {err && <Alert variant="danger">{err}</Alert>}
             <Form.Group className="mb-3">
-              <Form.Label>Assign to</Form.Label>
-              <Form.Select required value={form.assignee_id} onChange={e => setForm({ ...form, assignee_id: e.target.value })}>
-                <option value="">Choose…</option>
-                {isBob && teamLeads.length > 0 && (
-                  <optgroup label="Team Leads">
-                    {teamLeads.map(a => <option key={a.id} value={a.id}>{a.full_name || a.email}</option>)}
-                  </optgroup>
+              <Form.Label>
+                Assign to
+                {!editingId && !editingGroupId && form.assignee_ids.length > 1 && (
+                  <span className="text-muted ms-2 small">{form.assignee_ids.length} selected</span>
                 )}
-                {myApcs.length > 0 && (
-                  isBob
-                    ? <optgroup label="APCs">{myApcs.map(a => <option key={a.id} value={a.id}>{a.full_name || a.email}</option>)}</optgroup>
-                    : myApcs.map(a => <option key={a.id} value={a.id}>{a.full_name || a.email}</option>)
-                )}
-              </Form.Select>
-              {myApcs.length === 0 && teamLeads.length === 0 && <Form.Text className="text-danger">You have no APCs yet.</Form.Text>}
+              </Form.Label>
+              {editingGroupId ? (
+                // Group edit changes shared fields for a fixed set of people.
+                <>
+                  <div className="ac-assignee-chips">
+                    {form.assignee_ids.map(id => (
+                      <span key={id} className="ac-assignee-chip static">
+                        <Avatar name={personName(id)} size="sm" /> {personName(id)}
+                      </span>
+                    ))}
+                  </div>
+                  <Form.Text className="text-muted">Editing for all {form.assignee_ids.length} people. Changes apply to everyone; each keeps their own status.</Form.Text>
+                </>
+              ) : (
+                <>
+                  <AssigneePicker
+                    apcs={myApcs} leads={teamLeads} isBob={isBob}
+                    multiple={!editingId}
+                    value={form.assignee_ids}
+                    onChange={ids => setForm({ ...form, assignee_ids: ids })}
+                  />
+                  {editingId && <Form.Text className="text-muted">A task has one assignee. To give it to more people, create a new task.</Form.Text>}
+                  {myApcs.length === 0 && teamLeads.length === 0 && <Form.Text className="text-danger d-block">You have no APCs yet.</Form.Text>}
+                </>
+              )}
             </Form.Group>
             <Form.Group className="mb-3">
               <Form.Label>Title</Form.Label>
@@ -653,8 +875,14 @@ export default function Tasks() {
           </Modal.Body>
           <Modal.Footer>
             <Button variant="secondary" onClick={() => setShow(false)} disabled={saving}>Cancel</Button>
-            <Button type="submit" disabled={saving || !form.assignee_id || !form.title.trim()}>
-              {saving ? (editingId ? 'Saving…' : 'Creating…') : (editingId ? 'Save changes' : 'Assign task')}
+            <Button type="submit" disabled={saving || form.assignee_ids.length === 0 || !form.title.trim()}>
+              {saving
+                ? (editingId || editingGroupId ? 'Saving…' : 'Creating…')
+                : editingId || editingGroupId
+                  ? 'Save changes'
+                  : form.assignee_ids.length > 1
+                    ? `Assign to ${form.assignee_ids.length} people`
+                    : 'Assign task'}
             </Button>
           </Modal.Footer>
         </Form>
@@ -737,10 +965,136 @@ export default function Tasks() {
         <ManageOrgModal
           show={showOrg} onHide={() => setShowOrg(false)}
           folders={folders} labels={labels} myId={myId} isBob={isBob}
-          onChanged={load}
+          onChanged={() => load({ silent: true })}
         />
       )}
     </>
+  );
+}
+
+// ---- Searchable (multi-)select for task assignees ----
+// Bob picks from Team Leads + APCs, a Team Lead from their own APCs. In `multiple`
+// mode (new task) selecting fans the task out to everyone chosen; on edit it acts
+// as a single-select since a task row has one assignee.
+function AssigneePicker({ apcs, leads, isBob, multiple, value, onChange }: {
+  apcs: PersonLite[]; leads: PersonLite[]; isBob: boolean; multiple: boolean;
+  value: string[]; onChange: (ids: string[]) => void;
+}) {
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const nameOf = (p: PersonLite) => p.full_name || p.email;
+  const selected = new Set(value);
+
+  // Close the dropdown when clicking outside the picker.
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+  const needle = q.trim().toLowerCase();
+  const match = (p: PersonLite) => !needle || nameOf(p).toLowerCase().includes(needle);
+  const fLeads = leads.filter(match);
+  const fApcs = apcs.filter(match);
+  const byId = useMemo(() => {
+    const m = new Map<string, PersonLite>();
+    [...leads, ...apcs].forEach(p => m.set(p.id, p));
+    return m;
+  }, [leads, apcs]);
+
+  const toggle = (id: string) => {
+    if (!multiple) { onChange([id]); setOpen(false); return; }
+    const n = new Set(selected);
+    n.has(id) ? n.delete(id) : n.add(id);
+    onChange(Array.from(n));
+  };
+  const addAll = (list: PersonLite[]) => {
+    const n = new Set(selected);
+    list.forEach(p => n.add(p.id));
+    onChange(Array.from(n));
+  };
+  const removeChip = (id: string) => onChange(value.filter(x => x !== id));
+
+  const Row = (p: PersonLite) => {
+    const on = selected.has(p.id);
+    return (
+      <button type="button" key={p.id}
+        className={`ac-assignee-opt ${on ? 'on' : ''}`}
+        aria-pressed={on} onClick={() => toggle(p.id)}>
+        <Avatar name={nameOf(p)} size="sm" />
+        <span className="ac-assignee-opt-name">{nameOf(p)}</span>
+        <i className={`bi ${on ? (multiple ? 'bi-check-square-fill' : 'bi-check-circle-fill') : (multiple ? 'bi-square' : 'bi-circle')}`} />
+      </button>
+    );
+  };
+
+  return (
+    <div className="ac-assignee-picker" ref={ref}>
+      {multiple && value.length > 0 && (
+        <div className="ac-assignee-chips">
+          {value.map(id => {
+            const p = byId.get(id);
+            return (
+              <span key={id} className="ac-assignee-chip">
+                {p ? nameOf(p) : 'Unknown'}
+                <button type="button" aria-label="Remove" onClick={() => removeChip(id)}><i className="bi bi-x" /></button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+      <div className={`ac-assignee-search ${open ? 'open' : ''}`} onClick={() => setOpen(true)}>
+        <i className="bi bi-search" />
+        <input type="search" value={q} onChange={e => setQ(e.target.value)}
+          onFocus={() => setOpen(true)}
+          placeholder="Search people…" aria-label="Search people to assign"
+          aria-expanded={open} />
+        <i className={`bi bi-chevron-${open ? 'up' : 'down'} ac-assignee-caret`} />
+      </div>
+      {open && (
+        <div className="ac-assignee-dropdown">
+          {multiple && (fApcs.length > 0 || fLeads.length > 0) && (
+            <div className="ac-assignee-quick">
+              {fApcs.length > 0 && (
+                <button type="button" onClick={() => addAll(fApcs)}>
+                  <i className="bi bi-people me-1" />Select all APCs{needle ? ' (filtered)' : ''} ({fApcs.length})
+                </button>
+              )}
+              {isBob && fLeads.length > 0 && (
+                <button type="button" onClick={() => addAll(fLeads)}>
+                  <i className="bi bi-people me-1" />Select all Team Leads{needle ? ' (filtered)' : ''} ({fLeads.length})
+                </button>
+              )}
+              {value.length > 0 && (
+                <button type="button" className="clear" onClick={() => onChange([])}>
+                  <i className="bi bi-x-circle me-1" />Clear
+                </button>
+              )}
+            </div>
+          )}
+          <div className="ac-assignee-list">
+            {fLeads.length === 0 && fApcs.length === 0 && (
+              <div className="text-muted text-center py-2 small">No matches.</div>
+            )}
+            {isBob && fLeads.length > 0 && (
+              <>
+                <div className="ac-assignee-group">Team Leads</div>
+                {fLeads.map(Row)}
+              </>
+            )}
+            {fApcs.length > 0 && (
+              <>
+                {isBob && fLeads.length > 0 && <div className="ac-assignee-group">APCs</div>}
+                {fApcs.map(Row)}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
