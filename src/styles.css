@@ -3225,3 +3225,125 @@ input[type="number"] {
   .ac-profile-pw-toggle { transition: none; }
   .ac-profile-avatar-edit:hover:not(:disabled) { transform: none; }
 }
+
+/* =========================================================
+   Tasks page — visual refresh (micro-interactions, on brand)
+   Layered on top of the base .ac-task / rail / modal rules above.
+   ========================================================= */
+
+/* --- Hero header: gradient panel with icon badge + stat chips --- */
+.ac-tasks-header {
+  position: relative; overflow: hidden;
+  align-items: center;
+  padding: 20px 24px;
+  border-radius: var(--ac-radius);
+  background:
+    radial-gradient(760px 200px at 92% -60%, rgba(232,134,46,.20), transparent 62%),
+    linear-gradient(135deg, #fff 0%, var(--ac-bg-light) 100%);
+  border: 1px solid var(--ac-line-l);
+  box-shadow: 0 8px 26px rgba(20,22,32,.06);
+}
+.ac-tasks-head-left { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.ac-tasks-head-icon {
+  flex: none; width: 52px; height: 52px; border-radius: 15px;
+  display: flex; align-items: center; justify-content: center; font-size: 1.5rem; color: #fff;
+  background: linear-gradient(135deg, var(--ac-primary) 0%, var(--ac-primary-2) 100%);
+  box-shadow: 0 10px 24px rgba(232,134,46,.34);
+}
+.ac-tasks-head-text h2 { font-size: 1.55rem; margin: 0; }
+.ac-tasks-header .ac-task-stats { margin-top: 7px; }
+.ac-tasks-header .ac-task-stat {
+  box-shadow: 0 2px 8px rgba(20,22,32,.05);
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+.ac-tasks-header .ac-task-stat:hover { transform: translateY(-1px); box-shadow: 0 5px 14px rgba(20,22,32,.09); }
+.ac-tasks-header .ac-task-stat.high i { color: #dc2626; }
+.ac-tasks-header .ac-task-stat.over i { color: #b45309; }
+
+/* --- Task cards: rounded accent bar + softer tint + tactile hover --- */
+.ac-tasks-main .ac-task,
+.ac-task-group.ac-task {
+  border-left-width: 1px;              /* drop the flat colour border… */
+  border-radius: 15px;
+  padding-left: 20px;                  /* room for the pseudo accent bar */
+  transition: box-shadow .2s ease, transform .18s ease, border-color .18s ease;
+}
+/* …replace it with a pill accent bar so corners stay clean */
+.ac-tasks-main .ac-task::before,
+.ac-task-group.ac-task::before {
+  content: ""; position: absolute; left: 8px; top: 12px; bottom: 12px;
+  width: 4px; border-radius: 999px; background: var(--ac-line-l);
+  transition: background-color .18s ease, top .18s ease, bottom .18s ease;
+}
+.ac-tasks-main .ac-task--high::before, .ac-task-group.ac-task--high::before { background: #ef4444; }
+.ac-tasks-main .ac-task--mid::before,  .ac-task-group.ac-task--mid::before  { background: #f59e0b; }
+.ac-tasks-main .ac-task--low::before,  .ac-task-group.ac-task--low::before  { background: #3b82f6; }
+/* subtler tint (horizontal fade) than the flat wash */
+.ac-tasks-main .ac-task--high { background: linear-gradient(90deg, rgba(239,68,68,.07), rgba(239,68,68,0) 42%); }
+.ac-tasks-main .ac-task--mid  { background: linear-gradient(90deg, rgba(245,158,11,.08), rgba(245,158,11,0) 42%); }
+.ac-tasks-main .ac-task--low  { background: linear-gradient(90deg, rgba(59,130,246,.07), rgba(59,130,246,0) 42%); }
+.ac-tasks-main .ac-task:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 30px rgba(20,22,32,.10);
+}
+.ac-tasks-main .ac-task:hover::before { top: 8px; bottom: 8px; }
+.ac-tasks-main .ac-task.opacity-75 { opacity: .72; }
+.ac-tasks-main .ac-task.opacity-75:hover { opacity: 1; }
+
+/* --- Status filter: grouped into one segmented surface --- */
+.ac-tasks-main .ac-status-filter {
+  background: #fff; border: 1px solid var(--ac-line-l);
+  border-radius: var(--ac-radius-pill); padding: 5px;
+  gap: 4px; width: fit-content; max-width: 100%;
+  box-shadow: 0 2px 8px rgba(20,22,32,.04);
+}
+.ac-tasks-main .ac-status-filter-opt { border-color: transparent; background: transparent; }
+.ac-tasks-main .ac-status-filter-opt:hover { background: rgba(20,22,32,.04); border-color: transparent; }
+
+/* --- Section headers: label + trailing hairline --- */
+.ac-task-section { position: relative; }
+.ac-task-section::after {
+  content: ""; flex: 1; height: 1px; margin-left: 4px;
+  background: linear-gradient(90deg, var(--ac-line-l), transparent);
+}
+
+/* --- Left rail: gradient active state + lift --- */
+.ac-tasks-rail { box-shadow: 0 6px 22px rgba(20,22,32,.05); }
+.ac-rail-item.active {
+  background: linear-gradient(135deg, var(--ac-primary) 0%, var(--ac-primary-2) 100%);
+  box-shadow: 0 6px 16px rgba(232,134,46,.28);
+}
+.ac-rail-item:hover:not(.active) { transform: translateX(2px); }
+
+/* --- Quick-assign rails: gradient badges --- */
+.ac-tl-rail { box-shadow: 0 6px 22px rgba(20,22,32,.05); }
+.ac-tl-badge { background: linear-gradient(135deg, var(--ac-primary), var(--ac-primary-2)); }
+.ac-brandbar { box-shadow: 0 4px 16px rgba(20,22,32,.05); }
+
+/* --- Priority + status pills: hairline ring for crispness --- */
+.ac-prio-pill { box-shadow: inset 0 0 0 1px rgba(20,22,32,.04); }
+
+/* --- Group progress bar: brand-tinted track --- */
+.ac-group-bar > span { background: linear-gradient(90deg, var(--ac-primary), var(--ac-primary-2)); }
+
+/* --- Empty state icon: gradient like the hero --- */
+.ac-tasks-main .ac-empty .ac-empty-icon {
+  background: linear-gradient(135deg, var(--ac-primary-soft), rgba(245,161,66,.16));
+  color: var(--ac-primary);
+}
+
+@media (max-width: 640px) {
+  .ac-tasks-header { padding: 16px; }
+  .ac-tasks-head-icon { width: 44px; height: 44px; font-size: 1.25rem; border-radius: 13px; }
+  .ac-tasks-head-text h2 { font-size: 1.3rem; }
+}
+
+/* Keep motion calm for users who ask for it */
+@media (prefers-reduced-motion: reduce) {
+  .ac-tasks-header .ac-task-stat,
+  .ac-tasks-main .ac-task,
+  .ac-rail-item { transition: none; }
+  .ac-tasks-header .ac-task-stat:hover,
+  .ac-tasks-main .ac-task:hover,
+  .ac-rail-item:hover:not(.active) { transform: none; }
+}

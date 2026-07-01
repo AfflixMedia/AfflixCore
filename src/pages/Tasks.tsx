@@ -819,13 +819,16 @@ export default function Tasks() {
 
   return (
     <>
-      <div className="ac-page-header">
-        <div className="d-flex align-items-center gap-3 flex-wrap">
-          <h2>{isApc ? 'My Tasks' : 'Tasks'}</h2>
-          <div className="ac-task-stats">
-            <span className="ac-task-stat"><span className="ac-task-stat-num">{stats.total}</span> open</span>
-            {stats.high > 0 && <span className="ac-task-stat high"><i className="bi bi-flag-fill" />{stats.high} high</span>}
-            {stats.overdue > 0 && <span className="ac-task-stat over"><i className="bi bi-exclamation-triangle-fill" />{stats.overdue} overdue</span>}
+      <div className="ac-page-header ac-tasks-header">
+        <div className="ac-tasks-head-left">
+          <div className="ac-tasks-head-icon"><i className="bi bi-check2-square" /></div>
+          <div className="ac-tasks-head-text">
+            <h2>{isApc ? 'My Tasks' : 'Tasks'}</h2>
+            <div className="ac-task-stats">
+              <span className="ac-task-stat"><span className="ac-task-stat-num">{stats.total}</span> open</span>
+              {stats.high > 0 && <span className="ac-task-stat high"><i className="bi bi-flag-fill" />{stats.high} high</span>}
+              {stats.overdue > 0 && <span className="ac-task-stat over"><i className="bi bi-exclamation-triangle-fill" />{stats.overdue} overdue</span>}
+            </div>
           </div>
         </div>
         <div className="d-flex align-items-center gap-2 flex-wrap">
