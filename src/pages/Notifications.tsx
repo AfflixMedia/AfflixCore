@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, Button, Badge, Spinner, Nav } from 'react-bootstrap';
 import { useNotifications, Notification } from '../notifications/NotificationsContext';
+import { useAuth } from '../auth/AuthContext';
 
 type TabKey = 'all' | 'unread' | 'chats' | 'tasks' | 'weekly' | 'monthly';
 
@@ -25,8 +26,14 @@ const reportKind = (n: Notification): 'weekly' | 'monthly' | null => {
 
 export default function NotificationsPage() {
   const { notifications, unreadCount, loading, markRead, markAllRead, remove } = useNotifications();
+  const { profile } = useAuth();
   const nav = useNavigate();
   const [tab, setTab] = useState<TabKey>('unread');
+
+  // Chats / Tasks / Reporting notifications only ever reach internal staff
+  // (bob / team_lead / apc). Paid-collab clients & handlers see only Unread + All.
+  const role = profile?.role;
+  const isInternalStaff = role === 'bob' || role === 'team_lead' || role === 'apc';
 
   const chatCount = useMemo(() => notifications.filter(n => isChatNotif(n.type)).length, [notifications]);
   const taskCount = useMemo(() => notifications.filter(isTaskNotif).length, [notifications]);
@@ -97,34 +104,36 @@ export default function NotificationsPage() {
                 )}
               </Nav.Link>
             </Nav.Item>
-            <Nav.Item>
-              <Nav.Link eventKey="chats" style={tab === 'chats' ? { color: accents.chats, borderBottomColor: accents.chats } : undefined}>
-                <i className="bi bi-chat-dots me-1" />
-                Chats
-                <Badge bg="secondary" pill className="ms-2">{chatCount}</Badge>
-              </Nav.Link>
-            </Nav.Item>
-            <Nav.Item>
-              <Nav.Link eventKey="tasks" style={tab === 'tasks' ? { color: accents.tasks, borderBottomColor: accents.tasks } : undefined}>
-                <i className="bi bi-check2-square me-1" />
-                Tasks
-                <Badge bg="secondary" pill className="ms-2">{taskCount}</Badge>
-              </Nav.Link>
-            </Nav.Item>
-            <Nav.Item>
-              <Nav.Link eventKey="weekly" style={tab === 'weekly' ? { color: accents.weekly, borderBottomColor: accents.weekly } : undefined}>
-                <i className="bi bi-calendar-week me-1" />
-                Weekly Reporting
-                <Badge bg="secondary" pill className="ms-2">{weeklyCount}</Badge>
-              </Nav.Link>
-            </Nav.Item>
-            <Nav.Item>
-              <Nav.Link eventKey="monthly" style={tab === 'monthly' ? { color: accents.monthly, borderBottomColor: accents.monthly } : undefined}>
-                <i className="bi bi-calendar-month me-1" />
-                Monthly Reporting
-                <Badge bg="secondary" pill className="ms-2">{monthlyCount}</Badge>
-              </Nav.Link>
-            </Nav.Item>
+            {isInternalStaff && <>
+              <Nav.Item>
+                <Nav.Link eventKey="chats" style={tab === 'chats' ? { color: accents.chats, borderBottomColor: accents.chats } : undefined}>
+                  <i className="bi bi-chat-dots me-1" />
+                  Chats
+                  <Badge bg="secondary" pill className="ms-2">{chatCount}</Badge>
+                </Nav.Link>
+              </Nav.Item>
+              <Nav.Item>
+                <Nav.Link eventKey="tasks" style={tab === 'tasks' ? { color: accents.tasks, borderBottomColor: accents.tasks } : undefined}>
+                  <i className="bi bi-check2-square me-1" />
+                  Tasks
+                  <Badge bg="secondary" pill className="ms-2">{taskCount}</Badge>
+                </Nav.Link>
+              </Nav.Item>
+              <Nav.Item>
+                <Nav.Link eventKey="weekly" style={tab === 'weekly' ? { color: accents.weekly, borderBottomColor: accents.weekly } : undefined}>
+                  <i className="bi bi-calendar-week me-1" />
+                  Weekly Reporting
+                  <Badge bg="secondary" pill className="ms-2">{weeklyCount}</Badge>
+                </Nav.Link>
+              </Nav.Item>
+              <Nav.Item>
+                <Nav.Link eventKey="monthly" style={tab === 'monthly' ? { color: accents.monthly, borderBottomColor: accents.monthly } : undefined}>
+                  <i className="bi bi-calendar-month me-1" />
+                  Monthly Reporting
+                  <Badge bg="secondary" pill className="ms-2">{monthlyCount}</Badge>
+                </Nav.Link>
+              </Nav.Item>
+            </>}
             <Nav.Item>
               <Nav.Link eventKey="all">
                 <i className="bi bi-list-ul me-1" />
