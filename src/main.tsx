@@ -9,6 +9,7 @@ import { AuthProvider } from './auth/AuthContext';
 import { NotificationsProvider } from './notifications/NotificationsContext';
 import { TaskReminderProvider } from './notifications/TaskReminderContext';
 import { registerSW } from './notifications/swSetup';
+import InstallPrompt from './components/InstallPrompt';
 
 registerSW();
 
@@ -19,6 +20,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <NotificationsProvider>
           <TaskReminderProvider>
             <App />
+            <InstallPrompt />
           </TaskReminderProvider>
         </NotificationsProvider>
       </AuthProvider>
