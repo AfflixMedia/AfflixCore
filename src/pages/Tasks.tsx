@@ -24,6 +24,12 @@ interface Task {
   completed_at: string | null;
   group_id: string | null;
   seen_at: string | null;
+  recurrence_id: string | null;
+}
+// One firing of a recurrence (history record).
+interface RecurrenceRun {
+  id: string; recurrence_id: string; run_on: string; group_id: string | null;
+  task_count: number; created_at: string;
 }
 // A card in the assigner's list: either a single task (isGroup=false) or a set
 // of rows sharing a group_id — one task assigned to several people.
@@ -98,9 +104,11 @@ export default function Tasks() {
   const [folders, setFolders] = useState<OrgItem[]>([]);
   const [labels, setLabels] = useState<OrgItem[]>([]);
   const [recurrences, setRecurrences] = useState<Recurrence[]>([]);
+  const [recurrenceRuns, setRecurrenceRuns] = useState<RecurrenceRun[]>([]);
   // Latest reminder per task_id → drives the "acknowledged by" chip.
   const [reminderByTask, setReminderByTask] = useState<Map<string, ReminderLite>>(new Map());
   const [showRecur, setShowRecur] = useState(false);
+  const [runHist, setRunHist] = useState<string | null>(null); // recurrence whose history is expanded
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
@@ -133,12 +141,16 @@ export default function Tasks() {
   const load = async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
     setErr(null);
-    // Materialize any due recurring tasks first, so they show up in this fetch.
-    // Idempotent server-side; only staff have recurrences to generate.
-    if (!opts?.silent && canAssign) {
-      await supabase.rpc('generate_due_recurring_tasks');
+    // Before fetching: materialize any due recurring tasks (assigner only) and
+    // fire auto-reminders for tasks whose due date has arrived (all users, so an
+    // assignee opening their own list triggers their own due reminders). Both are
+    // idempotent server-side.
+    if (!opts?.silent) {
+      const pre: PromiseLike<any>[] = [supabase.rpc('fire_due_task_reminders')];
+      if (canAssign) pre.push(supabase.rpc('generate_due_recurring_tasks'));
+      await Promise.all(pre);
     }
-    const [tRes, brRes, apcRes, tlRes, fRes, lRes, abRes, tlbRes, recRes, remRes] = await Promise.all([
+    const [tRes, brRes, apcRes, tlRes, fRes, lRes, abRes, tlbRes, recRes, remRes, runRes] = await Promise.all([
       supabase.from('tasks').select('*').order('status').order('due_date', { nullsFirst: false }).order('created_at', { ascending: false }),
       canAssign ? supabase.from('brands').select('id,name').order('name') : Promise.resolve({ data: [], error: null }),
       canAssign ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('role', 'apc').order('full_name') : Promise.resolve({ data: [], error: null }),
@@ -149,6 +161,7 @@ export default function Tasks() {
       isBob ? supabase.from('team_lead_brands').select('team_lead_id,brand_id') : Promise.resolve({ data: [], error: null }),
       canAssign ? supabase.from('task_recurrences').select('*').order('created_at', { ascending: false }) : Promise.resolve({ data: [], error: null }),
       supabase.from('task_reminders').select('id,task_id,assignee_id,created_by,created_at,acknowledged_at,ack_response').order('created_at', { ascending: false }),
+      canAssign ? supabase.from('task_recurrence_runs').select('*').order('run_on', { ascending: false }) : Promise.resolve({ data: [], error: null }),
     ]);
     if (tRes.error) { setErr(tRes.error.message); setLoading(false); return; }
     const ts = (tRes.data as Task[]) ?? [];
@@ -159,6 +172,7 @@ export default function Tasks() {
     setFolders(((fRes as any).data ?? []) as OrgItem[]);
     setLabels(((lRes as any).data ?? []) as OrgItem[]);
     setRecurrences(((recRes as any).data ?? []) as Recurrence[]);
+    setRecurrenceRuns(((runRes as any).data ?? []) as RecurrenceRun[]);
     setBrandApc(new Map(((abRes as any).data ?? []).map((r: any) => [r.brand_id, r.apc_id])));
     setBrandLead(new Map(((tlbRes as any).data ?? []).map((r: any) => [r.brand_id, r.team_lead_id])));
     // Latest reminder per task (rows arrive newest-first, so first wins).
@@ -188,6 +202,7 @@ export default function Tasks() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => load({ silent: true }))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'task_reminders' }, () => load({ silent: true }))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'task_recurrences' }, () => load({ silent: true }))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_recurrence_runs' }, () => load({ silent: true }))
       .subscribe();
     return () => { supabase.removeChannel(ch); };
     // eslint-disable-next-line
@@ -213,6 +228,12 @@ export default function Tasks() {
   // since folders & labels are each assigner's own private organisation.
   const myFolders = useMemo(() => folders.filter(f => isBob || f.owner_id === myId), [folders, isBob, myId]);
   const myLabels = useMemo(() => labels.filter(l => isBob || l.owner_id === myId), [labels, isBob, myId]);
+  // Firing history grouped per schedule (runs already arrive newest-first).
+  const runsByRecurrence = useMemo(() => {
+    const m = new Map<string, RecurrenceRun[]>();
+    recurrenceRuns.forEach(run => { const a = m.get(run.recurrence_id) ?? []; a.push(run); m.set(run.recurrence_id, a); });
+    return m;
+  }, [recurrenceRuns]);
   // Every person we might need a name for (assignees, creators, brand owners).
   const allPeople = useMemo(() => {
     const m = new Map<string, string>();
@@ -630,6 +651,7 @@ export default function Tasks() {
           onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDetailId(t.id); } }}>
           <div className="ac-row-name d-flex align-items-center gap-2 flex-wrap">
             <span className={t.status === 'done' ? 'text-decoration-line-through text-muted' : ''}>{t.title}</span>
+            {t.recurrence_id && <i className="bi bi-arrow-repeat ac-recur-mark" title="Created by a recurring schedule" />}
             <span className={`ac-prio-pill prio-${t.priority}`}>{t.priority}</span>
             <StatusControl t={t} canUpdate={canComplete} />
             {overdue && <Badge bg="danger">Overdue</Badge>}
@@ -1354,6 +1376,33 @@ export default function Tasks() {
                           {r.due_offset_days != null && <span><i className="bi bi-calendar-event me-1" />due {r.due_offset_days === 0 ? 'same day' : `+${r.due_offset_days}d`}</span>}
                           {r.active && <span className="text-muted"><i className="bi bi-arrow-right-short" />next {new Date(r.next_run).toLocaleDateString()}</span>}
                         </div>
+                        {(() => {
+                          const runs = runsByRecurrence.get(r.id) ?? [];
+                          if (runs.length === 0) return <div className="ac-row-sub text-muted mt-1"><i className="bi bi-clock-history me-1" />Not run yet</div>;
+                          const totalTasks = runs.reduce((s, x) => s + x.task_count, 0);
+                          const open = runHist === r.id;
+                          return (
+                            <>
+                              <button type="button" className="ac-run-hist-toggle mt-1"
+                                onClick={() => setRunHist(open ? null : r.id)} aria-expanded={open}>
+                                <i className={`bi bi-chevron-${open ? 'down' : 'right'} me-1`} />
+                                Fired {runs.length}× · {totalTasks} task{totalTasks === 1 ? '' : 's'} created · last {new Date(runs[0].run_on).toLocaleDateString()}
+                              </button>
+                              {open && (
+                                <div className="ac-run-hist">
+                                  {runs.slice(0, 12).map(run => (
+                                    <div key={run.id} className="ac-run-hist-row">
+                                      <i className="bi bi-dot" />
+                                      <span>{new Date(run.run_on).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                                      <span className="text-muted">— {run.task_count} task{run.task_count === 1 ? '' : 's'}</span>
+                                    </div>
+                                  ))}
+                                  {runs.length > 12 && <div className="text-muted small ps-3">+{runs.length - 12} earlier…</div>}
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
                       <div className="ac-row-actions">
                         <button className="ac-icon-btn" title={r.active ? 'Pause' : 'Resume'}

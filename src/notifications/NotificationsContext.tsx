@@ -72,13 +72,16 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
         (p) => {
           const n = p.new as Notification;
           setNotifications(prev => [n, ...prev].slice(0, PAGE_SIZE));
-          // Foreground OS notification — normally only when web push ISN'T delivering
-          // one (otherwise the SW push + this would duplicate). Note reminders are an
-          // exception: they're inserted directly by the front-end RPC and are NOT sent
-          // through send-push unless the pg_cron job is configured, so always show them
-          // in the foreground regardless of push subscription.
-          const isReminder = n.type === 'note_reminder';
-          if ((isReminder || !hasPushSub.current) && 'Notification' in window && Notification.permission === 'granted') {
+          // Foreground OS notification. We normally suppress it when a web-push
+          // subscription exists (the SW push would deliver one → avoid duplicates).
+          // BUT the internal, realtime-inserted types below are NEVER sent through
+          // send-push (only the client-facing share/comment edge functions call it),
+          // so for them the in-tab popup is the ONLY delivery — always show it.
+          const FOREGROUND_ALWAYS = new Set([
+            'task', 'task_reminder', 'task_reminder_ack', 'chat', 'chat_mention', 'note_reminder',
+          ]);
+          const alwaysForeground = FOREGROUND_ALWAYS.has(n.type);
+          if ((alwaysForeground || !hasPushSub.current) && 'Notification' in window && Notification.permission === 'granted') {
             try {
               const ni = new Notification(n.title, { body: n.body ?? undefined, tag: n.id, icon: '/icon-192.png' });
               ni.onclick = () => { window.focus(); if (n.link) window.location.assign(n.link); };

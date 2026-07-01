@@ -2617,6 +2617,21 @@ input[type="number"] {
   display: flex; align-items: center; justify-content: center;
   background: var(--ac-primary-soft); color: var(--ac-primary); font-size: 1.15rem;
 }
+/* Small "created by a recurring schedule" marker on task cards */
+.ac-recur-mark { color: var(--ac-primary); font-size: .85rem; opacity: .8; }
+/* Recurrence firing history in the manager */
+.ac-run-hist-toggle {
+  border: none; background: transparent; padding: 0; cursor: pointer;
+  color: var(--ac-text-muted); font-size: .8rem; font-weight: 600;
+  display: inline-flex; align-items: center;
+}
+.ac-run-hist-toggle:hover { color: var(--ac-primary); }
+.ac-run-hist {
+  margin-top: 6px; padding: 8px 10px; border-radius: 8px;
+  background: rgba(20,22,32,.03); border: 1px solid var(--ac-line-l);
+  display: flex; flex-direction: column; gap: 2px; max-height: 200px; overflow-y: auto;
+}
+.ac-run-hist-row { display: flex; align-items: center; gap: 4px; font-size: .8rem; }
 
 /* Open / Done section headers */
 .ac-task-section {
