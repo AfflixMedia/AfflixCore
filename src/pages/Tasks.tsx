@@ -5,6 +5,7 @@ import { useAuth } from '../auth/AuthContext';
 import Avatar from '../components/Avatar';
 
 type Priority = 'low' | 'mid' | 'high';
+type Repeat = 'none' | 'daily' | 'weekly' | 'monthly' | 'every_n_days';
 
 interface Task {
   id: string;
@@ -21,6 +22,7 @@ interface Task {
   created_at: string;
   completed_at: string | null;
   group_id: string | null;
+  seen_at: string | null;
 }
 // A card in the assigner's list: either a single task (isGroup=false) or a set
 // of rows sharing a group_id — one task assigned to several people.
@@ -28,6 +30,38 @@ interface TaskGroup { key: string; tasks: Task[]; isGroup: boolean; }
 interface PersonLite { id: string; full_name: string | null; email: string; }
 interface BrandLite { id: string; name: string; }
 interface OrgItem { id: string; name: string; color: string | null; owner_id: string; }
+// A reminder row (used to surface acknowledgements in the task list).
+interface ReminderLite {
+  id: string; task_id: string; assignee_id: string; created_by: string | null;
+  created_at: string; acknowledged_at: string | null;
+  ack_response: 'seen' | 'on_it' | 'done' | null;
+}
+// A recurring-task schedule (auto-assigns each period).
+interface Recurrence {
+  id: string; created_by: string | null; title: string; description: string | null;
+  brand_id: string | null; priority: Priority; folder_id: string | null; label_ids: string[];
+  assignee_ids: string[]; frequency: Exclude<Repeat, 'none'>;
+  interval_days: number | null; weekday: number | null; day_of_month: number | null;
+  due_offset_days: number | null; active: boolean; next_run: string; last_run_at: string | null;
+  created_at: string;
+}
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const ACK_META: Record<'seen' | 'on_it' | 'done', { icon: string; label: string; cls: string }> = {
+  seen: { icon: '👁', label: 'Seen', cls: 'seen' },
+  on_it: { icon: '👍', label: 'On it', cls: 'onit' },
+  done: { icon: '✅', label: 'Done', cls: 'done' },
+};
+
+// Plain-language description of the repeat settings on the create form.
+function recurrencePreview(f: { repeat: Repeat; rep_weekday: number; rep_dom: number; rep_n: number }): string {
+  switch (f.repeat) {
+    case 'daily': return 'every day';
+    case 'weekly': return `every ${WEEKDAYS[f.rep_weekday]}`;
+    case 'monthly': return `monthly on day ${f.rep_dom}`;
+    case 'every_n_days': return `every ${f.rep_n} days`;
+    default: return '';
+  }
+}
 
 const PRIORITIES: { value: Priority; label: string }[] = [
   { value: 'low', label: 'Low' },
@@ -56,6 +90,10 @@ export default function Tasks() {
   const [brandLead, setBrandLead] = useState<Map<string, string>>(new Map());
   const [folders, setFolders] = useState<OrgItem[]>([]);
   const [labels, setLabels] = useState<OrgItem[]>([]);
+  const [recurrences, setRecurrences] = useState<Recurrence[]>([]);
+  // Latest reminder per task_id → drives the "acknowledged by" chip.
+  const [reminderByTask, setReminderByTask] = useState<Map<string, ReminderLite>>(new Map());
+  const [showRecur, setShowRecur] = useState(false);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
@@ -74,6 +112,8 @@ export default function Tasks() {
   const [form, setForm] = useState({
     assignee_ids: [] as string[], brand_id: '', title: '', description: '', due_date: '',
     priority: 'mid' as Priority, folder_id: '', label_ids: [] as string[],
+    // Recurrence (new task only): 'none' = one-off. rep_due '' = no due date.
+    repeat: 'none' as Repeat, rep_weekday: 1, rep_dom: 1, rep_n: 7, rep_due: '' as string,
   });
   const [saving, setSaving] = useState(false);
   const [reminded, setReminded] = useState<Set<string>>(new Set());
@@ -85,7 +125,12 @@ export default function Tasks() {
   const load = async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
     setErr(null);
-    const [tRes, brRes, apcRes, tlRes, fRes, lRes, abRes, tlbRes] = await Promise.all([
+    // Materialize any due recurring tasks first, so they show up in this fetch.
+    // Idempotent server-side; only staff have recurrences to generate.
+    if (!opts?.silent && canAssign) {
+      await supabase.rpc('generate_due_recurring_tasks');
+    }
+    const [tRes, brRes, apcRes, tlRes, fRes, lRes, abRes, tlbRes, recRes, remRes] = await Promise.all([
       supabase.from('tasks').select('*').order('status').order('due_date', { nullsFirst: false }).order('created_at', { ascending: false }),
       canAssign ? supabase.from('brands').select('id,name').order('name') : Promise.resolve({ data: [], error: null }),
       canAssign ? supabase.from('profiles').select('id,full_name,email').eq('role', 'apc').order('full_name') : Promise.resolve({ data: [], error: null }),
@@ -94,6 +139,8 @@ export default function Tasks() {
       supabase.from('task_labels').select('id,name,color,owner_id').order('name'),
       canAssign ? supabase.from('apc_brands').select('apc_id,brand_id') : Promise.resolve({ data: [], error: null }),
       isBob ? supabase.from('team_lead_brands').select('team_lead_id,brand_id') : Promise.resolve({ data: [], error: null }),
+      canAssign ? supabase.from('task_recurrences').select('*').order('created_at', { ascending: false }) : Promise.resolve({ data: [], error: null }),
+      supabase.from('task_reminders').select('id,task_id,assignee_id,created_by,created_at,acknowledged_at,ack_response').order('created_at', { ascending: false }),
     ]);
     if (tRes.error) { setErr(tRes.error.message); setLoading(false); return; }
     const ts = (tRes.data as Task[]) ?? [];
@@ -103,8 +150,13 @@ export default function Tasks() {
     setTeamLeads(((tlRes as any).data ?? []) as PersonLite[]);
     setFolders(((fRes as any).data ?? []) as OrgItem[]);
     setLabels(((lRes as any).data ?? []) as OrgItem[]);
+    setRecurrences(((recRes as any).data ?? []) as Recurrence[]);
     setBrandApc(new Map(((abRes as any).data ?? []).map((r: any) => [r.brand_id, r.apc_id])));
     setBrandLead(new Map(((tlbRes as any).data ?? []).map((r: any) => [r.brand_id, r.team_lead_id])));
+    // Latest reminder per task (rows arrive newest-first, so first wins).
+    const rmap = new Map<string, ReminderLite>();
+    (((remRes as any).data ?? []) as ReminderLite[]).forEach(r => { if (!rmap.has(r.task_id)) rmap.set(r.task_id, r); });
+    setReminderByTask(rmap);
 
     // Resolve names for assignees + creators (RLS returns what each role may see).
     const ids = Array.from(new Set(ts.flatMap(t => [t.assignee_id, t.created_by]).filter(Boolean) as string[]));
@@ -121,11 +173,13 @@ export default function Tasks() {
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [profile?.role]);
 
-  // Live updates: re-load when a task row changes that concerns me.
+  // Live updates: re-load when a task, reminder (ack), or recurrence changes.
   useEffect(() => {
     if (!myId) return;
     const ch = supabase.channel('tasks-live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => load({ silent: true }))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_reminders' }, () => load({ silent: true }))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_recurrences' }, () => load({ silent: true }))
       .subscribe();
     return () => { supabase.removeChannel(ch); };
     // eslint-disable-next-line
@@ -209,6 +263,12 @@ export default function Tasks() {
   const detailIdx = detailId ? ordered.findIndex(t => t.id === detailId) : -1;
   const detailTask = detailIdx >= 0 ? ordered[detailIdx] : null;
 
+  // Opening a task I'm assigned marks it seen (read receipt for the assigner).
+  useEffect(() => {
+    if (detailTask && detailTask.assignee_id === myId && !detailTask.seen_at) markSeen(detailTask);
+    // eslint-disable-next-line
+  }, [detailId]);
+
   // Open-task counts for the rail badges + header stats.
   const stats = useMemo(() => {
     const open = tasks.filter(t => t.status === 'open');
@@ -237,6 +297,7 @@ export default function Tasks() {
       priority: 'mid',
       folder_id: folderFilter !== 'all' && folderFilter !== 'none' ? folderFilter : '',
       label_ids: [],
+      repeat: 'none', rep_weekday: 1, rep_dom: 1, rep_n: 7, rep_due: '',
     });
     setErr(null);
     setShow(true);
@@ -255,6 +316,7 @@ export default function Tasks() {
       priority: 'mid',
       folder_id: folderFilter !== 'all' && folderFilter !== 'none' ? folderFilter : '',
       label_ids: [],
+      repeat: 'none', rep_weekday: 1, rep_dom: 1, rep_n: 7, rep_due: '',
     });
     setErr(null);
     setShow(true);
@@ -278,6 +340,7 @@ export default function Tasks() {
       priority: t.priority,
       folder_id: t.folder_id ?? '',
       label_ids: t.label_ids ?? [],
+      repeat: 'none', rep_weekday: 1, rep_dom: 1, rep_n: 7, rep_due: '',
     });
     setErr(null);
     setShow(true);
@@ -297,6 +360,7 @@ export default function Tasks() {
       priority: t.priority,
       folder_id: t.folder_id ?? '',
       label_ids: t.label_ids ?? [],
+      repeat: 'none', rep_weekday: 1, rep_dom: 1, rep_n: 7, rep_due: '',
     });
     setErr(null);
     setShow(true);
@@ -325,6 +389,25 @@ export default function Tasks() {
         // Editing a whole group updates the shared fields on every member row.
         const { error } = await supabase.from('tasks').update(base).eq('group_id', editingGroupId);
         if (error) throw error;
+      } else if (form.repeat !== 'none') {
+        // Create a recurring schedule; it auto-assigns each period. next_run =
+        // today so the first occurrence is generated immediately (below).
+        if (ids.length === 0) throw new Error('Pick at least one person to assign to.');
+        const rec = {
+          created_by: myId,
+          title: base.title, description: base.description, brand_id: base.brand_id,
+          priority: base.priority, folder_id: base.folder_id, label_ids: base.label_ids,
+          assignee_ids: ids,
+          frequency: form.repeat,
+          interval_days: form.repeat === 'every_n_days' ? Math.max(1, form.rep_n) : null,
+          weekday: form.repeat === 'weekly' ? form.rep_weekday : null,
+          day_of_month: form.repeat === 'monthly' ? form.rep_dom : null,
+          due_offset_days: form.rep_due === '' ? null : Math.max(0, parseInt(form.rep_due, 10) || 0),
+          next_run: new Date().toISOString().slice(0, 10),
+        };
+        const { error } = await supabase.from('task_recurrences').insert(rec);
+        if (error) throw error;
+        await supabase.rpc('generate_due_recurring_tasks'); // create the first occurrence now
       } else {
         // Create one task row per selected person (fan-out for multi-assign).
         // Rows created together share a group_id so the assigner sees one card.
@@ -393,6 +476,70 @@ export default function Tasks() {
     if (error) { setTasks(prev); alert(error.message); }
   };
 
+  // ---- Recurring-schedule actions ----
+  const setRecurrenceActive = async (r: Recurrence, active: boolean) => {
+    const prev = recurrences;
+    setRecurrences(recurrences.map(x => x.id === r.id ? { ...x, active } : x));
+    const { error } = await supabase.from('task_recurrences').update({ active }).eq('id', r.id);
+    if (error) { setRecurrences(prev); alert(error.message); }
+  };
+  const removeRecurrence = async (r: Recurrence) => {
+    if (!confirm(`Delete the recurring schedule "${r.title}"? Already-created tasks stay.`)) return;
+    const prev = recurrences;
+    setRecurrences(recurrences.filter(x => x.id !== r.id));
+    const { error } = await supabase.from('task_recurrences').delete().eq('id', r.id);
+    if (error) { setRecurrences(prev); alert(error.message); }
+  };
+  // Human label for a schedule, e.g. "Every Monday", "Monthly on day 1".
+  const recurrenceLabel = (r: Recurrence): string => {
+    switch (r.frequency) {
+      case 'daily': return 'Every day';
+      case 'every_n_days': return `Every ${r.interval_days ?? 1} days`;
+      case 'weekly': return `Every ${WEEKDAYS[r.weekday ?? 0]}`;
+      case 'monthly': return `Monthly on day ${r.day_of_month ?? 1}`;
+      default: return '';
+    }
+  };
+
+  // Mark my own task as seen the first time I open it (read receipt).
+  const markSeen = async (t: Task) => {
+    if (!myId || t.assignee_id !== myId || t.seen_at) return;
+    const now = new Date().toISOString();
+    setTasks(prev => prev.map(x => x.id === t.id ? { ...x, seen_at: now } : x));
+    await supabase.from('tasks').update({ seen_at: now }).eq('id', t.id);
+  };
+
+  // WhatsApp-style read tick shown to assigners (blue = seen, grey = not seen).
+  const seenTick = (t: Task) => {
+    if (isApc) return null;
+    const seen = !!t.seen_at;
+    return (
+      <span className={`ac-seen ${seen ? 'seen' : ''}`}
+        title={seen ? `Seen ${new Date(t.seen_at!).toLocaleString()}` : 'Delivered · not seen yet'}>
+        <i className="bi bi-check2-all" />
+      </span>
+    );
+  };
+
+  // The ack chip shown on a task: acknowledged response, or a pending "reminded".
+  const ackChip = (taskId: string) => {
+    const r = reminderByTask.get(taskId);
+    if (!r) return null;
+    if (r.acknowledged_at && r.ack_response) {
+      const m = ACK_META[r.ack_response];
+      return (
+        <span className={`ac-ack ${m.cls}`} title={`Acknowledged ${new Date(r.acknowledged_at).toLocaleString()}`}>
+          <span className="ac-ack-emoji">{m.icon}</span>{m.label}
+        </span>
+      );
+    }
+    return (
+      <span className="ac-ack pending" title={`Reminded ${new Date(r.created_at).toLocaleString()} · awaiting acknowledgement`}>
+        <i className="bi bi-alarm" /> Reminded
+      </span>
+    );
+  };
+
   const toggleFormLabel = (id: string) => {
     setForm(f => ({
       ...f,
@@ -427,7 +574,7 @@ export default function Tasks() {
           </div>
           {t.description && <div className="ac-row-sub ac-clamp1">{t.description}</div>}
           <div className="ac-row-sub d-flex align-items-center flex-wrap gap-2 mt-1">
-            {!isApc && <span><i className="bi bi-person me-1" />{personName(t.assignee_id)}</span>}
+            {!isApc && <span><i className="bi bi-person me-1" />{personName(t.assignee_id)}{seenTick(t)}</span>}
             {isApc && t.created_by && <span><i className="bi bi-person-badge me-1" />from {personName(t.created_by)}</span>}
             {t.brand_id && <span className="ac-chip neutral"><i className="bi bi-shop" /> {brandMap.get(t.brand_id) ?? 'Brand'}</span>}
             {folder && <span className="ac-chip" style={{ borderColor: folder.color ?? undefined, color: folder.color ?? undefined }}><i className="bi bi-folder me-1" />{folder.name}</span>}
@@ -437,6 +584,7 @@ export default function Tasks() {
               </span>
             ))}
             {t.due_date && <span><i className="bi bi-calendar-event me-1" />due {new Date(t.due_date).toLocaleDateString()}</span>}
+            {!isApc && ackChip(t.id)}
           </div>
         </div>
         <div className="ac-row-actions">
@@ -483,6 +631,7 @@ export default function Tasks() {
     const allDone = doneCount === total;
     const anyOverdue = g.tasks.some(t => t.status === 'open' && t.due_date && t.due_date < today);
     const anyOpen = doneCount < total;
+    const seenCount = g.tasks.filter(t => t.seen_at).length;
     const expanded = expandedGroups.has(g.key);
     const canManage = t0.created_by === myId || isBob;
     const canRemind = !isApc && canManage;
@@ -515,6 +664,9 @@ export default function Tasks() {
               <span className="ac-group-bar"><span style={{ width: `${(doneCount / total) * 100}%` }} /></span>
               {doneCount} of {total} done
             </span>
+            <span className={`ac-seen ${seenCount === total ? 'seen' : ''}`} title={`${seenCount} of ${total} have seen this`}>
+              <i className="bi bi-check2-all" /> {seenCount}/{total} seen
+            </span>
             {t0.brand_id && <span className="ac-chip neutral"><i className="bi bi-shop" /> {brandMap.get(t0.brand_id) ?? 'Brand'}</span>}
             {folder && <span className="ac-chip" style={{ borderColor: folder.color ?? undefined, color: folder.color ?? undefined }}><i className="bi bi-folder me-1" />{folder.name}</span>}
             {taskLabels.map(l => (
@@ -533,12 +685,13 @@ export default function Tasks() {
                 return (
                   <div key={t.id} className="ac-group-person">
                     <Avatar name={personName(t.assignee_id)} size="sm" />
-                    <span className="ac-group-person-name">{personName(t.assignee_id)}</span>
+                    <span className="ac-group-person-name">{personName(t.assignee_id)}{seenTick(t)}</span>
                     {done
                       ? <span className="ac-group-status done"><i className="bi bi-check2-circle me-1" />Done</span>
                       : overdue
                         ? <span className="ac-group-status over"><i className="bi bi-exclamation-triangle me-1" />Overdue</span>
                         : <span className="ac-group-status open">Open</span>}
+                    {ackChip(t.id)}
                     <div className="ac-group-person-actions">
                       {canRemind && !done && (
                         <button className={`ac-icon-btn sm remind ${reminded.has(t.id) ? 'sent' : ''}`}
@@ -707,6 +860,17 @@ export default function Tasks() {
                 )}
               </>
             )}
+
+            {/* Recurring schedules (auto-assigning "alarms") */}
+            {canAssign && (
+              <>
+                <div className="ac-rail-head mt-3"><span>Automation</span></div>
+                <button className="ac-rail-item" onClick={() => setShowRecur(true)}>
+                  <i className="bi bi-arrow-repeat" /><span className="ac-rail-label">Recurring</span>
+                  {recurrences.length > 0 && <span className="ac-rail-count">{recurrences.filter(r => r.active).length}</span>}
+                </button>
+              </>
+            )}
           </aside>
 
           {/* Right pane: task list */}
@@ -867,11 +1031,72 @@ export default function Tasks() {
                   {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                 </Form.Select>
               </Form.Group>
-              <Form.Group>
-                <Form.Label>Due date <span className="text-muted">(optional)</span></Form.Label>
-                <Form.Control type="date" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })} />
-              </Form.Group>
+              {/* One-off due date only when the task doesn't repeat. */}
+              {form.repeat === 'none' && (
+                <Form.Group>
+                  <Form.Label>Due date <span className="text-muted">(optional)</span></Form.Label>
+                  <Form.Control type="date" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })} />
+                </Form.Group>
+              )}
             </div>
+
+            {/* Repeat / "alarm" — new one-off tasks only. Creates a schedule that
+                auto-assigns each period. */}
+            {!editingId && !editingGroupId && (
+              <div className="ac-repeat mt-3">
+                <Form.Group>
+                  <Form.Label><i className="bi bi-arrow-repeat me-1" />Repeat</Form.Label>
+                  <Form.Select value={form.repeat} onChange={e => setForm({ ...form, repeat: e.target.value as Repeat })}>
+                    <option value="none">Does not repeat (one-off)</option>
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                    <option value="every_n_days">Every N days</option>
+                  </Form.Select>
+                </Form.Group>
+                {form.repeat !== 'none' && (
+                  <div className="d-flex gap-3 flex-wrap mt-2">
+                    {form.repeat === 'weekly' && (
+                      <Form.Group className="flex-grow-1">
+                        <Form.Label>On</Form.Label>
+                        <Form.Select value={form.rep_weekday} onChange={e => setForm({ ...form, rep_weekday: parseInt(e.target.value, 10) })}>
+                          {WEEKDAYS.map((d, i) => <option key={i} value={i}>{d}</option>)}
+                        </Form.Select>
+                      </Form.Group>
+                    )}
+                    {form.repeat === 'monthly' && (
+                      <Form.Group className="flex-grow-1">
+                        <Form.Label>Day of month</Form.Label>
+                        <Form.Control type="number" min={1} max={31} value={form.rep_dom}
+                          onChange={e => setForm({ ...form, rep_dom: Math.min(31, Math.max(1, parseInt(e.target.value, 10) || 1)) })} />
+                      </Form.Group>
+                    )}
+                    {form.repeat === 'every_n_days' && (
+                      <Form.Group className="flex-grow-1">
+                        <Form.Label>Every … days</Form.Label>
+                        <Form.Control type="number" min={1} value={form.rep_n}
+                          onChange={e => setForm({ ...form, rep_n: Math.max(1, parseInt(e.target.value, 10) || 1) })} />
+                      </Form.Group>
+                    )}
+                    <Form.Group className="flex-grow-1">
+                      <Form.Label>Each task is due</Form.Label>
+                      <Form.Select value={form.rep_due} onChange={e => setForm({ ...form, rep_due: e.target.value })}>
+                        <option value="">No due date</option>
+                        <option value="0">Same day</option>
+                        <option value="1">Next day</option>
+                        <option value="3">In 3 days</option>
+                        <option value="7">In 7 days</option>
+                      </Form.Select>
+                    </Form.Group>
+                  </div>
+                )}
+                {form.repeat !== 'none' && (
+                  <Form.Text className="text-muted d-block mt-1">
+                    A new task will be created automatically {recurrencePreview(form)} and assigned to the {form.assignee_ids.length || 'selected'} {form.assignee_ids.length === 1 ? 'person' : 'people'}. The first one is created now.
+                  </Form.Text>
+                )}
+              </div>
+            )}
           </Modal.Body>
           <Modal.Footer>
             <Button variant="secondary" onClick={() => setShow(false)} disabled={saving}>Cancel</Button>
@@ -924,6 +1149,15 @@ export default function Tasks() {
                 {t.description && <p className="ac-task-detail-desc">{t.description}</p>}
                 <div className="ac-task-detail-meta">
                   <div><span className="lbl">Assignee</span><span className="val"><Avatar name={personName(t.assignee_id)} size="sm" /> {personName(t.assignee_id)}</span></div>
+                  {!isApc && (
+                    <div><span className="lbl">Seen</span>
+                      <span className="val">
+                        {t.seen_at
+                          ? <>{seenTick(t)} <span className="text-muted ms-1">{new Date(t.seen_at).toLocaleString()}</span></>
+                          : <>{seenTick(t)} <span className="text-muted ms-1">Not seen yet</span></>}
+                      </span>
+                    </div>
+                  )}
                   {t.created_by && <div><span className="lbl">Assigned by</span><span className="val">{personName(t.created_by)}</span></div>}
                   {t.brand_id && <div><span className="lbl">Brand</span><span className="val"><i className="bi bi-shop me-1" />{brandMap.get(t.brand_id) ?? 'Brand'}</span></div>}
                   {t.due_date && <div><span className="lbl">Due</span><span className="val"><i className="bi bi-calendar-event me-1" />{new Date(t.due_date).toLocaleDateString()}</span></div>}
@@ -939,6 +1173,19 @@ export default function Tasks() {
                       </span>
                     </div>
                   )}
+                  {(() => {
+                    const r = reminderByTask.get(t.id);
+                    if (!r) return null;
+                    return (
+                      <div><span className="lbl">Reminder</span>
+                        <span className="val">
+                          {r.acknowledged_at && r.ack_response
+                            ? <>{ackChip(t.id)} <span className="text-muted ms-1">by {personName(t.assignee_id)} · {new Date(r.acknowledged_at).toLocaleString()}</span></>
+                            : <>{ackChip(t.id)} <span className="text-muted ms-1">sent {new Date(r.created_at).toLocaleString()}</span></>}
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </div>
               </Modal.Body>
               <Modal.Footer className="justify-content-between">
@@ -967,6 +1214,69 @@ export default function Tasks() {
           folders={folders} labels={labels} myId={myId} isBob={isBob}
           onChanged={() => load({ silent: true })}
         />
+      )}
+
+      {/* Recurring schedules manager */}
+      {canAssign && (
+        <Modal show={showRecur} onHide={() => setShowRecur(false)} centered size="lg">
+          <Modal.Header closeButton>
+            <Modal.Title><i className="bi bi-arrow-repeat me-2" />Recurring tasks</Modal.Title>
+          </Modal.Header>
+          <Modal.Body>
+            <p className="text-muted small">
+              These schedules auto-create and assign a task each period. Create one from the
+              <strong> New Task </strong> dialog using the <strong>Repeat</strong> option.
+            </p>
+            {recurrences.length === 0 ? (
+              <div className="ac-empty py-4">
+                <div className="ac-empty-icon"><i className="bi bi-arrow-repeat" /></div>
+                <h6>No recurring tasks yet</h6>
+                <p className="small text-muted">Set a repeat when creating a task to schedule it here.</p>
+              </div>
+            ) : (
+              <div className="ac-list">
+                {recurrences.map(r => {
+                  const folder = r.folder_id ? folderMap.get(r.folder_id) : null;
+                  return (
+                    <div key={r.id} className={`ac-list-row ac-task ac-task--${r.priority} ${r.active ? '' : 'opacity-75'}`}>
+                      <div className="ac-recur-icon"><i className="bi bi-arrow-repeat" /></div>
+                      <div className="ac-row-main">
+                        <div className="ac-row-name d-flex align-items-center gap-2 flex-wrap">
+                          <span className={r.active ? '' : 'text-muted'}>{r.title}</span>
+                          <span className={`ac-prio-pill prio-${r.priority}`}>{r.priority}</span>
+                          <span className="ac-group-badge"><i className="bi bi-clock-history me-1" />{recurrenceLabel(r)}</span>
+                          {!r.active && <Badge bg="secondary">Paused</Badge>}
+                        </div>
+                        <div className="ac-row-sub d-flex align-items-center flex-wrap gap-2 mt-1">
+                          <span className="d-inline-flex align-items-center gap-1">
+                            <i className="bi bi-people" />
+                            {r.assignee_ids.slice(0, 3).map(id => <Avatar key={id} name={personName(id)} size="sm" />)}
+                            {r.assignee_ids.length > 3 && <span>+{r.assignee_ids.length - 3}</span>}
+                          </span>
+                          {r.brand_id && <span className="ac-chip neutral"><i className="bi bi-shop" /> {brandMap.get(r.brand_id) ?? 'Brand'}</span>}
+                          {folder && <span className="ac-chip" style={{ borderColor: folder.color ?? undefined, color: folder.color ?? undefined }}><i className="bi bi-folder me-1" />{folder.name}</span>}
+                          {r.due_offset_days != null && <span><i className="bi bi-calendar-event me-1" />due {r.due_offset_days === 0 ? 'same day' : `+${r.due_offset_days}d`}</span>}
+                          {r.active && <span className="text-muted"><i className="bi bi-arrow-right-short" />next {new Date(r.next_run).toLocaleDateString()}</span>}
+                        </div>
+                      </div>
+                      <div className="ac-row-actions">
+                        <button className="ac-icon-btn" title={r.active ? 'Pause' : 'Resume'}
+                          aria-label={r.active ? 'Pause schedule' : 'Resume schedule'}
+                          onClick={() => setRecurrenceActive(r, !r.active)}>
+                          <i className={`bi ${r.active ? 'bi-pause-circle' : 'bi-play-circle'}`} />
+                        </button>
+                        <button className="ac-icon-btn danger" title="Delete schedule" aria-label="Delete schedule"
+                          onClick={() => removeRecurrence(r)}>
+                          <i className="bi bi-trash" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Modal.Body>
+        </Modal>
       )}
     </>
   );
