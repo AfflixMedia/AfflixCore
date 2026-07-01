@@ -141,15 +141,29 @@ export default function GroupModal(p: Props) {
   }
 
   // ----- Manage mode -----
+  // Brand groups are auto-managed: the name mirrors the brand and the roster
+  // follows brand access (Boss / Team Lead / APC) — no manual membership edits.
+  const isBrandGroup = !!p.conversation?.brand_id;
   return (
     <Modal show={p.show} onHide={p.onClose} centered>
-      <Modal.Header closeButton><Modal.Title><i className="bi bi-gear me-2" />Group info</Modal.Title></Modal.Header>
+      <Modal.Header closeButton>
+        <Modal.Title>
+          {isBrandGroup ? <><i className="bi bi-shop me-2 text-primary" />Brand group</> : <><i className="bi bi-gear me-2" />Group info</>}
+        </Modal.Title>
+      </Modal.Header>
       <Modal.Body>
+        {isBrandGroup && (
+          <p className="text-muted small mb-3">
+            <i className="bi bi-info-circle me-1" />
+            This group belongs to a brand. Its name and members are managed automatically —
+            whoever is assigned the brand (Boss, Team Lead, APC) is in the group.
+          </p>
+        )}
         <Form.Group className="mb-3">
           <Form.Label>Group name</Form.Label>
           <InputGroup>
-            <Form.Control value={title} disabled={!p.canManage} onChange={e => setTitle(e.target.value)} />
-            {p.canManage && (
+            <Form.Control value={title} disabled={!p.canManage || isBrandGroup} onChange={e => setTitle(e.target.value)} />
+            {p.canManage && !isBrandGroup && (
               <Button variant="outline-primary" disabled={busy || !title.trim() || title === (p.conversation?.title ?? '')}
                 onClick={() => run(() => p.onRename(title))}>
                 <i className="bi bi-check-lg" />
@@ -173,7 +187,7 @@ export default function GroupModal(p: Props) {
                       : isAdmin ? <Badge bg="warning" text="dark" className="ac-role-badge">Admin</Badge> : null}
                   </div>
                 </div>
-                {p.canManage && !isCreatorRow && c.id !== p.myId && (
+                {p.canManage && !isBrandGroup && !isCreatorRow && c.id !== p.myId && (
                   <div className="d-flex gap-1" onClick={e => e.stopPropagation()}>
                     {p.isCreator && (
                       <Button size="sm" variant="link" className="p-0 text-muted" title={isAdmin ? 'Remove admin' : 'Make admin'}
@@ -192,7 +206,7 @@ export default function GroupModal(p: Props) {
           })}
         </div>
 
-        {p.canManage && (
+        {p.canManage && !isBrandGroup && (
           <>
             <Form.Label>Add member</Form.Label>
             <InputGroup size="sm" className="mb-2">
@@ -222,8 +236,8 @@ export default function GroupModal(p: Props) {
           </>
         )}
 
-        {/* Leave group — available to every member. */}
-        {confirmLeave ? (
+        {/* Leave group — available to every member (not in auto-managed brand groups). */}
+        {isBrandGroup ? null : confirmLeave ? (
           <div className="ac-leave-confirm">
             <span className="small">Leave this group? You’ll stop receiving its messages.</span>
             <div className="d-flex gap-2 mt-2">

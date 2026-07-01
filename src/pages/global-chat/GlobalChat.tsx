@@ -661,6 +661,7 @@ export default function GlobalChat() {
           isGroup={isGroupActive}
           isGroupAdmin={isGroupActive && activeView.iAmAdmin}
           membersCanEdit={activeView.conversation.bookmarks_members_can_edit}
+          brandGroup={!!activeView.conversation.brand_id}
           loading={bookmarksLoading}
           onAdd={(t, u) => bookmarkOp(() => addBookmark(activeId!, t, u, myId).then(() => undefined))}
           onUpdate={(id, t, u) => bookmarkOp(() => updateBookmark(id, t, u))}

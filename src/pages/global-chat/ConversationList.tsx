@@ -1,6 +1,6 @@
-// Left pane: filter bar (All / Unread / Groups), search, conversation rows with
-// unread badges, and the floating "start a chat" button.
-import { useMemo, useState } from 'react';
+// Left pane: filter bar (All / Unread / Groups / Brands / Archive), search,
+// conversation rows with unread badges, and the floating "start a chat" button.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Badge, Form, InputGroup } from 'react-bootstrap';
 import Avatar from '../../components/Avatar';
 import type { ConversationView, ChatFilter } from './types';
@@ -20,12 +20,34 @@ const FILTERS: { key: ChatFilter; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'unread', label: 'Unread' },
   { key: 'groups', label: 'Groups' },
+  { key: 'brands', label: 'Brands' },
   { key: 'archived', label: 'Archive' },
 ];
 
 export default function ConversationList({ views, activeId, myId, onSelect, onStartChat, onOpenAnnouncement }: Props) {
   const [filter, setFilter] = useState<ChatFilter>('all');
   const [q, setQ] = useState('');
+
+  // Filter strip overflow: hidden scrollbar + left/right nudge arrows.
+  const stripRef = useRef<HTMLDivElement>(null);
+  const [canLeft, setCanLeft] = useState(false);
+  const [canRight, setCanRight] = useState(false);
+  const updateArrows = useCallback(() => {
+    const el = stripRef.current;
+    if (!el) return;
+    setCanLeft(el.scrollLeft > 2);
+    setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 2);
+  }, []);
+  useEffect(() => {
+    updateArrows();
+    const el = stripRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(updateArrows);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [updateArrows]);
+  const nudge = (dir: -1 | 1) =>
+    stripRef.current?.scrollBy({ left: dir * 120, behavior: 'smooth' });
 
   // Archived (left/removed) chats only count toward unread in their own tab.
   const totalUnread = useMemo(
@@ -39,6 +61,7 @@ export default function ConversationList({ views, activeId, myId, onSelect, onSt
       if (filter === 'archived' ? !v.archived : v.archived) return false;
       if (filter === 'unread' && v.unread === 0) return false;
       if (filter === 'groups' && !v.conversation.is_group) return false;
+      if (filter === 'brands' && !v.conversation.brand_id) return false;
       if (needle && !`${v.title} ${v.lastBody ?? ''}`.toLowerCase().includes(needle)) return false;
       return true;
     });
@@ -55,21 +78,35 @@ export default function ConversationList({ views, activeId, myId, onSelect, onSt
           <Form.Control placeholder="Search chats…" value={q} onChange={e => setQ(e.target.value)} />
         </InputGroup>
         <div className="ac-chat-filters">
-          {FILTERS.map(f => (
-            <button
-              key={f.key}
-              type="button"
-              className={`ac-chat-filter ${filter === f.key ? 'active' : ''}`}
-              onClick={() => setFilter(f.key)}
-            >
-              {f.label}
-              {f.key === 'unread' && totalUnread > 0 && <span className="ms-1">({totalUnread})</span>}
-              {f.key === 'archived' && archivedCount > 0 && <span className="ms-1">({archivedCount})</span>}
+          {canLeft && (
+            <button type="button" className="ac-chat-filter-arrow" aria-label="Scroll filters left"
+              onClick={() => nudge(-1)}>
+              <i className="bi bi-chevron-left" />
             </button>
-          ))}
+          )}
+          <div className="ac-chat-filters-strip" ref={stripRef} onScroll={updateArrows}>
+            {FILTERS.map(f => (
+              <button
+                key={f.key}
+                type="button"
+                className={`ac-chat-filter ${filter === f.key ? 'active' : ''}`}
+                onClick={() => setFilter(f.key)}
+              >
+                {f.label}
+                {f.key === 'unread' && totalUnread > 0 && <span className="ms-1">({totalUnread})</span>}
+                {f.key === 'archived' && archivedCount > 0 && <span className="ms-1">({archivedCount})</span>}
+              </button>
+            ))}
+          </div>
+          {canRight && (
+            <button type="button" className="ac-chat-filter-arrow" aria-label="Scroll filters right"
+              onClick={() => nudge(1)}>
+              <i className="bi bi-chevron-right" />
+            </button>
+          )}
           <button
             type="button"
-            className="ac-chat-filter ac-ann-filter ms-auto"
+            className="ac-chat-filter ac-ann-filter"
             title="Announcements"
             onClick={onOpenAnnouncement}
           >
@@ -103,6 +140,7 @@ export default function ConversationList({ views, activeId, myId, onSelect, onSt
                 />
                 <div className="flex-grow-1 min-w-0">
                   <div className="d-flex align-items-center gap-2">
+                    {v.conversation.brand_id && <i className="bi bi-shop ac-chat-row-brand" title="Brand group" />}
                     <span className="ac-chat-row-name text-truncate">{v.title}</span>
                     {!v.conversation.is_group && v.otherUser && (
                       <Badge bg={roleBadge(v.otherUser.role)} className="ac-role-badge">

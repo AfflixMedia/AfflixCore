@@ -18,6 +18,7 @@ export interface Conversation {
   created_at: string;
   last_message_at: string;
   bookmarks_members_can_edit: boolean;
+  brand_id: string | null;   // set = auto-managed brand group (roster follows brand access)
 }
 
 export interface Participant {
@@ -101,7 +102,7 @@ export interface ConversationView {
   unread: number;
 }
 
-export type ChatFilter = 'all' | 'unread' | 'groups' | 'archived';
+export type ChatFilter = 'all' | 'unread' | 'groups' | 'brands' | 'archived';
 
 // Friendly role labels shown as a small badge next to a person's name.
 export const ROLE_LABEL: Record<string, string> = {
