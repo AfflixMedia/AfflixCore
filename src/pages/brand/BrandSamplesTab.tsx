@@ -69,7 +69,7 @@ function prevMonthOf(yyyymm: string): string {
 function recentMonths(count: number): string[] {
   const now = new Date();
   const out: string[] = [];
-  for (let i = 0; i < count; i++) {
+  for (let i = count - 1; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
   }
