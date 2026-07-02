@@ -30,10 +30,12 @@ export default function NotificationsPage() {
   const nav = useNavigate();
   const [tab, setTab] = useState<TabKey>('unread');
 
-  // Chats / Tasks / Reporting notifications only ever reach internal staff
-  // (bob / team_lead / apc). Paid-collab clients & handlers see only Unread + All.
+  // Reporting notifications only ever reach internal staff (bob / team_lead / apc).
+  // Paid-collab handlers are internal too: they get chat (and task) notifications,
+  // so they see Chats + Tasks tabs but not the Reporting ones. Clients see only Unread + All.
   const role = profile?.role;
   const isInternalStaff = role === 'bob' || role === 'team_lead' || role === 'apc';
+  const showChatsTasks = isInternalStaff || role === 'paid_collab_handler';
 
   const chatCount = useMemo(() => notifications.filter(n => isChatNotif(n.type)).length, [notifications]);
   const taskCount = useMemo(() => notifications.filter(isTaskNotif).length, [notifications]);
@@ -104,7 +106,7 @@ export default function NotificationsPage() {
                 )}
               </Nav.Link>
             </Nav.Item>
-            {isInternalStaff && <>
+            {showChatsTasks && <>
               <Nav.Item>
                 <Nav.Link eventKey="chats" style={tab === 'chats' ? { color: accents.chats, borderBottomColor: accents.chats } : undefined}>
                   <i className="bi bi-chat-dots me-1" />
@@ -119,6 +121,8 @@ export default function NotificationsPage() {
                   <Badge bg="secondary" pill className="ms-2">{taskCount}</Badge>
                 </Nav.Link>
               </Nav.Item>
+            </>}
+            {isInternalStaff && <>
               <Nav.Item>
                 <Nav.Link eventKey="weekly" style={tab === 'weekly' ? { color: accents.weekly, borderBottomColor: accents.weekly } : undefined}>
                   <i className="bi bi-calendar-week me-1" />
