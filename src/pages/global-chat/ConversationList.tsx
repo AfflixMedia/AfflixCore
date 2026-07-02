@@ -3,14 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Badge, Form, InputGroup } from 'react-bootstrap';
 import Avatar from '../../components/Avatar';
-import type { ConversationView, ChatFilter } from './types';
-import { roleLabel, roleBadge, shortTime } from './types';
+import type { ConversationView, ChatFilter, ChatContact } from './types';
+import { roleLabel, roleBadge, shortTime, contactName } from './types';
 import { toPlainText } from './messageFormat';
 
 interface Props {
   views: ConversationView[];
   activeId: string | null;
   myId: string;
+  brandLeadByBrand: Map<string, ChatContact>; // brand_id → owning Team Lead
   onSelect: (conversationId: string) => void;
   onStartChat: () => void;
   onOpenAnnouncement: () => void;
@@ -24,9 +25,13 @@ const FILTERS: { key: ChatFilter; label: string }[] = [
   { key: 'archived', label: 'Archive' },
 ];
 
-export default function ConversationList({ views, activeId, myId, onSelect, onStartChat, onOpenAnnouncement }: Props) {
-  const [filter, setFilter] = useState<ChatFilter>('all');
+export default function ConversationList({ views, activeId, myId, brandLeadByBrand, onSelect, onStartChat, onOpenAnnouncement }: Props) {
+  const [filter, setFilter] = useState<ChatFilter>('unread');
+  // Brands sub-filter: 'all' | Team Lead id | 'none' (brands with no Team Lead).
+  const [leadFilter, setLeadFilter] = useState<string>('all');
   const [q, setQ] = useState('');
+  // The lead sub-filter only applies inside the Brands tab — reset on tab change.
+  useEffect(() => { setLeadFilter('all'); }, [filter]);
 
   // Filter strip overflow: hidden scrollbar + left/right nudge arrows.
   const stripRef = useRef<HTMLDivElement>(null);
@@ -54,18 +59,45 @@ export default function ConversationList({ views, activeId, myId, onSelect, onSt
     () => views.reduce((s, v) => s + (v.archived ? 0 : v.unread), 0), [views]);
   const archivedCount = useMemo(() => views.filter(v => v.archived).length, [views]);
 
+  // Team Lead chips for the Brands tab — one per lead that owns a visible brand
+  // group, plus an "Unassigned" bucket for brand groups with no Team Lead.
+  const leadChips = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; count: number }>();
+    let noneCount = 0;
+    views.forEach(v => {
+      if (!v.conversation.brand_id || v.archived) return;
+      const lead = brandLeadByBrand.get(v.conversation.brand_id);
+      if (lead) {
+        const e = map.get(lead.id) ?? { id: lead.id, name: contactName(lead), count: 0 };
+        e.count++; map.set(lead.id, e);
+      } else { noneCount++; }
+    });
+    const leads = Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+    return { leads, noneCount };
+  }, [views, brandLeadByBrand]);
+  // Only worth showing when there's more than one bucket to choose between.
+  const showLeadStrip = filter === 'brands'
+    && (leadChips.leads.length + (leadChips.noneCount > 0 ? 1 : 0)) >= 2;
+
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return views.filter(v => {
       // Archived chats live only under the Archive tab.
       if (filter === 'archived' ? !v.archived : v.archived) return false;
       if (filter === 'unread' && v.unread === 0) return false;
-      if (filter === 'groups' && !v.conversation.is_group) return false;
-      if (filter === 'brands' && !v.conversation.brand_id) return false;
+      // Groups tab excludes brand groups — those live under the Brands tab.
+      if (filter === 'groups' && (!v.conversation.is_group || v.conversation.brand_id)) return false;
+      if (filter === 'brands') {
+        if (!v.conversation.brand_id) return false;
+        if (leadFilter !== 'all') {
+          const leadId = brandLeadByBrand.get(v.conversation.brand_id)?.id ?? 'none';
+          if (leadId !== leadFilter) return false;
+        }
+      }
       if (needle && !`${v.title} ${v.lastBody ?? ''}`.toLowerCase().includes(needle)) return false;
       return true;
     });
-  }, [views, filter, q]);
+  }, [views, filter, q, leadFilter, brandLeadByBrand]);
 
   return (
     <div className="ac-chat-list">
@@ -113,6 +145,39 @@ export default function ConversationList({ views, activeId, myId, onSelect, onSt
             <i className="bi bi-megaphone-fill" />
           </button>
         </div>
+        {showLeadStrip && (
+          <div className="ac-chat-subfilters">
+            <button
+              type="button"
+              className={`ac-chat-subfilter ${leadFilter === 'all' ? 'active' : ''}`}
+              onClick={() => setLeadFilter('all')}
+            >
+              All leads
+            </button>
+            {leadChips.leads.map(l => (
+              <button
+                key={l.id}
+                type="button"
+                className={`ac-chat-subfilter ${leadFilter === l.id ? 'active' : ''}`}
+                onClick={() => setLeadFilter(l.id)}
+              >
+                <i className="bi bi-person-badge" />
+                {l.name}
+                <span className="ac-chat-subfilter-n">{l.count}</span>
+              </button>
+            ))}
+            {leadChips.noneCount > 0 && (
+              <button
+                type="button"
+                className={`ac-chat-subfilter ${leadFilter === 'none' ? 'active' : ''}`}
+                onClick={() => setLeadFilter('none')}
+              >
+                Unassigned
+                <span className="ac-chat-subfilter-n">{leadChips.noneCount}</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="ac-chat-list-scroll">

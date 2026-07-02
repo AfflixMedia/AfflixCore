@@ -39,6 +39,8 @@ export default function GlobalChat() {
   const activeId = params.get('c');
 
   const [contacts, setContacts] = useState<ChatContact[]>([]);
+  // brand_id → owning Team Lead id (drives the Brands "by Team Lead" sub-filter).
+  const [brandLeads, setBrandLeads] = useState<Map<string, string>>(new Map());
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [overview, setOverview] = useState<Map<string, ConversationOverview>>(new Map());
@@ -189,6 +191,17 @@ export default function GlobalChat() {
     return list;
   }, [conversations, participants, overview, directory, myId, isBob]);
 
+  // brand_id → owning Team Lead as a resolved contact (Team Leads are staff, so
+  // they're already in the directory). Feeds the Brands sub-filter chips.
+  const brandLeadByBrand = useMemo(() => {
+    const m = new Map<string, ChatContact>();
+    brandLeads.forEach((leadId, brandId) => {
+      const c = directory.get(leadId);
+      if (c) m.set(brandId, c);
+    });
+    return m;
+  }, [brandLeads, directory]);
+
   const activeView = useMemo(
     () => views.find(v => v.conversation.id === activeId) ?? null,
     [views, activeId],
@@ -247,6 +260,13 @@ export default function GlobalChat() {
       // Tell senders their messages reached me (double tick), then reflect my
       // own newly-bumped rows (incl. a lazily-created announcement row) locally.
       markDelivered().then(() => listParticipants().then(setParticipants)).catch(() => { /* non-fatal */ });
+      // Brand → Team Lead ownership (RLS: Bob sees all, a Team Lead only their own)
+      // — powers the Brands filter's "by Team Lead" sub-strip.
+      supabase.from('team_lead_brands').select('brand_id, team_lead_id')
+        .then(({ data }) => setBrandLeads(
+          new Map(((data ?? []) as { brand_id: string; team_lead_id: string }[])
+            .map(r => [r.brand_id, r.team_lead_id]))))
+        .then(undefined, () => { /* non-fatal */ });
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -574,6 +594,7 @@ export default function GlobalChat() {
           views={views}
           activeId={activeId}
           myId={myId}
+          brandLeadByBrand={brandLeadByBrand}
           onSelect={selectConversation}
           onStartChat={() => setShowNewChat(true)}
           onOpenAnnouncement={openAnnouncement}
