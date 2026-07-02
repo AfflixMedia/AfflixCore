@@ -66,6 +66,15 @@ function prevMonthOf(yyyymm: string): string {
   const d = new Date(y, m - 2, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
+function recentMonths(count: number): string[] {
+  const now = new Date();
+  const out: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+  return out;
+}
 function isWeekend(iso: string): boolean {
   const wd = new Date(iso + 'T00:00:00').getDay();
   return wd === 0 || wd === 6;
@@ -425,8 +434,19 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
         <Card.Body>
           <Row className="g-3 align-items-end">
             <Col md={3}>
-              <Form.Label className="small fw-semibold">Month</Form.Label>
-              <Form.Control type="month" value={month} onChange={e => setMonth(e.target.value)} />
+              <Form.Label className="small fw-semibold d-block">Month</Form.Label>
+              <div className="btn-group w-100" role="group" aria-label="Choose month">
+                {recentMonths(3).map(m => (
+                  <Button
+                    key={m}
+                    variant={m === month ? 'primary' : 'outline-secondary'}
+                    onClick={() => setMonth(m)}
+                  >
+                    {new Date(Number(m.split('-')[0]), Number(m.split('-')[1]) - 1, 1)
+                      .toLocaleString('en-US', { month: 'short', year: '2-digit' })}
+                  </Button>
+                ))}
+              </div>
             </Col>
             <Col md={3}>
               <Form.Label className="small fw-semibold">Total monthly goal</Form.Label>
