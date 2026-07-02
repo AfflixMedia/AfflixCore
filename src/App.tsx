@@ -77,7 +77,7 @@ export default function App() {
         <Route path="brands/:id" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead']}><BrandDetail /></ProtectedRoute>} />
         <Route path="apcs" element={<ProtectedRoute roles={['bob', 'team_lead']}><APCs /></ProtectedRoute>} />
         <Route path="team-leads" element={<ProtectedRoute roles={['bob']}><TeamLeads /></ProtectedRoute>} />
-        <Route path="tasks" element={<ProtectedRoute roles={['bob', 'team_lead', 'apc']}><Tasks /></ProtectedRoute>} />
+        <Route path="tasks" element={<ProtectedRoute roles={['bob', 'team_lead', 'apc']} allowInternalHandler><Tasks /></ProtectedRoute>} />
         <Route path="paid-collab-clients" element={<ProtectedRoute roles={['bob']}><PaidCollabClients /></ProtectedRoute>} />
         <Route path="paid-collab-handlers" element={<ProtectedRoute roles={['bob']}><PaidCollabHandlers /></ProtectedRoute>} />
         <Route path="clients" element={<ProtectedRoute roles={['bob']}><Clients /></ProtectedRoute>} />
@@ -88,7 +88,7 @@ export default function App() {
         <Route path="budget/company" element={<ProtectedRoute roles={['bob']}><CompanyBudget /></ProtectedRoute>} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route path="profile" element={<Profile />} />
-        <Route path="chats" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead']}><GlobalChat /></ProtectedRoute>} />
+        <Route path="chats" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead']} allowInternalHandler><GlobalChat /></ProtectedRoute>} />
         <Route path="reporting/weekly" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead']}><WeeklyReports /></ProtectedRoute>} />
         <Route path="reporting/weekly/:id" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead']}><WeeklyReportView /></ProtectedRoute>} />
         <Route path="reporting/weekly/:id/edit" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead']}><WeeklyReportEdit /></ProtectedRoute>} />

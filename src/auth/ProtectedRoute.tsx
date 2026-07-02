@@ -6,9 +6,12 @@ import { Spinner } from 'react-bootstrap';
 export function ProtectedRoute({
   children,
   roles,
+  allowInternalHandler = false,
 }: {
   children: ReactNode;
   roles?: AppRole[];
+  // Also admit Paid Collab Handlers whom Bob marked internal (Chats / Tasks).
+  allowInternalHandler?: boolean;
 }) {
   const { session, profile, loading } = useAuth();
 
@@ -20,7 +23,8 @@ export function ProtectedRoute({
     );
   }
   if (!session) return <Navigate to="/login" replace />;
-  if (roles && profile && !roles.includes(profile.role)) {
+  const isInternalHandler = profile?.role === 'paid_collab_handler' && !!profile.is_internal_handler;
+  if (roles && profile && !roles.includes(profile.role) && !(allowInternalHandler && isInternalHandler)) {
     return (
       <div className="p-5 text-center">
         <h3>Access denied</h3>

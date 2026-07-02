@@ -10,6 +10,7 @@ interface Handler {
   role: string;
   created_at: string;
   avatar_url?: string | null;
+  is_internal_handler?: boolean;
   brand_ids?: string[];
   brand_names?: string[];
 }
@@ -25,7 +26,7 @@ export default function PaidCollabHandlers() {
 
   const [show, setShow] = useState(false);
   const [editHandler, setEditHandler] = useState<Handler | null>(null);
-  const [form, setForm] = useState({ email: '', password: '', full_name: '', brand_ids: [] as string[] });
+  const [form, setForm] = useState({ email: '', password: '', full_name: '', brand_ids: [] as string[], is_internal: false });
   const [brandSearch, setBrandSearch] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -42,7 +43,7 @@ export default function PaidCollabHandlers() {
   const load = async () => {
     setLoading(true); setErr(null);
     const [{ data: hRows, error: e1 }, { data: brandRows, error: e2 }, { data: assigns, error: e3 }] = await Promise.all([
-      supabase.from('profiles').select('id,email,full_name,role,created_at,avatar_url').eq('role', 'paid_collab_handler').order('created_at', { ascending: false }),
+      supabase.from('profiles').select('id,email,full_name,role,created_at,avatar_url,is_internal_handler').eq('role', 'paid_collab_handler').order('created_at', { ascending: false }),
       supabase.from('brands').select('id,name').order('name'),
       supabase.from('paid_collab_handler_brands').select('handler_id,brand_id'),
     ]);
@@ -80,7 +81,7 @@ export default function PaidCollabHandlers() {
 
   const openAdd = () => {
     setEditHandler(null);
-    setForm({ email: '', password: '', full_name: '', brand_ids: [] });
+    setForm({ email: '', password: '', full_name: '', brand_ids: [], is_internal: false });
     setBrandSearch('');
     setErr(null);
     setShow(true);
@@ -88,7 +89,7 @@ export default function PaidCollabHandlers() {
 
   const openEdit = (h: Handler) => {
     setEditHandler(h);
-    setForm({ email: h.email, password: '', full_name: h.full_name ?? '', brand_ids: h.brand_ids ?? [] });
+    setForm({ email: h.email, password: '', full_name: h.full_name ?? '', brand_ids: h.brand_ids ?? [], is_internal: !!h.is_internal_handler });
     setBrandSearch('');
     setErr(null);
     setShow(true);
@@ -107,7 +108,7 @@ export default function PaidCollabHandlers() {
     try {
       if (editHandler) {
         const { error: pErr } = await supabase.from('profiles')
-          .update({ full_name: form.full_name }).eq('id', editHandler.id);
+          .update({ full_name: form.full_name, is_internal_handler: form.is_internal }).eq('id', editHandler.id);
         if (pErr) throw pErr;
         const { error: dErr } = await supabase.from('paid_collab_handler_brands').delete().eq('handler_id', editHandler.id);
         if (dErr) throw dErr;
@@ -124,6 +125,7 @@ export default function PaidCollabHandlers() {
             password: form.password,
             full_name: form.full_name,
             brand_ids: form.brand_ids,
+            is_internal: form.is_internal,
           },
           headers: { Authorization: `Bearer ${session?.access_token}` },
         });
@@ -164,6 +166,7 @@ export default function PaidCollabHandlers() {
         <i className="bi bi-info-circle me-1" />
         Paid Collab Handlers are ops staff who manage day-to-day paid collab data — creators, videos, programs — for the brands you assign them.
         They don't see weekly/monthly reports, GMV Max, or other Brand Detail tabs.
+        Handlers marked <strong>Internal</strong> additionally get team Chats and Tasks (you can assign them tasks; they can assign tasks to APCs).
       </Alert>
 
       {handlers.length > 0 && (
@@ -217,6 +220,16 @@ export default function PaidCollabHandlers() {
                     <span className="ac-chip" title="Paid Collab Handler role">
                       <i className="bi bi-person-gear" /> Paid Collab Handler
                     </span>
+                    {h.is_internal_handler ? (
+                      <span className="ac-chip" style={{ color: '#16a34a', borderColor: '#16a34a' }}
+                        title="Internal — has team Chats and Tasks access">
+                        <i className="bi bi-people-fill" /> Internal
+                      </span>
+                    ) : (
+                      <span className="ac-chip neutral" title="External — paid collab workspace only">
+                        <i className="bi bi-box-arrow-up-right" /> External
+                      </span>
+                    )}
                   </div>
                   <div className="mt-2 ac-chip-group">
                     {(h.brand_names ?? []).length === 0 ? (
@@ -280,6 +293,21 @@ export default function PaidCollabHandlers() {
                 <Form.Text className="text-muted">Share this with the handler.</Form.Text>
               </Form.Group>
             )}
+
+            <Form.Group className="mb-3">
+              <Form.Check
+                type="switch"
+                id="pch-internal"
+                label={<><strong>Internal handler</strong> <span className="text-muted">— part of the team</span></>}
+                checked={form.is_internal}
+                onChange={e => setForm({ ...form, is_internal: e.target.checked })}
+              />
+              <Form.Text className="text-muted">
+                {form.is_internal
+                  ? 'Gets access to team Chats and Tasks — can be assigned tasks by you and can assign tasks to any APC.'
+                  : 'External (default) — paid collab workspace only, no Chats or Tasks.'}
+              </Form.Text>
+            </Form.Group>
 
             <Form.Group className="mb-2">
               <div className="d-flex align-items-center justify-content-between mb-1">

@@ -83,20 +83,25 @@ const STATUS_META: Record<Status, { label: string; icon: string; cls: string }> 
 };
 const ORG_COLORS = ['#ef4444', '#f59e0b', '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#64748b'];
 
-// Task assignment. A Team Lead (or Bob) assigns tasks to APCs, sets a priority,
-// organises them into folders + labels, and can push a blocking reminder. The
-// APC sees "My tasks" and marks them done. Notifications fire via DB triggers.
+// Task assignment. A Team Lead (or Bob, or an INTERNAL Paid Collab Handler)
+// assigns tasks to APCs, sets a priority, organises them into folders + labels,
+// and can push a blocking reminder. The APC sees "My tasks" and marks them
+// done. Notifications fire via DB triggers.
 export default function Tasks() {
   const { profile, user } = useAuth();
   const myId = user?.id;
   const isApc = profile?.role === 'apc';
   const isBob = profile?.role === 'bob';
-  const canAssign = profile?.role === 'team_lead' || isBob;
+  // Internal handlers assign to any APC (external handlers never reach /tasks).
+  const isInternalHandler = profile?.role === 'paid_collab_handler' && !!profile?.is_internal_handler;
+  const canAssign = profile?.role === 'team_lead' || isBob || isInternalHandler;
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [people, setPeople] = useState<Map<string, PersonLite>>(new Map());
   const [myApcs, setMyApcs] = useState<PersonLite[]>([]);
   const [teamLeads, setTeamLeads] = useState<PersonLite[]>([]);
+  // Internal Paid Collab Handlers (Bob only — he can assign tasks to them).
+  const [handlers, setHandlers] = useState<PersonLite[]>([]);
   const [brands, setBrands] = useState<BrandLite[]>([]);
   // brand → its APC / Team Lead, so a brand chip can auto-fill the assignee.
   const [brandApc, setBrandApc] = useState<Map<string, string>>(new Map());
@@ -151,15 +156,18 @@ export default function Tasks() {
       if (canAssign) pre.push(supabase.rpc('generate_due_recurring_tasks'));
       await Promise.all(pre);
     }
-    const [tRes, brRes, apcRes, tlRes, fRes, lRes, abRes, tlbRes, recRes, remRes, runRes] = await Promise.all([
+    const [tRes, brRes, apcRes, tlRes, hRes, fRes, lRes, abRes, tlbRes, recRes, remRes, runRes] = await Promise.all([
       supabase.from('tasks').select('*').order('status').order('due_date', { nullsFirst: false }).order('created_at', { ascending: false }),
       canAssign ? supabase.from('brands').select('id,name').order('name') : Promise.resolve({ data: [], error: null }),
       canAssign ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('role', 'apc').order('full_name') : Promise.resolve({ data: [], error: null }),
-      isBob ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('role', 'team_lead').order('full_name') : Promise.resolve({ data: [], error: null }),
+      // Internal handlers also load Team Leads — RLS scopes them to the leads
+      // of the handler's own brands (shown as brand owners, not assignable).
+      (isBob || isInternalHandler) ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('role', 'team_lead').order('full_name') : Promise.resolve({ data: [], error: null }),
+      isBob ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('role', 'paid_collab_handler').eq('is_internal_handler', true).order('full_name') : Promise.resolve({ data: [], error: null }),
       supabase.from('task_folders').select('id,name,color,owner_id').order('name'),
       supabase.from('task_labels').select('id,name,color,owner_id').order('name'),
       canAssign ? supabase.from('apc_brands').select('apc_id,brand_id') : Promise.resolve({ data: [], error: null }),
-      isBob ? supabase.from('team_lead_brands').select('team_lead_id,brand_id') : Promise.resolve({ data: [], error: null }),
+      (isBob || isInternalHandler) ? supabase.from('team_lead_brands').select('team_lead_id,brand_id') : Promise.resolve({ data: [], error: null }),
       canAssign ? supabase.from('task_recurrences').select('*').order('created_at', { ascending: false }) : Promise.resolve({ data: [], error: null }),
       supabase.from('task_reminders').select('id,task_id,assignee_id,created_by,created_at,acknowledged_at,ack_response').order('created_at', { ascending: false }),
       canAssign ? supabase.from('task_recurrence_runs').select('*').order('run_on', { ascending: false }) : Promise.resolve({ data: [], error: null }),
@@ -170,6 +178,7 @@ export default function Tasks() {
     setBrands(((brRes as any).data ?? []) as BrandLite[]);
     setMyApcs(((apcRes as any).data ?? []) as PersonLite[]);
     setTeamLeads(((tlRes as any).data ?? []) as PersonLite[]);
+    setHandlers(((hRes as any).data ?? []) as PersonLite[]);
     setFolders(((fRes as any).data ?? []) as OrgItem[]);
     setLabels(((lRes as any).data ?? []) as OrgItem[]);
     setRecurrences(((recRes as any).data ?? []) as Recurrence[]);
@@ -241,8 +250,9 @@ export default function Tasks() {
     people.forEach((p, id) => m.set(id, p.full_name || p.email));
     myApcs.forEach(p => m.set(p.id, p.full_name || p.email));
     teamLeads.forEach(p => m.set(p.id, p.full_name || p.email));
+    handlers.forEach(p => m.set(p.id, p.full_name || p.email));
     return m;
-  }, [people, myApcs, teamLeads]);
+  }, [people, myApcs, teamLeads, handlers]);
   const personName = (id: string | null) => {
     if (!id) return '—';
     if (id === myId) return 'You';
@@ -254,13 +264,28 @@ export default function Tasks() {
     people.forEach((p, id) => m.set(id, p.avatar_url));
     myApcs.forEach(p => m.set(p.id, p.avatar_url));
     teamLeads.forEach(p => m.set(p.id, p.avatar_url));
+    handlers.forEach(p => m.set(p.id, p.avatar_url));
     if (myId && profile?.avatar_url) m.set(myId, profile.avatar_url);
     return m;
-  }, [people, myApcs, teamLeads, myId, profile?.avatar_url]);
+  }, [people, myApcs, teamLeads, handlers, myId, profile?.avatar_url]);
   const personAvatar = (id: string | null) => (id ? allAvatars.get(id) ?? null : null);
-  // Who owns a brand: its APC, else (Bob's view) its Team Lead.
+  // Brand names under each APC — shown in the assignee picker so the assigner
+  // (especially an internal handler) sees whose brands sit under which APC.
+  const apcBrandNames = useMemo(() => {
+    const m = new Map<string, string[]>();
+    brandApc.forEach((apcId, brandId) => {
+      const name = brandMap.get(brandId);
+      if (!name) return;
+      const arr = m.get(apcId) ?? [];
+      arr.push(name);
+      m.set(apcId, arr);
+    });
+    m.forEach(arr => arr.sort((a, b) => a.localeCompare(b)));
+    return m;
+  }, [brandApc, brandMap]);
+  // Who owns a brand: its APC, else (Bob / internal handler) its Team Lead.
   const brandOwnerName = (brandId: string): string | null => {
-    const id = brandApc.get(brandId) ?? (isBob ? brandLead.get(brandId) : undefined);
+    const id = brandApc.get(brandId) ?? ((isBob || isInternalHandler) ? brandLead.get(brandId) : undefined);
     return id ? (allPeople.get(id) ?? null) : null;
   };
 
@@ -1003,8 +1028,8 @@ export default function Tasks() {
 
           {/* Right rail: Team Leads + APCs (Bob only) — click an avatar to assign
               a task. Native scrollbar hidden; up/down arrows appear on overflow. */}
-          {isBob && (teamLeads.length > 0 || myApcs.length > 0) && (
-            <aside className="ac-tl-rail" aria-label="Assign a task to a Team Lead or APC">
+          {isBob && (teamLeads.length > 0 || myApcs.length > 0 || handlers.length > 0) && (
+            <aside className="ac-tl-rail" aria-label="Assign a task to a Team Lead, APC, or Handler">
               {tlOverflow && (
                 <button type="button" className="ac-tl-arrow" aria-label="Scroll up"
                   onClick={() => scrollTlRail(-1)}><i className="bi bi-chevron-up" /></button>
@@ -1033,6 +1058,20 @@ export default function Tasks() {
                       onClick={() => openAdd(apc.id)}
                       aria-label={`Assign a new task to ${name}`}>
                       <Avatar name={name} src={apc.avatar_url} size="lg" />
+                      {open > 0 && <span className="ac-tl-badge">{open}</span>}
+                      <span className="ac-tl-tip">Assign task to {name}</span>
+                    </button>
+                  );
+                })}
+                {handlers.length > 0 && <div className="ac-tl-rail-head mt-2">Handlers</div>}
+                {handlers.map(h => {
+                  const name = h.full_name || h.email;
+                  const open = tasks.filter(t => t.assignee_id === h.id && t.status !== 'done').length;
+                  return (
+                    <button key={h.id} type="button" className="ac-tl-avatar-btn"
+                      onClick={() => openAdd(h.id)}
+                      aria-label={`Assign a new task to ${name}`}>
+                      <Avatar name={name} src={h.avatar_url} size="lg" />
                       {open > 0 && <span className="ac-tl-badge">{open}</span>}
                       <span className="ac-tl-tip">Assign task to {name}</span>
                     </button>
@@ -1093,13 +1132,14 @@ export default function Tasks() {
                   ) : (
                     <>
                       <AssigneePicker
-                        apcs={myApcs} leads={teamLeads} isBob={isBob}
+                        apcs={myApcs} leads={teamLeads} handlers={handlers} isBob={isBob}
+                        brandsByApc={apcBrandNames}
                         multiple={!editingId}
                         value={form.assignee_ids}
                         onChange={ids => setForm({ ...form, assignee_ids: ids })}
                       />
                       {editingId && <Form.Text className="text-muted">A task has one assignee. To give it to more people, create a new task.</Form.Text>}
-                      {myApcs.length === 0 && teamLeads.length === 0 && <Form.Text className="text-danger d-block">You have no APCs yet.</Form.Text>}
+                      {myApcs.length === 0 && teamLeads.length === 0 && handlers.length === 0 && <Form.Text className="text-danger d-block">{isInternalHandler ? 'No APCs to assign to yet.' : 'You have no APCs yet.'}</Form.Text>}
                     </>
                   )}
                 </Form.Group>
@@ -1473,11 +1513,13 @@ export default function Tasks() {
 }
 
 // ---- Searchable (multi-)select for task assignees ----
-// Bob picks from Team Leads + APCs, a Team Lead from their own APCs. In `multiple`
+// Bob picks from Team Leads + APCs + internal Handlers, a Team Lead or internal
+// Handler from APCs. APC rows show the brands under that APC. In `multiple`
 // mode (new task) selecting fans the task out to everyone chosen; on edit it acts
 // as a single-select since a task row has one assignee.
-function AssigneePicker({ apcs, leads, isBob, multiple, value, onChange }: {
-  apcs: PersonLite[]; leads: PersonLite[]; isBob: boolean; multiple: boolean;
+function AssigneePicker({ apcs, leads, handlers = [], isBob, brandsByApc, multiple, value, onChange }: {
+  apcs: PersonLite[]; leads: PersonLite[]; handlers?: PersonLite[]; isBob: boolean;
+  brandsByApc?: Map<string, string[]>; multiple: boolean;
   value: string[]; onChange: (ids: string[]) => void;
 }) {
   const [q, setQ] = useState('');
@@ -1496,14 +1538,19 @@ function AssigneePicker({ apcs, leads, isBob, multiple, value, onChange }: {
     return () => document.removeEventListener('mousedown', onDoc);
   }, [open]);
   const needle = q.trim().toLowerCase();
-  const match = (p: PersonLite) => !needle || nameOf(p).toLowerCase().includes(needle);
-  const fLeads = leads.filter(match);
+  // APCs also match on their brand names, so "assign to whoever runs brand X" works.
+  const match = (p: PersonLite) =>
+    !needle
+    || nameOf(p).toLowerCase().includes(needle)
+    || (brandsByApc?.get(p.id) ?? []).some(b => b.toLowerCase().includes(needle));
+  const fLeads = leads.filter(p => !needle || nameOf(p).toLowerCase().includes(needle));
+  const fHandlers = handlers.filter(p => !needle || nameOf(p).toLowerCase().includes(needle));
   const fApcs = apcs.filter(match);
   const byId = useMemo(() => {
     const m = new Map<string, PersonLite>();
-    [...leads, ...apcs].forEach(p => m.set(p.id, p));
+    [...leads, ...handlers, ...apcs].forEach(p => m.set(p.id, p));
     return m;
-  }, [leads, apcs]);
+  }, [leads, handlers, apcs]);
 
   const toggle = (id: string) => {
     if (!multiple) { onChange([id]); setOpen(false); return; }
@@ -1518,14 +1565,22 @@ function AssigneePicker({ apcs, leads, isBob, multiple, value, onChange }: {
   };
   const removeChip = (id: string) => onChange(value.filter(x => x !== id));
 
-  const Row = (p: PersonLite) => {
+  const Row = (p: PersonLite, brands?: string[]) => {
     const on = selected.has(p.id);
     return (
       <button type="button" key={p.id}
         className={`ac-assignee-opt ${on ? 'on' : ''}`}
         aria-pressed={on} onClick={() => toggle(p.id)}>
         <Avatar name={nameOf(p)} src={p.avatar_url} size="sm" />
-        <span className="ac-assignee-opt-name">{nameOf(p)}</span>
+        <span className="ac-assignee-opt-name">
+          {nameOf(p)}
+          {brands && brands.length > 0 && (
+            <span className="ac-assignee-opt-sub" title={brands.join(', ')}>
+              <i className="bi bi-shop me-1" />
+              {brands.slice(0, 3).join(', ')}{brands.length > 3 ? ` +${brands.length - 3}` : ''}
+            </span>
+          )}
+        </span>
         <i className={`bi ${on ? (multiple ? 'bi-check-square-fill' : 'bi-check-circle-fill') : (multiple ? 'bi-square' : 'bi-circle')}`} />
       </button>
     );
@@ -1576,19 +1631,25 @@ function AssigneePicker({ apcs, leads, isBob, multiple, value, onChange }: {
             </div>
           )}
           <div className="ac-assignee-list">
-            {fLeads.length === 0 && fApcs.length === 0 && (
+            {fLeads.length === 0 && fApcs.length === 0 && fHandlers.length === 0 && (
               <div className="text-muted text-center py-2 small">No matches.</div>
             )}
             {isBob && fLeads.length > 0 && (
               <>
                 <div className="ac-assignee-group">Team Leads</div>
-                {fLeads.map(Row)}
+                {fLeads.map(p => Row(p))}
               </>
             )}
             {fApcs.length > 0 && (
               <>
-                {isBob && fLeads.length > 0 && <div className="ac-assignee-group">APCs</div>}
-                {fApcs.map(Row)}
+                {isBob && (fLeads.length > 0 || fHandlers.length > 0) && <div className="ac-assignee-group">APCs</div>}
+                {fApcs.map(p => Row(p, brandsByApc?.get(p.id)))}
+              </>
+            )}
+            {isBob && fHandlers.length > 0 && (
+              <>
+                <div className="ac-assignee-group">Paid Collab Handlers</div>
+                {fHandlers.map(p => Row(p))}
               </>
             )}
           </div>

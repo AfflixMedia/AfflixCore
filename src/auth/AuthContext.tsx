@@ -13,6 +13,8 @@ export interface Profile {
   can_manage_gmv_max?: boolean;
   team_lead_id?: string | null;
   avatar_url?: string | null;
+  // Paid Collab Handlers only: internal handlers get team Chats + Tasks.
+  is_internal_handler?: boolean;
 }
 
 interface AuthCtx {

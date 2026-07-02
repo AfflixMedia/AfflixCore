@@ -17,13 +17,14 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
   const isTeamLead = profile?.role === 'team_lead';
   const isPaidCollabClient = profile?.role === 'paid_collab_client';
   const isPaidCollabHandler = profile?.role === 'paid_collab_handler';
-  // Internal staff (admin / team lead / apc) get the team Chats feature.
-  // Paid Collab handlers are intentionally excluded from chat.
-  const isInternal = isBob || isTeamLead || isApc;
+  // Paid Collab Handlers Bob marked INTERNAL get Chats + Tasks; external don't.
+  const isInternalHandler = isPaidCollabHandler && !!profile?.is_internal_handler;
+  // Internal staff (admin / team lead / apc / internal handler) get team Chats.
+  const isInternal = isBob || isTeamLead || isApc || isInternalHandler;
   const chatUnread = notifications.filter(n => !n.read_at && n.type === 'chat').length;
   const taskUnread = notifications.filter(n => !n.read_at && n.type === 'task').length;
-  // Tasks are used by Team Leads (assign), APCs (do), and Bob (oversight).
-  const showTasks = isBob || isTeamLead || isApc;
+  // Tasks: Team Leads + internal handlers (assign), APCs (do), Bob (oversight).
+  const showTasks = isBob || isTeamLead || isApc || isInternalHandler;
 
   return (
     <aside className="ac-sidebar">

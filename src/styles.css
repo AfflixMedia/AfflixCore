@@ -2569,7 +2569,12 @@ input[type="number"] {
 }
 .ac-assignee-opt:hover { background: rgba(20,22,32,.04); }
 .ac-assignee-opt.on { background: var(--ac-primary-soft); }
-.ac-assignee-opt-name { flex: 1; font-size: .9rem; font-weight: 600; }
+.ac-assignee-opt-name { flex: 1; font-size: .9rem; font-weight: 600; min-width: 0; }
+/* Brands under an APC — small muted line inside the picker row */
+.ac-assignee-opt-sub {
+  display: block; font-size: .72rem; font-weight: 500; color: var(--ac-text-muted);
+  line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .ac-assignee-opt > i { color: var(--ac-text-muted); font-size: 1.05rem; }
 .ac-assignee-opt.on > i { color: var(--ac-primary); }
 .ac-assignee-chip.static { background: rgba(20,22,32,.05); color: var(--ac-text-dark); padding: 3px 10px; }
