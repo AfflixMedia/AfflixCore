@@ -6,6 +6,7 @@ export interface ChatContact {
   email: string;
   role: string;
   avatar_url?: string | null;
+  is_superbob?: boolean; // role 'bob' + flag → badge shows "Super Boss"
 }
 
 export interface Conversation {
@@ -120,8 +121,8 @@ export const ROLE_BADGE: Record<string, string> = {
   paid_collab_handler: 'success',
 };
 
-export const roleLabel = (role: string | null | undefined): string =>
-  (role && ROLE_LABEL[role]) || 'Staff';
+export const roleLabel = (role: string | null | undefined, isSuperbob = false): string =>
+  role === 'bob' && isSuperbob ? 'Super Boss' : (role && ROLE_LABEL[role]) || 'Staff';
 
 export const roleBadge = (role: string | null | undefined): string =>
   (role && ROLE_BADGE[role]) || 'secondary';

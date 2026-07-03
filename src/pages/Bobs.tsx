@@ -85,7 +85,7 @@ export default function Bobs() {
   };
 
   if (!isSuperBob) {
-    return <Alert variant="danger">Only the Super Bob can manage Bob accounts.</Alert>;
+    return <Alert variant="danger">Only the Super Boss can manage Bob accounts.</Alert>;
   }
 
   return (
@@ -132,7 +132,7 @@ export default function Bobs() {
                   <div className="ac-row-name d-flex align-items-center gap-2 flex-wrap">
                     {b.full_name || <span className="text-muted">No name</span>}
                     {b.is_superbob
-                      ? <Badge bg="warning" text="dark"><i className="bi bi-star-fill me-1" />Super Bob</Badge>
+                      ? <Badge bg="warning" text="dark"><i className="bi bi-star-fill me-1" />Super Boss</Badge>
                       : <Badge bg="dark">Bob</Badge>}
                     {isMe && <Badge bg="secondary">You</Badge>}
                   </div>

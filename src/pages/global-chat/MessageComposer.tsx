@@ -228,7 +228,7 @@ export default function MessageComposer({
               <button key={c.id} type="button" className="ac-mention-item" onClick={() => pickMention(c)}>
                 <Avatar name={contactName(c)} src={c.avatar_url} size="sm" />
                 <span className="fw-semibold text-truncate flex-grow-1">{contactName(c)}</span>
-                <Badge bg={roleBadge(c.role)} className="ac-role-badge">{roleLabel(c.role)}</Badge>
+                <Badge bg={roleBadge(c.role)} className="ac-role-badge">{roleLabel(c.role, c.is_superbob)}</Badge>
               </button>
             ))}
           </div>

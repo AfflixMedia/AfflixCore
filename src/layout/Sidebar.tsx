@@ -186,7 +186,7 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
             <div className="text-truncate" >
               {profile?.full_name ?? profile?.email}
             </div>
-            <small className="text-muted">Role: {profile?.is_superbob ? 'super bob' : profile?.role ??'—'}</small>
+            <small className="text-muted">Role: {profile?.is_superbob ? 'super boss' : profile?.role ??'—'}</small>
           </div>
           <i className="bi bi-chevron-right ms-auto ac-nav-label" />
         </NavLink>

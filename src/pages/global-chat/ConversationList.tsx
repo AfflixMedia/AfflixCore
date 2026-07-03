@@ -209,7 +209,7 @@ export default function ConversationList({ views, activeId, myId, brandLeadByBra
                     <span className="ac-chat-row-name text-truncate">{v.title}</span>
                     {!v.conversation.is_group && v.otherUser && (
                       <Badge bg={roleBadge(v.otherUser.role)} className="ac-role-badge">
-                        {roleLabel(v.otherUser.role)}
+                        {roleLabel(v.otherUser.role, v.otherUser.is_superbob)}
                       </Badge>
                     )}
                     <span className="ac-chat-row-time ms-auto">{shortTime(v.lastAt)}</span>

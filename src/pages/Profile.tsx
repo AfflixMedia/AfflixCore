@@ -69,7 +69,9 @@ export default function Profile() {
 
   const displayName = profile?.full_name || profile?.email || 'User';
   const email = profile?.email || user?.email || '—';
-  const roleLabel = profile?.role ? (ROLE_LABELS[profile.role] ?? profile.role) : '—';
+  const roleLabel = profile?.is_superbob
+    ? 'Super Boss'
+    : profile?.role ? (ROLE_LABELS[profile.role] ?? profile.role) : '—';
   // Live confirm-match hint once the user starts typing a confirmation.
   const mismatch = confirm.length > 0 && password !== confirm;
 

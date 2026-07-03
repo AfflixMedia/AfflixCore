@@ -198,7 +198,7 @@ export default function ChatPanel({
             <span className="fw-semibold text-truncate">{view.title}</span>
             {!isGroup && !isAnnouncement && view.otherUser && (
               <Badge bg={roleBadge(view.otherUser.role)} className="ac-role-badge">
-                {roleLabel(view.otherUser.role)}
+                {roleLabel(view.otherUser.role, view.otherUser.is_superbob)}
               </Badge>
             )}
           </div>

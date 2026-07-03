@@ -59,7 +59,7 @@ export default function GroupModal(p: Props) {
     const roster = [...p.allStaff].sort((a, b) => contactName(a).localeCompare(contactName(b)));
     const filtered = roster.filter(c => {
       const needle = q.trim().toLowerCase();
-      return !needle || `${contactName(c)} ${c.email} ${roleLabel(c.role)}`.toLowerCase().includes(needle);
+      return !needle || `${contactName(c)} ${c.email} ${roleLabel(c.role, c.is_superbob)}`.toLowerCase().includes(needle);
     });
     return (
       <Modal show={p.show} onHide={p.onClose} centered>
@@ -84,7 +84,7 @@ export default function GroupModal(p: Props) {
                 <div className="flex-grow-1 min-w-0">
                   <div className="d-flex align-items-center gap-2">
                     <span className="fw-semibold text-truncate">{contactName(c)}{c.id === p.myId && ' (you)'}</span>
-                    <Badge bg={roleBadge(c.role)} className="ac-role-badge">{roleLabel(c.role)}</Badge>
+                    <Badge bg={roleBadge(c.role)} className="ac-role-badge">{roleLabel(c.role, c.is_superbob)}</Badge>
                     {c.role === 'bob' && <Badge bg="dark" className="ac-role-badge">Can post</Badge>}
                   </div>
                   <div className="text-muted small text-truncate">{c.email}</div>
@@ -122,7 +122,7 @@ export default function GroupModal(p: Props) {
                 <div className="flex-grow-1 min-w-0 text-start">
                   <div className="d-flex align-items-center gap-2">
                     <span className="fw-semibold text-truncate">{contactName(c)}</span>
-                    <Badge bg={roleBadge(c.role)} className="ac-role-badge">{roleLabel(c.role)}</Badge>
+                    <Badge bg={roleBadge(c.role)} className="ac-role-badge">{roleLabel(c.role, c.is_superbob)}</Badge>
                   </div>
                 </div>
                 <i className={`bi ${picked.includes(c.id) ? 'bi-check-square-fill text-primary' : 'bi-square'}`} />
@@ -182,7 +182,7 @@ export default function GroupModal(p: Props) {
                 <div className="flex-grow-1 min-w-0">
                   <div className="d-flex align-items-center gap-2">
                     <span className="fw-semibold text-truncate">{contactName(c)}{c.id === p.myId && ' (you)'}</span>
-                    <Badge bg={roleBadge(c.role)} className="ac-role-badge">{roleLabel(c.role)}</Badge>
+                    <Badge bg={roleBadge(c.role)} className="ac-role-badge">{roleLabel(c.role, c.is_superbob)}</Badge>
                     {isCreatorRow ? <Badge bg="dark" className="ac-role-badge">Creator</Badge>
                       : isAdmin ? <Badge bg="warning" text="dark" className="ac-role-badge">Admin</Badge> : null}
                   </div>
