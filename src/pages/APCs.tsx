@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { Button, Card, Modal, Form, Spinner, Alert } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
+import { fnError } from '../lib/functionError';
 import { useAuth } from '../auth/AuthContext';
 import Avatar from '../components/Avatar';
 
@@ -164,7 +165,7 @@ export default function APCs() {
           },
           headers: { Authorization: `Bearer ${session?.access_token}` },
         });
-        if (error) throw error;
+        if (error) throw await fnError(error);
         if ((data as any)?.error) throw new Error((data as any).error);
       }
       setShow(false);
@@ -429,7 +430,7 @@ export default function APCs() {
             const { data, error } = await supabase.functions.invoke('reset-apc-password', {
               body: { user_id: pwApc.id, password: newPw },
             });
-            if (error) throw error;
+            if (error) throw await fnError(error);
             if ((data as any)?.error) throw new Error((data as any).error);
             setPwOk(true);
           } catch (e: any) {
@@ -477,7 +478,7 @@ export default function APCs() {
               const { data, error } = await supabase.functions.invoke('delete-apc', {
                 body: { user_id: delApc.id },
               });
-              if (error) throw error;
+              if (error) throw await fnError(error);
               if ((data as any)?.error) throw new Error((data as any).error);
               setDelApc(null);
               await load();

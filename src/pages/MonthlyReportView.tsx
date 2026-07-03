@@ -4,6 +4,7 @@ import { Spinner, Alert, Badge, Button } from 'react-bootstrap';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { supabase } from '../lib/supabase';
+import { fnError } from '../lib/functionError';
 import { useAuth } from '../auth/AuthContext';
 import { useNotifications } from '../notifications/NotificationsContext';
 import { MonthlyReportContent, normalizeMonthlyContent } from '../lib/monthlyReportSchema';
@@ -156,7 +157,7 @@ export default function MonthlyReportView() {
     const { data, error } = await supabase.functions.invoke('post-staff-comment', {
       body: { report_id: report.id, report_type: 'monthly', section, body, parent_id: parentId ?? null },
     });
-    if (error) throw error;
+    if (error) throw await fnError(error);
     if ((data as any)?.error) throw new Error((data as any).error);
     setComments(prev => [...prev, (data as any).comment as Comment]);
   };

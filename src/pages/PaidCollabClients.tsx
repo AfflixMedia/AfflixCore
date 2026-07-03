@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { Button, Card, Modal, Form, Spinner, Alert } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
+import { fnError } from '../lib/functionError';
 import Avatar from '../components/Avatar';
 
 interface Client {
@@ -124,7 +125,7 @@ export default function PaidCollabClients() {
           },
           headers: { Authorization: `Bearer ${session?.access_token}` },
         });
-        if (error) throw error;
+        if (error) throw await fnError(error);
         if ((data as any)?.error) throw new Error((data as any).error);
       }
       setShow(false);
@@ -307,7 +308,7 @@ export default function PaidCollabClients() {
             const { data, error } = await supabase.functions.invoke('reset-paid-collab-client-password', {
               body: { user_id: pwClient.id, password: newPw },
             });
-            if (error) throw error;
+            if (error) throw await fnError(error);
             if ((data as any)?.error) throw new Error((data as any).error);
             setPwOk(true);
           } catch (e: any) {
@@ -355,7 +356,7 @@ export default function PaidCollabClients() {
               const { data, error } = await supabase.functions.invoke('delete-paid-collab-client', {
                 body: { user_id: delClient.id },
               });
-              if (error) throw error;
+              if (error) throw await fnError(error);
               if ((data as any)?.error) throw new Error((data as any).error);
               setDelClient(null);
               await load();

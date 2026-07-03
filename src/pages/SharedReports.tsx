@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Card, Spinner, Alert, Form, Row, Col, Badge, Button, Tab, Nav, Offcanvas, Modal } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
+import { fnError } from '../lib/functionError';
 import { addDays, formatRange, formatHuman, formatWeekShort, fromISO } from '../lib/dates';
 import { WeeklyReportContent, normalizeContent } from '../lib/reportSchema';
 import { MonthlyReportContent, normalizeMonthlyContent } from '../lib/monthlyReportSchema';
@@ -115,7 +116,7 @@ export default function SharedReports() {
         const { data, error } = await supabase.functions.invoke('get-shared-reports', {
           body: { token },
         });
-        if (error) throw error;
+        if (error) throw await fnError(error);
         if ((data as any)?.error) throw new Error((data as any).error);
         setClient(data.client);
         setBrands(data.brands);
@@ -327,7 +328,7 @@ export default function SharedReports() {
     const { data, error } = await supabase.functions.invoke('post-shared-comment', {
       body: { token, report_id: reportId, report_type: reportType, section, author_name: authorName, body, parent_id: parentId },
     });
-    if (error) throw error;
+    if (error) throw await fnError(error);
     if ((data as any)?.error) throw new Error((data as any).error);
     setComments(prev => [...prev, (data as any).comment as Comment]);
     setPublicName(authorName);
@@ -376,7 +377,7 @@ export default function SharedReports() {
       const { data, error } = await supabase.functions.invoke('post-approval-decision', {
         body: { token, ...it },
       });
-      if (error) throw error;
+      if (error) throw await fnError(error);
       if ((data as any)?.error) throw new Error((data as any).error);
       const inserted = (data as any).decision;
       setDecisions(prev => {
@@ -401,7 +402,7 @@ export default function SharedReports() {
     const { data, error } = await supabase.functions.invoke('post-shared-resource-comment', {
       body: { token, resource_id: feedbackResource.id, author_name: authorName, body, parent_id: parentId },
     });
-    if (error) throw error;
+    if (error) throw await fnError(error);
     if ((data as any)?.error) throw new Error((data as any).error);
     setResourceComments(prev => [...prev, (data as any).comment as ResourceComment]);
     setPublicName(authorName);
@@ -416,7 +417,7 @@ export default function SharedReports() {
     const { data, error } = await supabase.functions.invoke('post-shared-paidcollab-comment', {
       body: { token, brand_id: brandId, target_type: targetType, target_key: targetKey, author_name: authorName, body, parent_id: parentId ?? null },
     });
-    if (error) throw error;
+    if (error) throw await fnError(error);
     if ((data as any)?.error) throw new Error((data as any).error);
     setPcComments(prev => [...prev, (data as any).comment]);
     setPublicName(authorName);
@@ -429,7 +430,7 @@ export default function SharedReports() {
     const { data, error } = await supabase.functions.invoke('post-shared-paidcollab-paid', {
       body: { token, brand_id: brandId, creator_id: creatorId, confirmed, author_name: publicName || null },
     });
-    if (error) throw error;
+    if (error) throw await fnError(error);
     if ((data as any)?.error) throw new Error((data as any).error);
     const updated = (data as any).creator as HandlerCreator;
     setPcHandlerCreators(prev => prev.map(c => (c.id === creatorId ? { ...c, ...updated } : c)));
@@ -1431,7 +1432,7 @@ function SharedPaidCollabPane({
     const { data, error } = await supabase.functions.invoke('post-shared-program-comment', {
       body: { token, program_id: programId, author_name: name, body, parent_id: parentId ?? null, creator_id: creatorId },
     });
-    if (error) throw error;
+    if (error) throw await fnError(error);
     if ((data as any)?.error) throw new Error((data as any).error);
     onThreadAdded((data as any).comment as ProgramThreadComment);
     onNameChange(name);
@@ -1780,7 +1781,7 @@ function SharedProgramView({
         parent_id: parentId ?? null, creator_id: creatorId ?? null,
       },
     });
-    if (error) throw error;
+    if (error) throw await fnError(error);
     if ((data as any)?.error) throw new Error((data as any).error);
     onThreadAdded((data as any).comment as ProgramThreadComment);
     onNameChange(name);

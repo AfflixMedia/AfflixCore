@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, FormEvent, CSSProperties } from '
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card, Form, Button, Row, Col, Table, Spinner, Alert, Badge, Modal, Offcanvas, Dropdown } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
+import { fnError } from '../lib/functionError';
 import {
   MonthlyReportContent, emptyMonthlyContent, normalizeMonthlyContent, applyLastMonthFromPrev,
   emptyMonthlyTopCreator, emptyMonthlyTopVideo, emptyMonthlyProduct,
@@ -313,7 +314,7 @@ export default function MonthlyReportEdit() {
     const { data, error } = await supabase.functions.invoke('post-staff-comment', {
       body: { report_id: report.id, report_type: 'monthly', section, body, parent_id: parentId ?? null },
     });
-    if (error) throw error;
+    if (error) throw await fnError(error);
     if ((data as any)?.error) throw new Error((data as any).error);
     setComments(prev => [...prev, (data as any).comment as Comment]);
   };

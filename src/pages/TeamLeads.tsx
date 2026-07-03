@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { Button, Card, Modal, Form, Spinner, Alert, Row, Col } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
+import { fnError } from '../lib/functionError';
 import Avatar from '../components/Avatar';
 
 interface TeamLead {
@@ -192,7 +193,7 @@ export default function TeamLeads() {
           },
           headers: { Authorization: `Bearer ${session?.access_token}` },
         });
-        if (error) throw error;
+        if (error) throw await fnError(error);
         if ((data as any)?.error) throw new Error((data as any).error);
         leadId = (data as any).id as string;
       }
@@ -447,7 +448,7 @@ export default function TeamLeads() {
             const { data, error } = await supabase.functions.invoke('reset-team-lead-password', {
               body: { user_id: pwLead.id, password: newPw },
             });
-            if (error) throw error;
+            if (error) throw await fnError(error);
             if ((data as any)?.error) throw new Error((data as any).error);
             setPwOk(true);
           } catch (e: any) {
@@ -498,7 +499,7 @@ export default function TeamLeads() {
               const { data, error } = await supabase.functions.invoke('delete-team-lead', {
                 body: { user_id: delLead.id },
               });
-              if (error) throw error;
+              if (error) throw await fnError(error);
               if ((data as any)?.error) throw new Error((data as any).error);
               setDelLead(null);
               await load();
