@@ -35,6 +35,7 @@ import ReportingCanvasList from './pages/templates/ReportingCanvasList';
 import ReportingCanvasEditor from './pages/templates/ReportingCanvasEditor';
 import GlobalChat from './pages/global-chat/GlobalChat';
 import TeamLeads from './pages/TeamLeads';
+import Bobs from './pages/Bobs';
 import Tasks from './pages/Tasks';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { useAuth } from './auth/AuthContext';
@@ -77,6 +78,8 @@ export default function App() {
         <Route path="brands/:id" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead']}><BrandDetail /></ProtectedRoute>} />
         <Route path="apcs" element={<ProtectedRoute roles={['bob', 'team_lead']}><APCs /></ProtectedRoute>} />
         <Route path="team-leads" element={<ProtectedRoute roles={['bob']}><TeamLeads /></ProtectedRoute>} />
+        {/* Bobs management — role-gated to bob here; the page itself additionally requires is_superbob. */}
+        <Route path="bobs" element={<ProtectedRoute roles={['bob']}><Bobs /></ProtectedRoute>} />
         <Route path="tasks" element={<ProtectedRoute roles={['bob', 'team_lead', 'apc']} allowInternalHandler><Tasks /></ProtectedRoute>} />
         <Route path="paid-collab-clients" element={<ProtectedRoute roles={['bob']}><PaidCollabClients /></ProtectedRoute>} />
         <Route path="paid-collab-handlers" element={<ProtectedRoute roles={['bob']}><PaidCollabHandlers /></ProtectedRoute>} />

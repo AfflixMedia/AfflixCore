@@ -87,6 +87,11 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
                 <NavLink to="/clients" title="Clients">
                   <i className="bi bi-building" /> <span className="ac-nav-label">Clients</span>
                 </NavLink>
+                {profile?.is_superbob && (
+                  <NavLink to="/bobs" title="Bobs">
+                    <i className="bi bi-person-badge" /> <span className="ac-nav-label">Bobs</span>
+                  </NavLink>
+                )}
                 <NavLink to="/team-leads" title="Team Leads">
                   <i className="bi bi-diagram-3" /> <span className="ac-nav-label">Team Leads</span>
                 </NavLink>
@@ -181,7 +186,7 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
             <div className="text-truncate" >
               {profile?.full_name ?? profile?.email}
             </div>
-            <small className="text-muted">Role: {profile?.role ?? '—'}</small>
+            <small className="text-muted">Role: {profile?.is_superbob ? 'super bob' : profile?.role ??'—'}</small>
           </div>
           <i className="bi bi-chevron-right ms-auto ac-nav-label" />
         </NavLink>

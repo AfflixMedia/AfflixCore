@@ -95,6 +95,8 @@ export default function Tasks() {
   // Internal handlers assign to any APC (external handlers never reach /tasks).
   const isInternalHandler = profile?.role === 'paid_collab_handler' && !!profile?.is_internal_handler;
   const canAssign = profile?.role === 'team_lead' || isBob || isInternalHandler;
+  // An APC can also create tasks — upward only (their Team Lead + Bobs).
+  const canCreate = canAssign || isApc;
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [people, setPeople] = useState<Map<string, PersonLite>>(new Map());
@@ -102,6 +104,8 @@ export default function Tasks() {
   const [teamLeads, setTeamLeads] = useState<PersonLite[]>([]);
   // Internal Paid Collab Handlers (Bob only — he can assign tasks to them).
   const [handlers, setHandlers] = useState<PersonLite[]>([]);
+  // Bobs — a Bob assigns to the other Bobs; an APC assigns "up" to any Bob.
+  const [bobs, setBobs] = useState<PersonLite[]>([]);
   const [brands, setBrands] = useState<BrandLite[]>([]);
   // brand → its APC / Team Lead, so a brand chip can auto-fill the assignee.
   const [brandApc, setBrandApc] = useState<Map<string, string>>(new Map());
@@ -156,9 +160,9 @@ export default function Tasks() {
       if (canAssign) pre.push(supabase.rpc('generate_due_recurring_tasks'));
       await Promise.all(pre);
     }
-    const [tRes, brRes, apcRes, tlRes, hRes, fRes, lRes, abRes, tlbRes, recRes, remRes, runRes] = await Promise.all([
+    const [tRes, brRes, apcRes, tlRes, hRes, fRes, lRes, abRes, tlbRes, recRes, remRes, runRes, bobRes, myLeadRes] = await Promise.all([
       supabase.from('tasks').select('*').order('status').order('due_date', { nullsFirst: false }).order('created_at', { ascending: false }),
-      canAssign ? supabase.from('brands').select('id,name').order('name') : Promise.resolve({ data: [], error: null }),
+      canCreate ? supabase.from('brands').select('id,name').order('name') : Promise.resolve({ data: [], error: null }),
       canAssign ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('role', 'apc').order('full_name') : Promise.resolve({ data: [], error: null }),
       // Internal handlers also load Team Leads — RLS scopes them to the leads
       // of the handler's own brands (shown as brand owners, not assignable).
@@ -171,14 +175,19 @@ export default function Tasks() {
       canAssign ? supabase.from('task_recurrences').select('*').order('created_at', { ascending: false }) : Promise.resolve({ data: [], error: null }),
       supabase.from('task_reminders').select('id,task_id,assignee_id,created_by,created_at,acknowledged_at,ack_response').order('created_at', { ascending: false }),
       canAssign ? supabase.from('task_recurrence_runs').select('*').order('run_on', { ascending: false }) : Promise.resolve({ data: [], error: null }),
+      (isBob || isApc) ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('role', 'bob').order('full_name') : Promise.resolve({ data: [], error: null }),
+      // An APC's own Team Lead (their other upward assignment target).
+      (isApc && profile?.team_lead_id) ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('id', profile.team_lead_id) : Promise.resolve({ data: [], error: null }),
     ]);
     if (tRes.error) { setErr(tRes.error.message); setLoading(false); return; }
     const ts = (tRes.data as Task[]) ?? [];
     setTasks(ts);
     setBrands(((brRes as any).data ?? []) as BrandLite[]);
     setMyApcs(((apcRes as any).data ?? []) as PersonLite[]);
-    setTeamLeads(((tlRes as any).data ?? []) as PersonLite[]);
+    // For an APC, "teamLeads" holds just their own lead (their upward target).
+    setTeamLeads(((isApc ? (myLeadRes as any).data : (tlRes as any).data) ?? []) as PersonLite[]);
     setHandlers(((hRes as any).data ?? []) as PersonLite[]);
+    setBobs(((bobRes as any).data ?? []) as PersonLite[]);
     setFolders(((fRes as any).data ?? []) as OrgItem[]);
     setLabels(((lRes as any).data ?? []) as OrgItem[]);
     setRecurrences(((recRes as any).data ?? []) as Recurrence[]);
@@ -244,6 +253,8 @@ export default function Tasks() {
     recurrenceRuns.forEach(run => { const a = m.get(run.recurrence_id) ?? []; a.push(run); m.set(run.recurrence_id, a); });
     return m;
   }, [recurrenceRuns]);
+  // Everyone except me — a Bob doesn't assign a task to himself via the picker.
+  const otherBobs = useMemo(() => bobs.filter(b => b.id !== myId), [bobs, myId]);
   // Every person we might need a name for (assignees, creators, brand owners).
   const allPeople = useMemo(() => {
     const m = new Map<string, string>();
@@ -251,8 +262,9 @@ export default function Tasks() {
     myApcs.forEach(p => m.set(p.id, p.full_name || p.email));
     teamLeads.forEach(p => m.set(p.id, p.full_name || p.email));
     handlers.forEach(p => m.set(p.id, p.full_name || p.email));
+    bobs.forEach(p => m.set(p.id, p.full_name || p.email));
     return m;
-  }, [people, myApcs, teamLeads, handlers]);
+  }, [people, myApcs, teamLeads, handlers, bobs]);
   const personName = (id: string | null) => {
     if (!id) return '—';
     if (id === myId) return 'You';
@@ -265,9 +277,10 @@ export default function Tasks() {
     myApcs.forEach(p => m.set(p.id, p.avatar_url));
     teamLeads.forEach(p => m.set(p.id, p.avatar_url));
     handlers.forEach(p => m.set(p.id, p.avatar_url));
+    bobs.forEach(p => m.set(p.id, p.avatar_url));
     if (myId && profile?.avatar_url) m.set(myId, profile.avatar_url);
     return m;
-  }, [people, myApcs, teamLeads, handlers, myId, profile?.avatar_url]);
+  }, [people, myApcs, teamLeads, handlers, bobs, myId, profile?.avatar_url]);
   const personAvatar = (id: string | null) => (id ? allAvatars.get(id) ?? null : null);
   // Brand names under each APC — shown in the assignee picker so the assigner
   // (especially an internal handler) sees whose brands sit under which APC.
@@ -327,7 +340,7 @@ export default function Tasks() {
   // only ever holds their own single row). Rows created together share every
   // shared field, so grouping after the folder/label/search filter is safe.
   const groups = useMemo<TaskGroup[]>(() => {
-    if (!canAssign) return visibleTasks.map(t => ({ key: t.id, tasks: [t], isGroup: false }));
+    if (!canCreate) return visibleTasks.map(t => ({ key: t.id, tasks: [t], isGroup: false }));
     const map = new Map<string, Task[]>();
     const order: string[] = [];
     for (const t of visibleTasks) {
@@ -597,8 +610,9 @@ export default function Tasks() {
   };
 
   // WhatsApp-style read tick shown to assigners (blue = seen, grey = not seen).
+  // An APC sees it too on tasks THEY assigned upward (to their lead / a Bob).
   const seenTick = (t: Task) => {
-    if (isApc) return null;
+    if (isApc && t.created_by !== myId) return null;
     const seen = !!t.seen_at;
     return (
       <span className={`ac-seen ${seen ? 'seen' : ''}`}
@@ -664,7 +678,7 @@ export default function Tasks() {
     const overdue = t.status !== 'done' && t.due_date && t.due_date < new Date().toISOString().slice(0, 10);
     const canComplete = t.assignee_id === myId || t.created_by === myId || isBob;
     const canDelete = t.created_by === myId || isBob;
-    const canEditTask = canAssign && (t.created_by === myId || isBob);
+    const canEditTask = canCreate && (t.created_by === myId || isBob);
     const canRemind = !isApc && (t.created_by === myId || isBob);
     const folder = t.folder_id ? folderMap.get(t.folder_id) : null;
     const taskLabels = (t.label_ids ?? []).map(id => labelMap.get(id)).filter(Boolean) as OrgItem[];
@@ -684,8 +698,8 @@ export default function Tasks() {
           </div>
           {t.description && <div className="ac-row-sub ac-clamp1">{t.description}</div>}
           <div className="ac-row-sub d-flex align-items-center flex-wrap gap-2 mt-1">
-            {!isApc && <span><i className="bi bi-person me-1" />{personName(t.assignee_id)}{seenTick(t)}</span>}
-            {isApc && t.created_by && <span><i className="bi bi-person-badge me-1" />from {personName(t.created_by)}</span>}
+            {(!isApc || t.created_by === myId) && <span><i className="bi bi-person me-1" />{personName(t.assignee_id)}{seenTick(t)}</span>}
+            {isApc && t.created_by && t.created_by !== myId && <span><i className="bi bi-person-badge me-1" />from {personName(t.created_by)}</span>}
             {t.brand_id && <span className="ac-chip neutral"><i className="bi bi-shop" /> {brandMap.get(t.brand_id) ?? 'Brand'}</span>}
             {folder && <span className="ac-chip" style={{ borderColor: folder.color ?? undefined, color: folder.color ?? undefined }}><i className="bi bi-folder me-1" />{folder.name}</span>}
             {taskLabels.map(l => (
@@ -863,7 +877,7 @@ export default function Tasks() {
               type="search" value={query} onChange={e => setQuery(e.target.value)}
               placeholder="Search tasks…" aria-label="Search tasks" />
           </div>
-          {canAssign && (
+          {canCreate && (
             <Button onClick={() => openAdd()}>
               <i className="bi bi-plus-lg me-1" /> New Task
             </Button>
@@ -995,8 +1009,12 @@ export default function Tasks() {
                   <div className="ac-empty">
                     <div className="ac-empty-icon"><i className="bi bi-check2-square" /></div>
                     <h5>No tasks {isApc ? 'assigned to you' : 'here'}</h5>
-                    <p>{canAssign ? 'Create a task and assign it to one of your APCs.' : 'Tasks your Team Lead assigns will appear here.'}</p>
-                    {canAssign && (
+                    <p>{canAssign
+                      ? 'Create a task and assign it to one of your APCs.'
+                      : isApc
+                        ? 'Tasks assigned to you appear here — and you can assign a task to your Team Lead or Bob.'
+                        : 'Tasks your Team Lead assigns will appear here.'}</p>
+                    {canCreate && (
                       <Button className="mt-3" onClick={() => openAdd()}><i className="bi bi-plus-lg me-1" /> New Task</Button>
                     )}
                   </div>
@@ -1028,14 +1046,28 @@ export default function Tasks() {
 
           {/* Right rail: Team Leads + APCs (Bob only) — click an avatar to assign
               a task. Native scrollbar hidden; up/down arrows appear on overflow. */}
-          {isBob && (teamLeads.length > 0 || myApcs.length > 0 || handlers.length > 0) && (
-            <aside className="ac-tl-rail" aria-label="Assign a task to a Team Lead, APC, or Handler">
+          {isBob && (teamLeads.length > 0 || myApcs.length > 0 || handlers.length > 0 || otherBobs.length > 0) && (
+            <aside className="ac-tl-rail" aria-label="Assign a task to a Bob, Team Lead, APC, or Handler">
               {tlOverflow && (
                 <button type="button" className="ac-tl-arrow" aria-label="Scroll up"
                   onClick={() => scrollTlRail(-1)}><i className="bi bi-chevron-up" /></button>
               )}
               <div className="ac-tl-track" ref={tlRailRef}>
-                {teamLeads.length > 0 && <div className="ac-tl-rail-head">Team Leads</div>}
+                {otherBobs.length > 0 && <div className="ac-tl-rail-head">Bobs</div>}
+                {otherBobs.map(b => {
+                  const name = b.full_name || b.email;
+                  const open = tasks.filter(t => t.assignee_id === b.id && t.status !== 'done').length;
+                  return (
+                    <button key={b.id} type="button" className="ac-tl-avatar-btn"
+                      onClick={() => openAdd(b.id)}
+                      aria-label={`Assign a new task to ${name}`}>
+                      <Avatar name={name} src={b.avatar_url} size="lg" variant="dark" />
+                      {open > 0 && <span className="ac-tl-badge">{open}</span>}
+                      <span className="ac-tl-tip">Assign task to {name}</span>
+                    </button>
+                  );
+                })}
+                {teamLeads.length > 0 && <div className={`ac-tl-rail-head ${otherBobs.length > 0 ? 'mt-2' : ''}`}>Team Leads</div>}
                 {teamLeads.map(tl => {
                   const name = tl.full_name || tl.email;
                   const open = tasks.filter(t => t.assignee_id === tl.id && t.status !== 'done').length;
@@ -1132,14 +1164,15 @@ export default function Tasks() {
                   ) : (
                     <>
                       <AssigneePicker
-                        apcs={myApcs} leads={teamLeads} handlers={handlers} isBob={isBob}
+                        apcs={myApcs} leads={teamLeads} handlers={handlers} bobs={otherBobs}
+                        isBob={isBob} isApc={isApc}
                         brandsByApc={apcBrandNames}
                         multiple={!editingId}
                         value={form.assignee_ids}
                         onChange={ids => setForm({ ...form, assignee_ids: ids })}
                       />
                       {editingId && <Form.Text className="text-muted">A task has one assignee. To give it to more people, create a new task.</Form.Text>}
-                      {myApcs.length === 0 && teamLeads.length === 0 && handlers.length === 0 && <Form.Text className="text-danger d-block">{isInternalHandler ? 'No APCs to assign to yet.' : 'You have no APCs yet.'}</Form.Text>}
+                      {myApcs.length === 0 && teamLeads.length === 0 && handlers.length === 0 && otherBobs.length === 0 && <Form.Text className="text-danger d-block">{isInternalHandler ? 'No APCs to assign to yet.' : isApc ? 'No one to assign a task to yet.' : 'You have no APCs yet.'}</Form.Text>}
                     </>
                   )}
                 </Form.Group>
@@ -1210,8 +1243,8 @@ export default function Tasks() {
             </div>
 
             {/* Repeat / "alarm" — new one-off tasks only. Creates a schedule that
-                auto-assigns each period. */}
-            {!editingId && !editingGroupId && (() => {
+                auto-assigns each period. Assigner roles only (not APCs). */}
+            {!editingId && !editingGroupId && canAssign && (() => {
               const expanded = repeatOpen || form.repeat !== 'none';
               return (
               <div className="ac-repeat mt-3">
@@ -1314,7 +1347,7 @@ export default function Tasks() {
           const sm = STATUS_META[t.status];
           const canComplete = t.assignee_id === myId || t.created_by === myId || isBob;
           const canDelete = t.created_by === myId || isBob;
-          const canEditTask = canAssign && (t.created_by === myId || isBob);
+          const canEditTask = canCreate && (t.created_by === myId || isBob);
           const canRemind = !isApc && (t.created_by === myId || isBob);
           const folder = t.folder_id ? folderMap.get(t.folder_id) : null;
           const taskLabels = (t.label_ids ?? []).map(id => labelMap.get(id)).filter(Boolean) as OrgItem[];
@@ -1341,7 +1374,7 @@ export default function Tasks() {
                 {t.description && <p className="ac-task-detail-desc">{t.description}</p>}
                 <div className="ac-task-detail-meta">
                   <div><span className="lbl">Assignee</span><span className="val"><Avatar name={personName(t.assignee_id)} src={personAvatar(t.assignee_id)} size="sm" /> {personName(t.assignee_id)}</span></div>
-                  {!isApc && (
+                  {(!isApc || t.created_by === myId) && (
                     <div><span className="lbl">Seen</span>
                       <span className="val">
                         {t.seen_at
@@ -1513,12 +1546,14 @@ export default function Tasks() {
 }
 
 // ---- Searchable (multi-)select for task assignees ----
-// Bob picks from Team Leads + APCs + internal Handlers, a Team Lead or internal
-// Handler from APCs. APC rows show the brands under that APC. In `multiple`
+// Bob picks from the other Bobs + Team Leads + APCs + internal Handlers, a Team
+// Lead or internal Handler from APCs, and an APC assigns UP: their own Team
+// Lead + the Bobs. APC rows show the brands under that APC. In `multiple`
 // mode (new task) selecting fans the task out to everyone chosen; on edit it acts
 // as a single-select since a task row has one assignee.
-function AssigneePicker({ apcs, leads, handlers = [], isBob, brandsByApc, multiple, value, onChange }: {
-  apcs: PersonLite[]; leads: PersonLite[]; handlers?: PersonLite[]; isBob: boolean;
+function AssigneePicker({ apcs, leads, handlers = [], bobs = [], isBob, isApc = false, brandsByApc, multiple, value, onChange }: {
+  apcs: PersonLite[]; leads: PersonLite[]; handlers?: PersonLite[]; bobs?: PersonLite[];
+  isBob: boolean; isApc?: boolean;
   brandsByApc?: Map<string, string[]>; multiple: boolean;
   value: string[]; onChange: (ids: string[]) => void;
 }) {
@@ -1545,12 +1580,13 @@ function AssigneePicker({ apcs, leads, handlers = [], isBob, brandsByApc, multip
     || (brandsByApc?.get(p.id) ?? []).some(b => b.toLowerCase().includes(needle));
   const fLeads = leads.filter(p => !needle || nameOf(p).toLowerCase().includes(needle));
   const fHandlers = handlers.filter(p => !needle || nameOf(p).toLowerCase().includes(needle));
+  const fBobs = bobs.filter(p => !needle || nameOf(p).toLowerCase().includes(needle));
   const fApcs = apcs.filter(match);
   const byId = useMemo(() => {
     const m = new Map<string, PersonLite>();
-    [...leads, ...handlers, ...apcs].forEach(p => m.set(p.id, p));
+    [...leads, ...handlers, ...bobs, ...apcs].forEach(p => m.set(p.id, p));
     return m;
-  }, [leads, handlers, apcs]);
+  }, [leads, handlers, bobs, apcs]);
 
   const toggle = (id: string) => {
     if (!multiple) { onChange([id]); setOpen(false); return; }
@@ -1631,18 +1667,24 @@ function AssigneePicker({ apcs, leads, handlers = [], isBob, brandsByApc, multip
             </div>
           )}
           <div className="ac-assignee-list">
-            {fLeads.length === 0 && fApcs.length === 0 && fHandlers.length === 0 && (
+            {fLeads.length === 0 && fApcs.length === 0 && fHandlers.length === 0 && fBobs.length === 0 && (
               <div className="text-muted text-center py-2 small">No matches.</div>
             )}
-            {isBob && fLeads.length > 0 && (
+            {fBobs.length > 0 && (
               <>
-                <div className="ac-assignee-group">Team Leads</div>
+                <div className="ac-assignee-group">{fBobs.length === 1 ? 'Bob' : 'Bobs'}</div>
+                {fBobs.map(p => Row(p))}
+              </>
+            )}
+            {(isBob || isApc) && fLeads.length > 0 && (
+              <>
+                <div className="ac-assignee-group">{isApc ? 'My Team Lead' : 'Team Leads'}</div>
                 {fLeads.map(p => Row(p))}
               </>
             )}
             {fApcs.length > 0 && (
               <>
-                {isBob && (fLeads.length > 0 || fHandlers.length > 0) && <div className="ac-assignee-group">APCs</div>}
+                {isBob && (fLeads.length > 0 || fHandlers.length > 0 || fBobs.length > 0) && <div className="ac-assignee-group">APCs</div>}
                 {fApcs.map(p => Row(p, brandsByApc?.get(p.id)))}
               </>
             )}

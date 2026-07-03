@@ -15,6 +15,8 @@ export interface Profile {
   avatar_url?: string | null;
   // Paid Collab Handlers only: internal handlers get team Chats + Tasks.
   is_internal_handler?: boolean;
+  // Bob only: the Super Bob additionally manages Bob accounts (/bobs page).
+  is_superbob?: boolean;
 }
 
 interface AuthCtx {
