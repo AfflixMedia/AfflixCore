@@ -160,11 +160,11 @@ export default function BrandDetail() {
 
   const visibleTabs = useMemo(() => {
     if (isBob) return TABS;
-    // Team Lead: APC-level access to their brands, minus Paid Collab (separate
-    // operation) and the Bob-only financials (Billing / Payments).
+    // Team Lead: APC-level access to their brands (incl. Paid Collab since
+    // 2026-07-06), minus the Bob-only financials (Billing / Payments).
     if (isTeamLead) {
       if (!assignedToMe) return [];
-      return TABS.filter(t => !['paid-collab', 'billing', 'payments'].includes(t.key));
+      return TABS.filter(t => !['billing', 'payments'].includes(t.key));
     }
     if (!isApc || !assignedToMe) return [];
     return TABS.filter(t => {
@@ -210,7 +210,7 @@ export default function BrandDetail() {
   const canEditResources = (isBob) && brandActive;
   const canEditGmvMax    = (isBob || canManageGmvMax || tlAssigned) && brandActive;
   const canEditSamples   = (isBob || (isApc && assignedToMe) || tlAssigned) && brandActive;
-  const canEditPaidCollab = (isBob || (isApc && assignedToMe)) && brandActive;
+  const canEditPaidCollab = (isBob || (isApc && assignedToMe) || tlAssigned) && brandActive;
   const canEditProducts   = (isBob || (isApc && assignedToMe) || tlAssigned) && brandActive;
   // Reporting share toggles are Bob-only and require active brand.
   const canEditReporting = isBob && brandActive;
