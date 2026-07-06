@@ -8,7 +8,7 @@ import { supabase } from '../../lib/supabase';
 import { toISO } from '../../lib/dates';
 import NumberInput from '../../components/NumberInput';
 
-interface SampleProduct {
+export interface SampleProduct {
   id: string;
   brand_id: string;
   external_product_id: string | null;
@@ -16,7 +16,7 @@ interface SampleProduct {
   monthly_goal: number | null;
   sort_order: number;
 }
-interface DailyEntry {
+export interface DailyEntry {
   id?: string;
   brand_id: string;
   entry_date: string;
@@ -34,15 +34,15 @@ interface WeeklyGmv {
   affiliate_gmv: number | null;
 }
 
-function currentMonth() {
+export function currentMonth() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
-function monthLabel(yyyymm: string) {
+export function monthLabel(yyyymm: string) {
   const [y, m] = yyyymm.split('-').map(Number);
   return new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
 }
-function daysInMonth(yyyymm: string): string[] {
+export function daysInMonth(yyyymm: string): string[] {
   const [y, m] = yyyymm.split('-').map(Number);
   const last = new Date(y, m, 0).getDate();
   const out: string[] = [];
@@ -66,7 +66,7 @@ function prevMonthOf(yyyymm: string): string {
   const d = new Date(y, m - 2, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
-function recentMonths(count: number): string[] {
+export function recentMonths(count: number): string[] {
   const now = new Date();
   const out: string[] = [];
   for (let i = count - 1; i >= 0; i--) {
@@ -75,11 +75,11 @@ function recentMonths(count: number): string[] {
   }
   return out;
 }
-function isWeekend(iso: string): boolean {
+export function isWeekend(iso: string): boolean {
   const wd = new Date(iso + 'T00:00:00').getDay();
   return wd === 0 || wd === 6;
 }
-const sumValues = (m: Record<string, number>) =>
+export const sumValues = (m: Record<string, number>) =>
   Object.values(m).reduce((s, v) => s + (v ?? 0), 0);
 
 const SECTION_HEADING_STYLE: React.CSSProperties = { textTransform: 'none', letterSpacing: 0 };
@@ -1108,7 +1108,7 @@ e.g.
 // Goal progress tile — large, gradient bar, percentage centered
 // =====================================================================
 
-function GoalProgressTile({ approved, goal, pct }: { approved: number; goal: number; pct: number }) {
+export function GoalProgressTile({ approved, goal, pct }: { approved: number; goal: number; pct: number }) {
   const color = pct >= 100 ? '#198754' : pct >= 75 ? '#e8862e' : pct >= 40 ? '#fd7e14' : '#dc3545';
   return (
     <div className="p-3 rounded h-100 position-relative" style={{
@@ -1151,7 +1151,7 @@ function GoalProgressTile({ approved, goal, pct }: { approved: number; goal: num
 // Generic colored KPI tile (icon + label + value)
 // =====================================================================
 
-function KpiTile({ icon, color, label, value }: { icon: string; color: string; label: string; value: string }) {
+export function KpiTile({ icon, color, label, value }: { icon: string; color: string; label: string; value: string }) {
   return (
     <div className="p-3 rounded h-100 d-flex align-items-center gap-3" style={{
       background: `linear-gradient(135deg, ${color}1a 0%, ${color}0d 100%)`,
@@ -1175,7 +1175,7 @@ function KpiTile({ icon, color, label, value }: { icon: string; color: string; l
 // Beautiful per-product progress bar (used in the products table)
 // =====================================================================
 
-function ProductProgressBar({ pct, approved, goal }: { pct: number; approved: number; goal: number }) {
+export function ProductProgressBar({ pct, approved, goal }: { pct: number; approved: number; goal: number }) {
   const color = pct >= 100 ? '#198754' : pct >= 75 ? '#e8862e' : pct >= 40 ? '#fd7e14' : '#dc3545';
   return (
     <div className="d-flex align-items-center gap-2">

@@ -2187,16 +2187,32 @@ input[type="number"] {
 .ac-msg-quote-name { font-size: .74rem; font-weight: 700; color: var(--ac-primary); }
 .ac-msg-quote-body { font-size: .78rem; color: var(--ac-text-muted); max-width: 320px; }
 
+/* Hover action toolbar — a Discord-style pill floating just above the bubble's
+   edge (never covering the text, even on tiny messages). Anchored toward the
+   panel center: incoming → left edge, outgoing → right edge. */
 .ac-msg-actions {
-  position: absolute; top: 2px; right: 4px; display: none; gap: 2px;
+  position: absolute; top: -18px; left: 8px; right: auto; display: none;
+  align-items: center; gap: 0; padding: 2px;
+  background: #fff; border: 1px solid var(--ac-line-l); border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0,0,0,.14); z-index: 6;
 }
-.ac-msg-bubble:hover .ac-msg-actions { display: flex; }
-.ac-msg-actions button {
-  border: none; background: rgba(255,255,255,.9); color: var(--ac-text-muted);
-  width: 24px; height: 24px; border-radius: 50%; font-size: .72rem; cursor: pointer;
-  box-shadow: 0 1px 3px rgba(0,0,0,.15);
+.ac-msg-bubble.mine .ac-msg-actions { left: auto; right: 8px; }
+.ac-msg-bubble:hover .ac-msg-actions, .ac-msg-actions.show { display: inline-flex; }
+/* Scoped to the toolbar's own buttons only — the emoji-picker popup rendered
+   inside must keep its own button sizing/colors. */
+.ac-msg-actions > button,
+.ac-msg-actions > .ac-ack-wrap > button {
+  border: none; background: transparent; color: var(--ac-text-muted);
+  width: 26px; height: 24px; border-radius: 6px; font-size: .8rem; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
 }
-.ac-msg-actions button:hover { color: var(--ac-primary); }
+.ac-msg-actions > button:hover,
+.ac-msg-actions > .ac-ack-wrap > button:hover { background: rgba(0,0,0,.08); color: var(--ac-text-dark); }
+/* Inline quick reactions + divider before the reply/forward/info/delete icons. */
+.ac-msg-actions > .ac-react-quick.active {
+  background: rgba(37,99,235,.15); box-shadow: inset 0 0 0 1.5px var(--ac-primary);
+}
+.ac-msg-actions-sep { width: 1px; height: 16px; background: var(--ac-line-l); margin: 0 3px; flex: none; }
 
 /* ---- Composer ---- */
 .ac-composer { background: #f0f0f0; border-top: 1px solid var(--ac-line-l); padding: 8px 12px; }
@@ -2254,10 +2270,50 @@ input[type="number"] {
 }
 .ac-mention { color: #1d4ed8; font-weight: 600; background: rgba(29,78,216,.10); border-radius: 4px; padding: 0 2px; }
 .ac-msg-bubble.mine .ac-mention { color: #0a6b2e; background: rgba(10,107,46,.10); }
+/* Mentions are tappable (open the person's contact card / DM). */
+.ac-mention[data-uid] { cursor: pointer; }
+.ac-mention[data-uid]:hover { text-decoration: underline; background: rgba(29,78,216,.18); }
+.ac-msg-bubble.mine .ac-mention[data-uid]:hover { background: rgba(10,107,46,.18); }
+
+/* "/" resource-tag autocomplete (shares the mention popup shell). */
+.ac-slash-head {
+  padding: 6px 10px 4px; font-size: .72rem; font-weight: 700; letter-spacing: .4px;
+  text-transform: uppercase; color: var(--ac-text-muted);
+}
+.ac-slash-icon { font-size: 1.05rem; flex: none; }
 
 .ac-composer-readonly {
   display: flex; align-items: center; justify-content: center;
   color: var(--ac-text-muted); font-size: .85rem; padding: 14px;
+}
+
+/* Brand-group extras (inside the chat header): sample-seeding progress chip
+   + Products/Reports pill buttons, opening their popups. */
+.ac-brandbar-chat { display: flex; align-items: center; gap: 6px; flex: none; }
+.ac-brandbar-progress {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--ac-line-l); background: #fff; padding: 4px 10px;
+  border-radius: 999px; cursor: pointer; color: var(--ac-text-dark); font-size: .75rem;
+}
+.ac-brandbar-progress:hover { background: rgba(0,0,0,.05); }
+.ac-brandbar-label { font-weight: 600; flex: none; }
+.ac-brandbar-track-chat {
+  width: 64px; height: 6px; border-radius: 999px;
+  background: rgba(0,0,0,.08); overflow: hidden; flex: none;
+}
+.ac-brandbar-fill { height: 100%; border-radius: 999px; transition: width .3s ease; }
+.ac-brandbar-pct { flex: none; font-weight: 600; white-space: nowrap; font-size: .72rem; }
+.ac-brandbar-btn {
+  flex: none; display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--ac-line-l); background: #fff; color: var(--ac-text-dark);
+  font-size: .75rem; font-weight: 600; padding: 4px 10px; border-radius: 999px; cursor: pointer;
+}
+.ac-brandbar-btn:hover { background: rgba(0,0,0,.05); }
+/* Narrow screens: keep the header on one line — icons + bar only. */
+@media (max-width: 900px) {
+  .ac-brandbar-label, .ac-brandbar-pct, .ac-brandbar-btn span { display: none; }
+  .ac-brandbar-track-chat { width: 44px; }
+  .ac-brandbar-btn, .ac-brandbar-progress { padding: 4px 8px; }
 }
 
 .ac-mention-pop {
@@ -2292,7 +2348,6 @@ input[type="number"] {
 .ac-react-chip:hover { background: rgba(0,0,0,.05); }
 .ac-react-count { font-size: .72rem; color: var(--ac-text-muted); font-weight: 600; }
 
-.ac-msg-actions.show { display: flex; }
 .ac-ack-wrap { position: relative; }
 .ac-ack-pop {
   position: absolute; top: calc(100% + 4px); right: 0; z-index: 30;
@@ -2301,6 +2356,13 @@ input[type="number"] {
 }
 /* Open rightward when there isn't room on the left (keeps it inside the panel). */
 .ac-ack-pop.ac-ack-pop-right { right: auto; left: 0; }
+/* Reaction "+" full picker — identical to the composer's ac-emoji-pop popup,
+   anchored to the reaction button and opening upward. `.end` flips it to the
+   right edge when there isn't room to grow rightward. */
+.ac-emoji-pop.ac-react-emoji { bottom: calc(100% + 6px); z-index: 30; }
+.ac-emoji-pop.ac-react-emoji.end { left: auto; right: 0; }
+/* Legend shown standalone in the announcement ?-popup (no strip above it). */
+.ac-ack-legend.ac-ack-legend-solo { border-top: 0; margin-top: 0; padding-top: 0; }
 .ac-ack-emojis { display: flex; align-items: center; gap: 2px; }
 .ac-ack-emojis button {
   border: none; background: transparent; font-size: 1.25rem; padding: 3px 5px;

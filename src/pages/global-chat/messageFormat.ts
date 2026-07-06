@@ -27,18 +27,22 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function inline(input: string, mentionNames: string[] = []): string {
+/** A mention to highlight: the tagged user's id + display name. */
+export interface MentionRef { id: string; name: string; }
+
+function inline(input: string, mentions: MentionRef[] = []): string {
   const stash: string[] = [];
   const put = (html: string) => `${SENT}${stash.push(html) - 1}${SENT}`;
 
   let s = input;
   // Stash @mentions, code spans and links first so emphasis rules don't corrupt
-  // them (e.g. underscores inside a URL must not become italic).
-  for (const name of mentionNames) {
-    const esc = escapeHtml(name);          // input is already HTML-escaped
+  // them (e.g. underscores inside a URL must not become italic). Mentions carry
+  // the user id (data-uid) so the bubble can open the person on click.
+  for (const m of mentions) {
+    const esc = escapeHtml(m.name);        // input is already HTML-escaped
     if (!esc) continue;
     s = s.replace(new RegExp('@' + escapeRegExp(esc), 'g'),
-      () => put(`<span class="ac-mention">@${esc}</span>`));
+      () => put(`<span class="ac-mention" data-uid="${escapeHtml(m.id)}" role="button" tabindex="0">@${esc}</span>`));
   }
   s = s.replace(/`([^`]+)`/g, (_m, c) => put(`<code>${c}</code>`));
   s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_m, label, url) =>
@@ -56,9 +60,9 @@ function inline(input: string, mentionNames: string[] = []): string {
   return s.replace(new RegExp(`${SENT}(\\d+)${SENT}`, 'g'), (_m, i) => stash[Number(i)] ?? '');
 }
 
-/** Render a chat message body to sanitized HTML. `mentionNames` are the display
- *  names that should be highlighted as @mentions. */
-export function renderMessageHtml(body: string, mentionNames: string[] = []): string {
+/** Render a chat message body to sanitized HTML. `mentions` are the tagged
+ *  users (id + display name) to highlight as clickable @mentions. */
+export function renderMessageHtml(body: string, mentions: MentionRef[] = []): string {
   const lines = escapeHtml(body ?? '').split('\n');
   const out: string[] = [];
   let listType: 'ul' | 'ol' | null = null;
@@ -71,16 +75,16 @@ export function renderMessageHtml(body: string, mentionNames: string[] = []): st
     const ol = /^\s*\d+\.\s+(.*)$/.exec(line);
     if (ul) {
       if (listType !== 'ul') { closeList(); out.push('<ul>'); listType = 'ul'; }
-      out.push(`<li>${inline(ul[1], mentionNames)}</li>`);
+      out.push(`<li>${inline(ul[1], mentions)}</li>`);
       prevText = false;
     } else if (ol) {
       if (listType !== 'ol') { closeList(); out.push('<ol>'); listType = 'ol'; }
-      out.push(`<li>${inline(ol[1], mentionNames)}</li>`);
+      out.push(`<li>${inline(ol[1], mentions)}</li>`);
       prevText = false;
     } else {
       closeList();
       if (prevText) out.push('<br>');
-      out.push(inline(line, mentionNames));
+      out.push(inline(line, mentions));
       prevText = true;
     }
   }
@@ -88,7 +92,7 @@ export function renderMessageHtml(body: string, mentionNames: string[] = []): st
 
   return DOMPurify.sanitize(out.join(''), {
     ALLOWED_TAGS: ['a', 'strong', 'em', 'del', 'code', 'ul', 'ol', 'li', 'br', 'span'],
-    ADD_ATTR: ['target', 'rel', 'class'],
+    ADD_ATTR: ['target', 'rel', 'class', 'data-uid', 'role', 'tabindex'],
   });
 }
 

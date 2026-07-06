@@ -14,6 +14,7 @@ import ForwardModal from './ForwardModal';
 import GroupModal, { GroupMember } from './GroupModal';
 import BookmarksModal from './BookmarksModal';
 import DeleteMessageModal from './DeleteMessageModal';
+import ContactModal from './ContactModal';
 import {
   listContacts, listConversations, listParticipants, fetchOverview,
   fetchMessages, getOrCreateDm, sendMessage, markConversationRead, markDelivered,
@@ -65,6 +66,8 @@ export default function GlobalChat() {
   const [bookmarksLoading, setBookmarksLoading] = useState(false);
   // First unread message id at open time — drives the "Unread messages" divider.
   const [unreadAnchorId, setUnreadAnchorId] = useState<string | null>(null);
+  // Contact card opened by clicking a @mention.
+  const [contactCard, setContactCard] = useState<ChatContact | null>(null);
 
   const activeIdRef = useRef<string | null>(activeId);
   useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
@@ -281,11 +284,15 @@ export default function GlobalChat() {
   const openConversation = useCallback(async (conversationId: string | null) => {
     if (!conversationId) {
       setMessages([]); setEvents([]); setReactions([]); setHiddenIds(new Set());
-      setUnreadAnchorId(null); setHasMoreOlder(false);
+      setUnreadAnchorId(null); setHasMoreOlder(false); setBookmarks([]);
       return;
     }
     setMessagesLoading(true);
     setReplyTo(null);
+    // Bookmarks feed the composer's "/" resource tags (brand groups: synced
+    // with the brand's Resources). Non-fatal, loads alongside the messages.
+    setBookmarks([]);
+    fetchBookmarks(conversationId).then(setBookmarks).catch(() => { /* non-fatal */ });
     try {
       // Capture the read boundary BEFORE marking read, so we can place the
       // "Unread messages" divider at the first message we hadn't seen.
@@ -617,7 +624,12 @@ export default function GlobalChat() {
           announcementCount={allStaff.length}
           canPost={!activeView?.archived && (!(activeView?.conversation.is_announcement) || isBob)}
           reactionsByMsg={reactionsByMsg}
+          resources={bookmarks}
           onReact={handleReact}
+          onOpenContact={(userId) => {
+            const c = directory.get(userId);
+            if (c) setContactCard(c);
+          }}
           onOpenGroup={() => setGroupModal({ mode: 'manage' })}
           onOpenSettings={() => setGroupModal({ mode: 'announcement' })}
           onOpenBookmarks={openBookmarks}
@@ -691,6 +703,12 @@ export default function GlobalChat() {
           onClose={() => setShowBookmarks(false)}
         />
       )}
+      <ContactModal
+        contact={contactCard}
+        isSelf={contactCard?.id === myId}
+        onMessage={(c) => { setContactCard(null); startChatWith(c); }}
+        onClose={() => setContactCard(null)}
+      />
       <DeleteMessageModal
         message={deleteMsg}
         canDeleteForEveryone={!!deleteMsg && deleteMsg.sender_id === myId && !deleteMsg.deleted_at}

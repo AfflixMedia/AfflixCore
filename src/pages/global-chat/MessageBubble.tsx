@@ -1,12 +1,15 @@
-// A single message bubble with hover actions (Reply, Forward, Acknowledge,
-// Delete), quoted reply / forwarded labels, a deleted tombstone, and — on
-// announcement messages — emoji acknowledgements with a meaning legend and a
-// visible list of who reacted. Outgoing messages align right, incoming left.
+// A single message bubble with hover actions (React, Reply, Forward, Delete),
+// quoted reply / forwarded labels, a deleted tombstone, and WhatsApp-style
+// emoji reactions on every message: normal chats open the full emoji picker;
+// announcement messages keep the fixed acknowledgement set with a meaning
+// legend. Reaction chips show who reacted. Outgoing messages align right,
+// incoming left.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Emoji, EmojiStyle } from 'emoji-picker-react';
+import EmojiPicker from './EmojiPicker';
 import type { ChatContact, ChatMessage, ChatReaction, Receipt } from './types';
 import { messageTime, contactName, ACK_REACTIONS, ackMeaning, ackUnified } from './types';
-import { renderMessageHtml, toPlainText } from './messageFormat';
+import { renderMessageHtml, toPlainText, MentionRef } from './messageFormat';
 
 // Apple-style ack glyph; falls back to the raw emoji char if not in the ack set.
 function AckEmoji({ emoji, size = 18 }: { emoji: string; size?: number }) {
@@ -21,7 +24,7 @@ interface Props {
   mine: boolean;
   isGroup: boolean;
   sender: ChatContact | null;          // resolved sender (for group + names)
-  mentionNames: string[];              // display names to highlight as @mentions
+  mentions: MentionRef[];              // tagged users to highlight as clickable @mentions
   replyTo: ChatMessage | null;         // resolved replied-to message, if loaded
   replyToSender: ChatContact | null;
   canReply: boolean;                   // hidden in announcements for non-posters
@@ -35,6 +38,7 @@ interface Props {
   onForward: (m: ChatMessage) => void;
   onDelete: (m: ChatMessage) => void;
   onInfo: (m: ChatMessage) => void;
+  onMentionClick: (userId: string) => void;  // tap a @mention → open that person
 }
 
 // Single tick (sent) vs double tick (delivered/read); blue when read.
@@ -48,19 +52,19 @@ function Ticks({ receipt }: { receipt: Receipt }) {
 }
 
 export default function MessageBubble({
-  message, mine, isGroup, sender, mentionNames, replyTo, replyToSender,
+  message, mine, isGroup, sender, mentions, replyTo, replyToSender,
   canReply, ackMode, reactions, myReaction, reactorName, receipt,
-  onReact, onReply, onForward, onDelete, onInfo,
+  onReact, onReply, onForward, onDelete, onInfo, onMentionClick,
 }: Props) {
   const [showPicker, setShowPicker] = useState(false);
-  const [showInfo, setShowInfo] = useState(false);
   const [ackSide, setAckSide] = useState<'left' | 'right'>('left');
   const ackWrapRef = useRef<HTMLDivElement>(null);
   const ackBtnRef = useRef<HTMLButtonElement>(null);
   const deleted = !!message.deleted_at;
 
-  // Choose which way the acknowledge popup opens so it never spills out of the
-  // message panel (e.g. into the contact list on left-aligned bubbles).
+  // Choose which way the reaction popup (announcement legend / full emoji
+  // picker) opens so it never spills out of the message panel (e.g. into the
+  // contact list on left-aligned bubbles).
   const toggleAck = () => {
     if (!showPicker) {
       const btn = ackBtnRef.current;
@@ -71,7 +75,7 @@ export default function MessageBubble({
         const b = panel?.getBoundingClientRect();
         const leftBound = (b?.left ?? 0) + 8;
         const rightBound = (b?.right ?? window.innerWidth) - 8;
-        const POP = 248;
+        const POP = ackMode ? 248 : 340;      // legend vs full emoji picker
         const fitsLeft = rect.right - POP >= leftBound;
         const fitsRight = rect.left + POP <= rightBound;
         if (fitsLeft) side = 'left';
@@ -87,7 +91,7 @@ export default function MessageBubble({
     if (!showPicker) return;
     const onDoc = (e: MouseEvent) => {
       if (ackWrapRef.current && !ackWrapRef.current.contains(e.target as Node)) {
-        setShowPicker(false); setShowInfo(false);
+        setShowPicker(false);
       }
     };
     document.addEventListener('mousedown', onDoc);
@@ -146,13 +150,21 @@ export default function MessageBubble({
           </div>
         )}
 
-        <div className="ac-msg-text" dangerouslySetInnerHTML={{ __html: renderMessageHtml(message.body, mentionNames) }} />
+        <div
+          className="ac-msg-text"
+          onClick={e => {
+            const uid = (e.target as HTMLElement).closest('.ac-mention')?.getAttribute('data-uid');
+            if (uid) onMentionClick(uid);
+          }}
+          dangerouslySetInnerHTML={{ __html: renderMessageHtml(message.body, mentions) }}
+        />
         <div className="ac-msg-meta">
           {messageTime(message.created_at)}
           {mine && receipt && <Ticks receipt={receipt} />}
         </div>
 
-        {/* Acknowledgement summary (who reacted with what). */}
+        {/* Reaction summary (who reacted with what). Clicking a chip toggles
+            that emoji as my own reaction, WhatsApp-style. */}
         {summary.length > 0 && (
           <div className="ac-msg-reactions">
             {summary.map(([emoji, names]) => (
@@ -160,8 +172,10 @@ export default function MessageBubble({
                 key={emoji}
                 type="button"
                 className={`ac-react-chip ${myReaction === emoji ? 'mine' : ''}`}
-                title={`${ackMeaning(emoji) || 'Reacted'} — ${names.join(', ')}`}
-                onClick={() => ackMode && onReact(emoji)}
+                title={ackMode
+                  ? `${ackMeaning(emoji) || 'Reacted'} — ${names.join(', ')}`
+                  : names.join(', ')}
+                onClick={() => (ackMode || canReply) && onReact(emoji)}
               >
                 <AckEmoji emoji={emoji} size={16} /><span className="ac-react-count">{names.length}</span>
               </button>
@@ -170,44 +184,55 @@ export default function MessageBubble({
         )}
 
         <div className={`ac-msg-actions ${showPicker ? 'show' : ''}`}>
+          {(ackMode || canReply) && (
+            <>
+              {/* Quick reactions inline in the toolbar — one click to react. */}
+              {ACK_REACTIONS.map(r => (
+                <button
+                  key={r.emoji}
+                  type="button"
+                  className={`ac-react-quick ${myReaction === r.emoji ? 'active' : ''}`}
+                  title={ackMode ? `${r.label} — ${r.meaning}` : r.label}
+                  onClick={() => onReact(r.emoji)}
+                ><AckEmoji emoji={r.emoji} size={16} /></button>
+              ))}
+              <div ref={ackWrapRef} className="ac-ack-wrap">
+                <button
+                  ref={ackBtnRef}
+                  type="button"
+                  title={ackMode ? 'What do these mean?' : 'More emojis'}
+                  onClick={toggleAck}
+                >
+                  <i className={`bi ${ackMode ? 'bi-question-circle' : 'bi-plus-circle'}`} />
+                </button>
+                {showPicker && (
+                  ackMode ? (
+                    <div className={`ac-ack-pop ${ackSide === 'right' ? 'ac-ack-pop-right' : ''}`}>
+                      <div className="ac-ack-legend ac-ack-legend-solo">
+                        {ACK_REACTIONS.map(r => (
+                          <div key={r.emoji} className="ac-ack-legend-row">
+                            <span className="ac-ack-legend-emoji"><AckEmoji emoji={r.emoji} size={18} /></span>
+                            <span><b>{r.label}</b> — {r.meaning}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    // "+" opens the composer's emoji popup — same ac-emoji-pop
+                    // design, opening upward from the button.
+                    <div className={`ac-emoji-pop ac-react-emoji ${ackSide === 'left' ? 'end' : ''}`}>
+                      <EmojiPicker onPick={(emoji) => { onReact(emoji); setShowPicker(false); }} />
+                    </div>
+                  )
+                )}
+              </div>
+              <span className="ac-msg-actions-sep" />
+            </>
+          )}
           {canReply && (
             <button type="button" title="Reply" onClick={() => onReply(message)}>
               <i className="bi bi-reply-fill" />
             </button>
-          )}
-          {ackMode && (
-            <div ref={ackWrapRef} className="ac-ack-wrap">
-              <button ref={ackBtnRef} type="button" title="Acknowledge" onClick={toggleAck}>
-                <i className="bi bi-emoji-smile" />
-              </button>
-              {showPicker && (
-                <div className={`ac-ack-pop ${ackSide === 'right' ? 'ac-ack-pop-right' : ''}`}>
-                  <div className="ac-ack-emojis">
-                    {ACK_REACTIONS.map(r => (
-                      <button
-                        key={r.emoji}
-                        type="button"
-                        className={myReaction === r.emoji ? 'active' : ''}
-                        title={`${r.label} — ${r.meaning}`}
-                        onClick={() => { onReact(r.emoji); setShowPicker(false); setShowInfo(false); }}
-                      ><AckEmoji emoji={r.emoji} size={20} /></button>
-                    ))}
-                    <button type="button" className="ac-ack-info" title="What do these mean?"
-                      onClick={() => setShowInfo(s => !s)}><i className="bi bi-info-circle" /></button>
-                  </div>
-                  {showInfo && (
-                    <div className="ac-ack-legend">
-                      {ACK_REACTIONS.map(r => (
-                        <div key={r.emoji} className="ac-ack-legend-row">
-                          <span className="ac-ack-legend-emoji"><AckEmoji emoji={r.emoji} size={18} /></span>
-                          <span><b>{r.label}</b> — {r.meaning}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
           )}
           <button type="button" title="Forward" onClick={() => onForward(message)}>
             <i className="bi bi-forward-fill" />

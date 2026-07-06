@@ -1,14 +1,17 @@
 // Bottom composer: reply preview, formatting bar, emoji picker, @-mention
-// autocomplete, growing textarea, send button. Enter sends; Shift+Enter makes a
-// new line. List mode keeps adding bullets until turned off. Announcement
-// channels render read-only for non-admins. Resets per conversation (re-keyed).
+// autocomplete, "/" resource-tag autocomplete (conversation bookmarks → inserted
+// as clickable links), growing textarea, send button. Enter sends; Shift+Enter
+// makes a new line. List mode keeps adding bullets until turned off.
+// Announcement channels render read-only for non-admins. Resets per
+// conversation (re-keyed).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from 'react-bootstrap';
 import Avatar from '../../components/Avatar';
 import EmojiPicker from './EmojiPicker';
-import type { ChatContact, ChatMessage } from './types';
+import type { ChatBookmark, ChatContact, ChatMessage } from './types';
 import { contactName, roleLabel, roleBadge } from './types';
 import { toPlainText } from './messageFormat';
+import { resourceIcon } from '../../lib/resourceIcon';
 
 const BULLET = '- ';
 type ListMode = 'ul' | 'ol' | null;
@@ -32,6 +35,7 @@ interface Props {
   readOnlyNote?: string;
   readOnlyIcon?: string;          // bootstrap-icon class for the read-only banner
   mentionables?: ChatContact[];   // members that can be @-mentioned (groups)
+  resources?: ChatBookmark[];     // conversation bookmarks, taggable via "/"
   replyTo: ChatMessage | null;
   replyToSender: ChatContact | null;
   onCancelReply: () => void;
@@ -39,13 +43,14 @@ interface Props {
 }
 
 export default function MessageComposer({
-  disabled, readOnly, readOnlyNote, readOnlyIcon, mentionables = [],
+  disabled, readOnly, readOnlyNote, readOnlyIcon, mentionables = [], resources = [],
   replyTo, replyToSender, onCancelReply, onSend,
 }: Props) {
   const [text, setText] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
   const [listMode, setListMode] = useState<ListMode>(null);
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
+  const [slash, setSlash] = useState<{ start: number; query: string } | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const emojiWrapRef = useRef<HTMLDivElement>(null);
 
@@ -76,13 +81,26 @@ export default function MessageComposer({
       .slice(0, 6);
   }, [mention, mentionables]);
 
-  // Detect an "@query" immediately before the caret.
+  // Resource ("/query") suggestions — the conversation's bookmarks.
+  const slashSuggestions = useMemo(() => {
+    if (!slash || resources.length === 0) return [];
+    const q = slash.query.toLowerCase();
+    return resources
+      .filter(r => r.title.toLowerCase().includes(q) || r.url.toLowerCase().includes(q))
+      .slice(0, 6);
+  }, [slash, resources]);
+
+  // Detect an "@query" (mention) or "/query" (resource) immediately before the caret.
   const detectMention = (value: string, caret: number) => {
-    if (mentionables.length === 0) { setMention(null); return; }
     const before = value.slice(0, caret);
-    const m = /(?:^|\s)@([\p{L}\p{N} ]{0,25})$/u.exec(before);
-    if (m) setMention({ start: caret - m[1].length - 1, query: m[1] });
-    else setMention(null);
+    if (mentionables.length > 0) {
+      const m = /(?:^|\s)@([\p{L}\p{N} ]{0,25})$/u.exec(before);
+      setMention(m ? { start: caret - m[1].length - 1, query: m[1] } : null);
+    } else setMention(null);
+    if (resources.length > 0) {
+      const s = /(?:^|\s)\/([\p{L}\p{N} \-_.]{0,30})$/u.exec(before);
+      setSlash(s ? { start: caret - s[1].length - 1, query: s[1] } : null);
+    } else setSlash(null);
   };
 
   const onChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -105,6 +123,22 @@ export default function MessageComposer({
     });
   };
 
+  // Insert a tagged resource as a markdown link (renders as a clickable link).
+  const pickResource = (r: ChatBookmark) => {
+    if (!slash) return;
+    const ta = taRef.current;
+    const caret = ta?.selectionStart ?? text.length;
+    const insert = `[${r.title}](${r.url}) `;
+    const next = text.slice(0, slash.start) + insert + text.slice(caret);
+    setText(next);
+    setSlash(null);
+    requestAnimationFrame(() => {
+      ta?.focus();
+      const pos = slash.start + insert.length;
+      ta?.setSelectionRange(pos, pos);
+    });
+  };
+
   // Resolve which mentionables were actually @-tagged in the final text.
   const collectMentions = (body: string): string[] => {
     const ids: string[] = [];
@@ -121,6 +155,7 @@ export default function MessageComposer({
     const mentions = collectMentions(body);
     setShowEmoji(false);
     setMention(null);
+    setSlash(null);
     const marker = listMode === 'ol' ? '1. ' : listMode === 'ul' ? BULLET : '';
     setText(marker);
     if (listMode) {
@@ -234,6 +269,26 @@ export default function MessageComposer({
           </div>
         )}
 
+        {slashSuggestions.length > 0 && (
+          <div className="ac-mention-pop">
+            <div className="ac-slash-head">
+              <i className="bi bi-link-45deg me-1" />Tag a resource
+            </div>
+            {slashSuggestions.map(r => {
+              const ic = resourceIcon(r.url);
+              return (
+                <button key={r.id} type="button" className="ac-mention-item" onClick={() => pickResource(r)}>
+                  <i className={`bi ${ic.icon} ac-slash-icon`} style={{ color: ic.color }} />
+                  <span className="min-w-0 flex-grow-1">
+                    <span className="fw-semibold text-truncate d-block">{r.title}</span>
+                    <span className="text-muted text-truncate d-block" style={{ fontSize: '.72rem' }}>{r.url}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         <div ref={emojiWrapRef} className="ac-emoji-wrap">
           <button type="button" className="ac-composer-icon" title="Emoji" disabled={disabled} onClick={() => setShowEmoji(s => !s)}>
             <i className="bi bi-emoji-smile" />
@@ -256,9 +311,10 @@ export default function MessageComposer({
               if (k === 'b') { e.preventDefault(); surround('**'); return; }
               if (k === 'i') { e.preventDefault(); surround('_'); return; }
             }
-            if (e.key === 'Escape' && mention) { setMention(null); return; }
+            if (e.key === 'Escape' && (mention || slash)) { setMention(null); setSlash(null); return; }
             if (e.key === 'Enter' && !e.shiftKey) {
               if (mention && suggestions.length > 0) { e.preventDefault(); pickMention(suggestions[0]); return; }
+              if (slash && slashSuggestions.length > 0) { e.preventDefault(); pickResource(slashSuggestions[0]); return; }
               e.preventDefault();
               if (listMode) {
                 const ta = e.currentTarget;
