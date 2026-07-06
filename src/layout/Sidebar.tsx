@@ -15,16 +15,18 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
   const reportingUnread = notifications.filter(n => !n.read_at && n.link?.startsWith('/reporting/')).length;
   const isApc = profile?.role === 'apc';
   const isTeamLead = profile?.role === 'team_lead';
+  // Ads Manager: APC-like view-only nav (Brands / Resources / Reporting) — no Tasks/Chats.
+  const isAdsManager = profile?.role === 'ads_manager';
   const isPaidCollabClient = profile?.role === 'paid_collab_client';
   const isPaidCollabHandler = profile?.role === 'paid_collab_handler';
   // Paid Collab Handlers Bob marked INTERNAL get Chats + Tasks; external don't.
   const isInternalHandler = isPaidCollabHandler && !!profile?.is_internal_handler;
-  // Internal staff (admin / team lead / apc / internal handler) get team Chats.
-  const isInternal = isBob || isTeamLead || isApc || isInternalHandler;
+  // Internal staff (admin / team lead / apc / ads manager / internal handler) get team Chats.
+  const isInternal = isBob || isTeamLead || isApc || isAdsManager || isInternalHandler;
   const chatUnread = notifications.filter(n => !n.read_at && n.type === 'chat').length;
   const taskUnread = notifications.filter(n => !n.read_at && n.type === 'task').length;
-  // Tasks: Team Leads + internal handlers (assign), APCs (do), Bob (oversight).
-  const showTasks = isBob || isTeamLead || isApc || isInternalHandler;
+  // Tasks: Team Leads + internal handlers (assign), APCs + Ads Managers (do), Bob (oversight).
+  const showTasks = isBob || isTeamLead || isApc || isAdsManager || isInternalHandler;
 
   return (
     <aside className="ac-sidebar">
@@ -53,7 +55,7 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
               <i className="bi bi-collection-play" /> <span className="ac-nav-label">Videos</span>
             </NavLink>
           </>
-        ) : isApc ? (
+        ) : isApc || isAdsManager ? (
           <>
             <NavLink to="/brands" title="Brands">
               <i className="bi bi-shop" /> <span className="ac-nav-label">Brands</span>
@@ -97,6 +99,9 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
                 </NavLink>
                 <NavLink to="/apcs" title="APCs">
                   <i className="bi bi-people" /> <span className="ac-nav-label">APCs</span>
+                </NavLink>
+                <NavLink to="/ads-managers" title="Ads Managers">
+                  <i className="bi bi-badge-ad" /> <span className="ac-nav-label">Ads Managers</span>
                 </NavLink>
                 <NavLink to="/paid-collab-clients" title="Paid Collab Clients">
                   <i className="bi bi-people-fill" /> <span className="ac-nav-label">Paid Collab Clients</span>

@@ -35,7 +35,9 @@ export default function BrandChatBar({ brandId, brandName }: { brandId: string; 
   const [modal, setModal] = useState<BarModal>(null);
   const [summary, setSummary] = useState<{ approved: number; goal: number } | null>(null);
 
-  const isStaff = !!profile && ['bob', 'team_lead', 'apc'].includes(profile.role);
+  // Roles with RLS read access to brand_samples_* / brand_products / the report
+  // tables + the /reporting routes. Internal handlers stay excluded (no such reads).
+  const isStaff = !!profile && ['bob', 'team_lead', 'apc', 'ads_manager'].includes(profile.role);
 
   // Current-month seeding rollup for the strip.
   useEffect(() => {

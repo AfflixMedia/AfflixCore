@@ -90,7 +90,11 @@ const ORG_COLORS = ['#ef4444', '#f59e0b', '#3b82f6', '#10b981', '#8b5cf6', '#ec4
 export default function Tasks() {
   const { profile, user } = useAuth();
   const myId = user?.id;
-  const isApc = profile?.role === 'apc';
+  // Ads Managers use the APC persona on this page: "My tasks" + upward
+  // assignment to Bobs only (they have no Team Lead, so the my-lead fetch
+  // below naturally comes back empty; no Remind / Repeat, like an APC).
+  const isAdsManager = profile?.role === 'ads_manager';
+  const isApc = profile?.role === 'apc' || isAdsManager;
   const isBob = profile?.role === 'bob';
   // Internal handlers assign to any APC (external handlers never reach /tasks).
   const isInternalHandler = profile?.role === 'paid_collab_handler' && !!profile?.is_internal_handler;
@@ -104,6 +108,8 @@ export default function Tasks() {
   const [teamLeads, setTeamLeads] = useState<PersonLite[]>([]);
   // Internal Paid Collab Handlers (Bob only — he can assign tasks to them).
   const [handlers, setHandlers] = useState<PersonLite[]>([]);
+  // Ads Managers (Bob only — he can assign tasks to them too).
+  const [adsManagers, setAdsManagers] = useState<PersonLite[]>([]);
   // Bobs — a Bob assigns to the other Bobs; an APC assigns "up" to any Bob.
   const [bobs, setBobs] = useState<PersonLite[]>([]);
   const [brands, setBrands] = useState<BrandLite[]>([]);
@@ -160,7 +166,7 @@ export default function Tasks() {
       if (canAssign) pre.push(supabase.rpc('generate_due_recurring_tasks'));
       await Promise.all(pre);
     }
-    const [tRes, brRes, apcRes, tlRes, hRes, fRes, lRes, abRes, tlbRes, recRes, remRes, runRes, bobRes, myLeadRes] = await Promise.all([
+    const [tRes, brRes, apcRes, tlRes, hRes, fRes, lRes, abRes, tlbRes, recRes, remRes, runRes, bobRes, myLeadRes, amRes] = await Promise.all([
       supabase.from('tasks').select('*').order('status').order('due_date', { nullsFirst: false }).order('created_at', { ascending: false }),
       canCreate ? supabase.from('brands').select('id,name').order('name') : Promise.resolve({ data: [], error: null }),
       canAssign ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('role', 'apc').order('full_name') : Promise.resolve({ data: [], error: null }),
@@ -178,6 +184,7 @@ export default function Tasks() {
       (isBob || isApc) ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('role', 'bob').order('full_name') : Promise.resolve({ data: [], error: null }),
       // An APC's own Team Lead (their other upward assignment target).
       (isApc && profile?.team_lead_id) ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('id', profile.team_lead_id) : Promise.resolve({ data: [], error: null }),
+      isBob ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('role', 'ads_manager').order('full_name') : Promise.resolve({ data: [], error: null }),
     ]);
     if (tRes.error) { setErr(tRes.error.message); setLoading(false); return; }
     const ts = (tRes.data as Task[]) ?? [];
@@ -187,6 +194,7 @@ export default function Tasks() {
     // For an APC, "teamLeads" holds just their own lead (their upward target).
     setTeamLeads(((isApc ? (myLeadRes as any).data : (tlRes as any).data) ?? []) as PersonLite[]);
     setHandlers(((hRes as any).data ?? []) as PersonLite[]);
+    setAdsManagers(((amRes as any).data ?? []) as PersonLite[]);
     setBobs(((bobRes as any).data ?? []) as PersonLite[]);
     setFolders(((fRes as any).data ?? []) as OrgItem[]);
     setLabels(((lRes as any).data ?? []) as OrgItem[]);
@@ -1046,8 +1054,8 @@ export default function Tasks() {
 
           {/* Right rail: Team Leads + APCs (Bob only) — click an avatar to assign
               a task. Native scrollbar hidden; up/down arrows appear on overflow. */}
-          {isBob && (teamLeads.length > 0 || myApcs.length > 0 || handlers.length > 0 || otherBobs.length > 0) && (
-            <aside className="ac-tl-rail" aria-label="Assign a task to a Bob, Team Lead, APC, or Handler">
+          {isBob && (teamLeads.length > 0 || myApcs.length > 0 || handlers.length > 0 || adsManagers.length > 0 || otherBobs.length > 0) && (
+            <aside className="ac-tl-rail" aria-label="Assign a task to a Bob, Team Lead, APC, Ads Manager, or Handler">
               {tlOverflow && (
                 <button type="button" className="ac-tl-arrow" aria-label="Scroll up"
                   onClick={() => scrollTlRail(-1)}><i className="bi bi-chevron-up" /></button>
@@ -1090,6 +1098,20 @@ export default function Tasks() {
                       onClick={() => openAdd(apc.id)}
                       aria-label={`Assign a new task to ${name}`}>
                       <Avatar name={name} src={apc.avatar_url} size="lg" />
+                      {open > 0 && <span className="ac-tl-badge">{open}</span>}
+                      <span className="ac-tl-tip">Assign task to {name}</span>
+                    </button>
+                  );
+                })}
+                {adsManagers.length > 0 && <div className="ac-tl-rail-head mt-2">Ads Managers</div>}
+                {adsManagers.map(am => {
+                  const name = am.full_name || am.email;
+                  const open = tasks.filter(t => t.assignee_id === am.id && t.status !== 'done').length;
+                  return (
+                    <button key={am.id} type="button" className="ac-tl-avatar-btn"
+                      onClick={() => openAdd(am.id)}
+                      aria-label={`Assign a new task to ${name}`}>
+                      <Avatar name={name} src={am.avatar_url} size="lg" />
                       {open > 0 && <span className="ac-tl-badge">{open}</span>}
                       <span className="ac-tl-tip">Assign task to {name}</span>
                     </button>
@@ -1164,7 +1186,7 @@ export default function Tasks() {
                   ) : (
                     <>
                       <AssigneePicker
-                        apcs={myApcs} leads={teamLeads} handlers={handlers} bobs={otherBobs}
+                        apcs={myApcs} leads={teamLeads} handlers={handlers} adsManagers={adsManagers} bobs={otherBobs}
                         isBob={isBob} isApc={isApc}
                         brandsByApc={apcBrandNames}
                         multiple={!editingId}
@@ -1172,7 +1194,7 @@ export default function Tasks() {
                         onChange={ids => setForm({ ...form, assignee_ids: ids })}
                       />
                       {editingId && <Form.Text className="text-muted">A task has one assignee. To give it to more people, create a new task.</Form.Text>}
-                      {myApcs.length === 0 && teamLeads.length === 0 && handlers.length === 0 && otherBobs.length === 0 && <Form.Text className="text-danger d-block">{isInternalHandler ? 'No APCs to assign to yet.' : isApc ? 'No one to assign a task to yet.' : 'You have no APCs yet.'}</Form.Text>}
+                      {myApcs.length === 0 && teamLeads.length === 0 && handlers.length === 0 && adsManagers.length === 0 && otherBobs.length === 0 && <Form.Text className="text-danger d-block">{isInternalHandler ? 'No APCs to assign to yet.' : isApc ? 'No one to assign a task to yet.' : 'You have no APCs yet.'}</Form.Text>}
                     </>
                   )}
                 </Form.Group>
@@ -1551,8 +1573,8 @@ export default function Tasks() {
 // Lead + the Bobs. APC rows show the brands under that APC. In `multiple`
 // mode (new task) selecting fans the task out to everyone chosen; on edit it acts
 // as a single-select since a task row has one assignee.
-function AssigneePicker({ apcs, leads, handlers = [], bobs = [], isBob, isApc = false, brandsByApc, multiple, value, onChange }: {
-  apcs: PersonLite[]; leads: PersonLite[]; handlers?: PersonLite[]; bobs?: PersonLite[];
+function AssigneePicker({ apcs, leads, handlers = [], adsManagers = [], bobs = [], isBob, isApc = false, brandsByApc, multiple, value, onChange }: {
+  apcs: PersonLite[]; leads: PersonLite[]; handlers?: PersonLite[]; adsManagers?: PersonLite[]; bobs?: PersonLite[];
   isBob: boolean; isApc?: boolean;
   brandsByApc?: Map<string, string[]>; multiple: boolean;
   value: string[]; onChange: (ids: string[]) => void;
@@ -1580,13 +1602,14 @@ function AssigneePicker({ apcs, leads, handlers = [], bobs = [], isBob, isApc = 
     || (brandsByApc?.get(p.id) ?? []).some(b => b.toLowerCase().includes(needle));
   const fLeads = leads.filter(p => !needle || nameOf(p).toLowerCase().includes(needle));
   const fHandlers = handlers.filter(p => !needle || nameOf(p).toLowerCase().includes(needle));
+  const fAdsManagers = adsManagers.filter(p => !needle || nameOf(p).toLowerCase().includes(needle));
   const fBobs = bobs.filter(p => !needle || nameOf(p).toLowerCase().includes(needle));
   const fApcs = apcs.filter(match);
   const byId = useMemo(() => {
     const m = new Map<string, PersonLite>();
-    [...leads, ...handlers, ...bobs, ...apcs].forEach(p => m.set(p.id, p));
+    [...leads, ...handlers, ...adsManagers, ...bobs, ...apcs].forEach(p => m.set(p.id, p));
     return m;
-  }, [leads, handlers, bobs, apcs]);
+  }, [leads, handlers, adsManagers, bobs, apcs]);
 
   const toggle = (id: string) => {
     if (!multiple) { onChange([id]); setOpen(false); return; }
@@ -1667,7 +1690,7 @@ function AssigneePicker({ apcs, leads, handlers = [], bobs = [], isBob, isApc = 
             </div>
           )}
           <div className="ac-assignee-list">
-            {fLeads.length === 0 && fApcs.length === 0 && fHandlers.length === 0 && fBobs.length === 0 && (
+            {fLeads.length === 0 && fApcs.length === 0 && fHandlers.length === 0 && fAdsManagers.length === 0 && fBobs.length === 0 && (
               <div className="text-muted text-center py-2 small">No matches.</div>
             )}
             {fBobs.length > 0 && (
@@ -1684,8 +1707,14 @@ function AssigneePicker({ apcs, leads, handlers = [], bobs = [], isBob, isApc = 
             )}
             {fApcs.length > 0 && (
               <>
-                {isBob && (fLeads.length > 0 || fHandlers.length > 0 || fBobs.length > 0) && <div className="ac-assignee-group">APCs</div>}
+                {isBob && (fLeads.length > 0 || fHandlers.length > 0 || fAdsManagers.length > 0 || fBobs.length > 0) && <div className="ac-assignee-group">APCs</div>}
                 {fApcs.map(p => Row(p, brandsByApc?.get(p.id)))}
+              </>
+            )}
+            {isBob && fAdsManagers.length > 0 && (
+              <>
+                <div className="ac-assignee-group">Ads Managers</div>
+                {fAdsManagers.map(p => Row(p))}
               </>
             )}
             {isBob && fHandlers.length > 0 && (

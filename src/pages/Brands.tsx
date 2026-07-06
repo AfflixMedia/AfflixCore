@@ -24,11 +24,10 @@ type ClientStatus = 'onboarding' | 'in_progress' | 'paused' | 'closed';
 
 const STATUS_ORDER: ClientStatus[] = ['onboarding', 'in_progress', 'paused', 'closed'];
 
-type ScopeKey = 'affiliate' | 'affiliate_limited' | 'ads' | 'paid_creator' | 'shop';
+type ScopeKey = 'affiliate' | 'ads' | 'paid_creator' | 'shop';
 
 const SCOPE_OPTIONS: { key: ScopeKey; label: string; icon: string }[] = [
   { key: 'affiliate',         label: 'Affiliates',         icon: 'bi-link-45deg' },
-  { key: 'affiliate_limited', label: 'Limited Affiliates', icon: 'bi-link-45deg' },
   { key: 'paid_creator',      label: 'Paid Collabs',       icon: 'bi-people' },
   { key: 'ads',               label: 'GMV Max',            icon: 'bi-graph-up-arrow' },
   { key: 'shop',              label: 'Shop Monitoring',    icon: 'bi-shop' },

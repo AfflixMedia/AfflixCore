@@ -110,6 +110,7 @@ export const ROLE_LABEL: Record<string, string> = {
   bob: 'Boss',
   team_lead: 'Team Lead',
   apc: 'APC',
+  ads_manager: 'Ads Manager',
   paid_collab_handler: 'PCL',
 };
 
@@ -118,6 +119,7 @@ export const ROLE_BADGE: Record<string, string> = {
   bob: 'danger',
   team_lead: 'warning',
   apc: 'primary',
+  ads_manager: 'info',
   paid_collab_handler: 'success',
 };
 

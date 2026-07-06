@@ -178,7 +178,7 @@ export default function MonthlyReportView() {
           <Button variant="outline-secondary" onClick={exportPdf} disabled={exporting} title="Download a PDF copy">
             <i className="bi bi-printer me-1" /> {exporting ? 'Building PDF…' : 'Export PDF'}
           </Button>
-          {brandActive && (
+          {brandActive && profile?.role !== 'ads_manager' && (
             <Button variant="primary" onClick={() => nav(`/reporting/monthly/${id}/edit`)}>
               <i className="bi bi-pencil me-1" /> Edit data
             </Button>

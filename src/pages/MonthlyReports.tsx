@@ -69,6 +69,8 @@ export default function MonthlyReports() {
   const { notifications } = useNotifications();
   const nav = useNavigate();
   const isBob = profile?.role === 'bob';
+  // Ads Manager: browse + open reports read-only, never create/edit them.
+  const isAdsManager = profile?.role === 'ads_manager';
 
   const unreadByReport = useMemo(() => {
     const m = new Map<string, number>();
@@ -272,9 +274,11 @@ export default function MonthlyReports() {
         </div>
 
         <div className="wr-header-right">
-          <Button variant="primary" size="sm" onClick={() => setPickerOpen(true)}>
-            <i className="bi bi-plus-lg me-1" /> New Report
-          </Button>
+          {!isAdsManager && (
+            <Button variant="primary" size="sm" onClick={() => setPickerOpen(true)}>
+              <i className="bi bi-plus-lg me-1" /> New Report
+            </Button>
+          )}
           <Dropdown align="end">
             <Dropdown.Toggle variant="outline-secondary" size="sm" id="mr-filters">
               <i className="bi bi-funnel me-1" /> Filters

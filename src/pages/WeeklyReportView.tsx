@@ -193,7 +193,7 @@ export default function WeeklyReportView() {
           <Button variant="outline-secondary" onClick={exportPdf} disabled={exporting} title="Download a PDF copy of the dashboard">
             <i className="bi bi-printer me-1" /> {exporting ? 'Building PDF…' : 'Export PDF'}
           </Button>
-          {brandActive && (
+          {brandActive && profile?.role !== 'ads_manager' && (
             <Button variant="primary" onClick={() => nav(`/reporting/weekly/${id}/edit`)}>
               <i className="bi bi-pencil me-1" /> Edit data
             </Button>
