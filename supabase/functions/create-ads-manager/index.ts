@@ -38,23 +38,15 @@ serve(async (req) => {
       return json({ error: 'Forbidden — only Bob can create Ads Managers' }, 403);
     }
 
-    // 2. Parse + validate body
-    const { email, password, full_name, brand_ids } = await req.json();
-    if (!email || !password || !Array.isArray(brand_ids)) {
-      return json({ error: 'email, password, brand_ids required' }, 400);
+    // 2. Parse + validate body. Brands are NOT chosen here — an Ads Manager
+    // automatically receives every GMV Max ('ads') brand via the DB trigger
+    // reconcile_ads_manager_brands() when their profile role is set below.
+    const { email, password, full_name } = await req.json();
+    if (!email || !password) {
+      return json({ error: 'email, password required' }, 400);
     }
     if (String(password).length < 6) return json({ error: 'Password must be at least 6 characters' }, 400);
     if (String(password).length > 72) return json({ error: 'Password must be 72 characters or fewer' }, 400);
-
-    // Only brands with the 'ads' (GMV Max) scope can be assigned to an Ads Manager.
-    if (brand_ids.length > 0) {
-      const { data: scoped } = await admin.from('brands').select('id,name,scope').in('id', brand_ids);
-      const bad = (scoped ?? []).filter((b: { scope: string[] | null }) => !(b.scope ?? []).includes('ads'));
-      if (bad.length > 0 || (scoped ?? []).length !== brand_ids.length) {
-        const names = bad.map((b: { name: string }) => b.name).join(', ');
-        return json({ error: `Only brands with the GMV Max scope can be assigned to an Ads Manager${names ? ` (not: ${names})` : ''}.` }, 400);
-      }
-    }
 
     // 3. Create the auth user (email auto-confirmed so they can log in immediately)
     const { data: created, error: createErr } = await admin.auth.admin.createUser({
@@ -83,26 +75,22 @@ serve(async (req) => {
       });
     if (profErr) return json({ error: profErr.message }, 400);
 
-    // 5. Assign brands (no exclusivity — an Ads Manager coexists with the brand's APC/Team Lead)
-    if (brand_ids.length > 0) {
-      const rows = brand_ids.map((bid: string) => ({ ads_manager_id: newUserId, brand_id: bid }));
-      const { error: asgErr } = await admin.from('ads_manager_brands').insert(rows);
-      if (asgErr) return json({ error: asgErr.message }, 400);
-    }
+    // 5. Brands are auto-assigned: setting role = 'ads_manager' above fired the
+    // reconcile_ads_manager_brands() trigger, which granted every GMV Max brand.
 
-    // 6. Welcome notification — which brands they got.
+    // 6. Welcome notification — they have all GMV Max brands.
     try {
-      if (brand_ids.length > 0) {
-        const { data: bs } = await admin.from('brands').select('name').in('id', brand_ids);
-        const names = (bs ?? []).map((b: { name: string }) => b.name).join(', ');
-        await admin.from('notifications').insert({
-          user_id: newUserId, type: 'brand_assignment',
-          title: `Brand${brand_ids.length > 1 ? 's' : ''} assigned to you`,
-          body: names || 'A brand',
-          link: '/brands',
-          payload: { brand_ids, kind: 'brand_assigned' },
-        });
-      }
+      const { count } = await admin
+        .from('ads_manager_brands')
+        .select('brand_id', { count: 'exact', head: true })
+        .eq('ads_manager_id', newUserId);
+      await admin.from('notifications').insert({
+        user_id: newUserId, type: 'brand_assignment',
+        title: 'Welcome — GMV Max brands assigned',
+        body: count ? `You have access to ${count} GMV Max brand${count === 1 ? '' : 's'}.` : 'You will see GMV Max brands here as they are enabled.',
+        link: '/brands',
+        payload: { kind: 'brand_assigned' },
+      });
     } catch (_) { /* notifications are best-effort */ }
 
     return json({ id: newUserId, email });

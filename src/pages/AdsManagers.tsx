@@ -32,7 +32,7 @@ export default function AdsManagers() {
 
   const [show, setShow] = useState(false);
   const [editMgr, setEditMgr] = useState<AdsManager | null>(null);
-  const [form, setForm] = useState({ email: '', password: '', full_name: '', brand_ids: [] as string[] });
+  const [form, setForm] = useState({ email: '', password: '', full_name: '' });
   const [saving, setSaving] = useState(false);
 
   const [pwMgr, setPwMgr] = useState<AdsManager | null>(null);
@@ -93,23 +93,16 @@ export default function AdsManagers() {
 
   const openAdd = () => {
     setEditMgr(null);
-    setForm({ email: '', password: '', full_name: '', brand_ids: [] });
+    setForm({ email: '', password: '', full_name: '' });
     setErr(null);
     setShow(true);
   };
 
   const openEdit = (m: AdsManager) => {
     setEditMgr(m);
-    setForm({ email: m.email, password: '', full_name: m.full_name ?? '', brand_ids: m.brand_ids ?? [] });
+    setForm({ email: m.email, password: '', full_name: m.full_name ?? '' });
     setErr(null);
     setShow(true);
-  };
-
-  const toggleBrand = (id: string) => {
-    setForm(f => ({
-      ...f,
-      brand_ids: f.brand_ids.includes(id) ? f.brand_ids.filter(b => b !== id) : [...f.brand_ids, id],
-    }));
   };
 
   const submit = async (e: FormEvent) => {
@@ -117,14 +110,10 @@ export default function AdsManagers() {
     setSaving(true); setErr(null);
     try {
       if (editMgr) {
+        // Brands are auto-assigned (all GMV Max brands); only the name is editable here.
         const { error: pErr } = await supabase.from('profiles')
           .update({ full_name: form.full_name }).eq('id', editMgr.id);
         if (pErr) throw pErr;
-        // Replace brand assignments + notify of any newly-added brands.
-        const { error: bErr } = await supabase.rpc('set_ads_manager_brands', {
-          p_manager: editMgr.id, p_brand_ids: form.brand_ids,
-        });
-        if (bErr) throw bErr;
       } else {
         const { data: { session } } = await supabase.auth.getSession();
         const { data, error } = await supabase.functions.invoke('create-ads-manager', {
@@ -132,7 +121,6 @@ export default function AdsManagers() {
             email: form.email,
             password: form.password,
             full_name: form.full_name,
-            brand_ids: form.brand_ids,
           },
           headers: { Authorization: `Bearer ${session?.access_token}` },
         });
@@ -171,12 +159,13 @@ export default function AdsManagers() {
 
       <Alert variant="light" className="border small text-muted py-2">
         <i className="bi bi-eye me-1" />
-        Ads Managers <strong>view</strong> their assigned brands (reports, sample seeding, products,
+        Ads Managers automatically get <strong>every GMV Max-scope brand</strong> — no manual
+        picking. They <strong>view</strong> those brands (reports, sample seeding, products,
         resources, paid collab) but can only <strong>edit GMV Max</strong> and toggle a paid-collab
         video's <strong>Authorised</strong> flag. They get team <strong>Chats</strong> (incl. their
         brands' groups) and <strong>Tasks</strong> (you assign to them; they assign up to Bobs).
-        Only <strong>GMV Max</strong>-scope brands can be assigned, and assigning one does not
-        affect its APC / Team Lead.
+        Turning the GMV Max scope on/off for a brand adds/removes it for all Ads Managers, and
+        this doesn't affect the brand's APC / Team Lead.
       </Alert>
 
       {managers.length > 0 && (
@@ -286,30 +275,13 @@ export default function AdsManagers() {
                 <Form.Text className="text-muted">Share this with the Ads Manager.</Form.Text>
               </Form.Group>
             )}
-            <Form.Group className="mb-2">
-              <Form.Label>Assign brands</Form.Label>
-              <Form.Text className="text-muted d-block mb-1">
-                Only brands with the <strong>GMV Max</strong> scope are listed. View-only access
-                to each brand, plus full GMV Max editing. A brand can be shared with its
-                APC / Team Lead — this doesn't take it away from them.
-              </Form.Text>
-              {brands.length === 0 ? (
-                <p className="text-muted small mb-0">No brands with the GMV Max scope yet. Enable that scope on a brand first (Brands → edit → Scope).</p>
-              ) : (
-                <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid #dee2e6', borderRadius: 6, padding: 10 }}>
-                  {brands.map(b => (
-                    <Form.Check
-                      key={b.id}
-                      type="checkbox"
-                      id={`amb-${b.id}`}
-                      checked={form.brand_ids.includes(b.id)}
-                      onChange={() => toggleBrand(b.id)}
-                      label={b.name}
-                    />
-                  ))}
-                </div>
-              )}
-            </Form.Group>
+            <Alert variant="light" className="border small text-muted py-2 mb-0">
+              <i className="bi bi-magic me-1" />
+              Brands are assigned <strong>automatically</strong>: this Ads Manager gets
+              {' '}<strong>all {brands.length} GMV Max brand{brands.length === 1 ? '' : 's'}</strong>,
+              and any brand you later give the GMV Max scope is added for them too. No manual
+              selection needed.
+            </Alert>
           </Modal.Body>
           <Modal.Footer>
             <Button variant="secondary" onClick={() => setShow(false)} disabled={saving}>Cancel</Button>
