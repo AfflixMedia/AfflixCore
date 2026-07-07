@@ -37,6 +37,7 @@ import GlobalChat from './pages/global-chat/GlobalChat';
 import TeamLeads from './pages/TeamLeads';
 import AdsManagers from './pages/AdsManagers';
 import Bobs from './pages/Bobs';
+import Teams from './pages/Teams';
 import Tasks from './pages/Tasks';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { useAuth } from './auth/AuthContext';
@@ -80,6 +81,9 @@ export default function App() {
         <Route path="apcs" element={<ProtectedRoute roles={['bob', 'team_lead']}><APCs /></ProtectedRoute>} />
         <Route path="ads-managers" element={<ProtectedRoute roles={['bob']}><AdsManagers /></ProtectedRoute>} />
         <Route path="team-leads" element={<ProtectedRoute roles={['bob']}><TeamLeads /></ProtectedRoute>} />
+        {/* Teams — Bob/Super Boss hub consolidating Team Leads / APCs / Ads Managers /
+            Paid Collab Clients / Paid Collab Handlers / Bobs into one tabbed page. */}
+        <Route path="teams" element={<ProtectedRoute roles={['bob']}><Teams /></ProtectedRoute>} />
         {/* Bobs management — role-gated to bob here; the page itself additionally requires is_superbob. */}
         <Route path="bobs" element={<ProtectedRoute roles={['bob']}><Bobs /></ProtectedRoute>} />
         <Route path="tasks" element={<ProtectedRoute roles={['bob', 'team_lead', 'apc', 'ads_manager']} allowInternalHandler><Tasks /></ProtectedRoute>} />

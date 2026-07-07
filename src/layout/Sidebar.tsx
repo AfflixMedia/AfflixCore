@@ -89,25 +89,10 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
                 <NavLink to="/clients" title="Clients">
                   <i className="bi bi-building" /> <span className="ac-nav-label">Clients</span>
                 </NavLink>
-                {profile?.is_superbob && (
-                  <NavLink to="/bobs" title="Bobs">
-                    <i className="bi bi-person-badge" /> <span className="ac-nav-label">Bobs</span>
-                  </NavLink>
-                )}
-                <NavLink to="/team-leads" title="Team Leads">
-                  <i className="bi bi-diagram-3" /> <span className="ac-nav-label">Team Leads</span>
-                </NavLink>
-                <NavLink to="/apcs" title="APCs">
-                  <i className="bi bi-people" /> <span className="ac-nav-label">APCs</span>
-                </NavLink>
-                <NavLink to="/ads-managers" title="Ads Managers">
-                  <i className="bi bi-badge-ad" /> <span className="ac-nav-label">Ads Managers</span>
-                </NavLink>
-                <NavLink to="/paid-collab-clients" title="Paid Collab Clients">
-                  <i className="bi bi-people-fill" /> <span className="ac-nav-label">Paid Collab Clients</span>
-                </NavLink>
-                <NavLink to="/paid-collab-handlers" title="Paid Collab Handlers">
-                  <i className="bi bi-person-gear" /> <span className="ac-nav-label">Paid Collab Handlers</span>
+                {/* Teams — one hub for Team Leads / APCs / Ads Managers /
+                    Paid Collab Clients / Paid Collab Handlers / Bobs. */}
+                <NavLink to="/teams" title="Teams">
+                  <i className="bi bi-diagram-3" /> <span className="ac-nav-label">Teams</span>
                 </NavLink>
                 <NavLink to="/client-access" title="Client Access">
                   <i className="bi bi-link-45deg" /> <span className="ac-nav-label">Client Access</span>
