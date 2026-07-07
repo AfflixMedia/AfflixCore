@@ -556,11 +556,14 @@ export function BrandNotesDrawer({ brandId, brandName, brands, brandById, month,
 
 /* ── All-notes drawer ──
    Global, searchable list of every note — opened from the floating notes button
-   so any note is reachable from anywhere in the handler workspace. */
-export function AllNotesDrawer({ notes = [], brands, brandById, month, onClose, onChanged }) {
+   so any note is reachable from anywhere in the handler workspace. Also reused
+   by the Super Boss "Ads Manager notes" view (canCreate=false, notes carry an
+   injected owner_name shown as a chip). Includes a brand-wise filter. */
+export function AllNotesDrawer({ notes = [], brands, brandById, month, onClose, onChanged, canCreate = true, title = 'All notes' }) {
   const [list, setList] = useState(() => notes.filter(n => !n.archived));
   const [editor, setEditor] = useState(null);
   const [search, setSearch] = useState('');
+  const [brandFilter, setBrandFilter] = useState('all'); // 'all' | 'none' | <brand_id>
   useEffect(() => { setList(notes.filter(n => !n.archived)); }, [notes]);
 
   const persist = useCallback(async (payload) => {
@@ -585,16 +588,28 @@ export function AllNotesDrawer({ notes = [], brands, brandById, month, onClose, 
     onChanged && onChanged();
   }, [onChanged]);
 
+  // Brand-wise filter options, built from the notes themselves (with counts).
+  const brandOptions = useMemo(() => {
+    const m = {};
+    list.forEach(n => { if (n.brand_id) m[n.brand_id] = (m[n.brand_id] || 0) + 1; });
+    return Object.entries(m)
+      .map(([id, count]) => ({ id, count, name: brandById[id]?.name || 'Brand' }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [list, brandById]);
+
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     let l = list;
+    if (brandFilter === 'none') l = l.filter(n => !n.brand_id);
+    else if (brandFilter !== 'all') l = l.filter(n => n.brand_id === brandFilter);
     if (q) l = l.filter(n =>
       (n.title || '').toLowerCase().includes(q) ||
       htmlToText(n.body).toLowerCase().includes(q) ||
       (n.labels || []).some(x => x.toLowerCase().includes(q)) ||
+      (n.owner_name || '').toLowerCase().includes(q) ||
       (n.brand_id && (brandById[n.brand_id]?.name || '').toLowerCase().includes(q)));
     return [...l].sort((a, b) => (b.pinned - a.pinned) || (new Date(b.updated_at) - new Date(a.updated_at)));
-  }, [list, search, brandById]);
+  }, [list, search, brandFilter, brandById]);
 
   return (
     <>
@@ -604,20 +619,30 @@ export function AllNotesDrawer({ notes = [], brands, brandById, month, onClose, 
             <div className="pc-drawer-head-l">
               <span className="pc-ava" style={{ background: 'var(--pc-accent)', color: '#fff' }}><i className="bi bi-journal-text" /></span>
               <div>
-                <div className="pc-drawer-title">All notes</div>
+                <div className="pc-drawer-title">{title}</div>
                 <div className="pc-drawer-sub">{list.length} note{list.length === 1 ? '' : 's'}</div>
               </div>
             </div>
-            <button className="pc-btn pc-btn-primary pc-btn-sm" onClick={() => setEditor({ mode: 'add', note: { color: 'default', labels: [], brand_id: null, month: month || null } })}>
-              <i className="bi bi-plus-lg" />New
-            </button>
+            {canCreate && (
+              <button className="pc-btn pc-btn-primary pc-btn-sm" onClick={() => setEditor({ mode: 'add', note: { color: 'default', labels: [], brand_id: null, month: month || null } })}>
+                <i className="bi bi-plus-lg" />New
+              </button>
+            )}
           </div>
           <div className="pc-drawer-body">
-            <div className="pc-nsearch" style={{ marginBottom: 14 }}>
+            <div className="pc-nsearch" style={{ marginBottom: 10 }}>
               <i className="bi bi-search" />
               <input placeholder="Search all notes…" value={search} onChange={e => setSearch(e.target.value)} />
               {search && <button className="pc-nsearch-x" onClick={() => setSearch('')}>×</button>}
             </div>
+            {brandOptions.length > 0 && (
+              <select className="pc-input" style={{ marginBottom: 14 }} value={brandFilter}
+                onChange={e => setBrandFilter(e.target.value)} aria-label="Filter by brand">
+                <option value="all">All brands</option>
+                <option value="none">No brand</option>
+                {brandOptions.map(b => <option key={b.id} value={b.id}>{b.name} ({b.count})</option>)}
+              </select>
+            )}
             {visible.length === 0 ? (
               <div className="pc-nempty" style={{ padding: '40px 10px' }}>
                 <div className="pc-nempty-ico"><i className="bi bi-journal-text" /></div>
@@ -635,8 +660,9 @@ export function AllNotesDrawer({ notes = [], brands, brandById, month, onClose, 
                       {n.pinned && <i className="bi bi-pin-angle-fill pc-bnpin" />}
                       {n.title && <div className="pc-bntitle">{n.title}</div>}
                       {text && <div className="pc-bnsnippet">{text}</div>}
-                      {(brandName || n.reminder_at || n.month || (n.labels || []).length > 0) && (
+                      {(n.owner_name || brandName || n.reminder_at || n.month || (n.labels || []).length > 0) && (
                         <div className="pc-nchips">
+                          {n.owner_name && <span className="pc-nchip"><i className="bi bi-person-badge" /> {n.owner_name}</span>}
                           {n.reminder_at && !n.reminder_done && <span className={`pc-nchip pc-nchip-rem ${overdue ? 'due' : ''}`}><i className="bi bi-alarm" /> {reminderLabel(n.reminder_at)}</span>}
                           {brandName && <span className="pc-nchip pc-nchip-brand"><i className="bi bi-shop" /> {brandName}</span>}
                           {n.month && <span className="pc-nchip pc-nchip-prog"><i className="bi bi-calendar3" /> {monthLabel(n.month)}</span>}
