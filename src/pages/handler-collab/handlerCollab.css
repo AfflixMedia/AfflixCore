@@ -1167,3 +1167,19 @@ a.pc-vx-prod:hover{ text-decoration:none; filter:brightness(.97); }
 .pc-bntitle{ font-size:14px; font-weight:800; letter-spacing:-.2px; margin:0 20px 4px 0; word-break:break-word; }
 .pc-bnsnippet{ font-size:12.5px; line-height:1.5; color:var(--pc-text-2); display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
 .pc-bnitem .pc-nchips{ margin-top:9px; }
+
+/* ── Authorization queue (Brand Detail → Paid Collab → Authorization) ──
+   All not-yet-authorised videos across creators + bulk authorise / copy-all-codes.
+   Rows reuse the pc-vx-* grid from the creator drilldown. */
+.pc-authq{ padding:18px; }
+.pc-authq-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:14px; flex-wrap:wrap; margin-bottom:16px; }
+.pc-authq-title{ font-size:15px; font-weight:800; letter-spacing:-.2px; }
+.pc-authq-sub{ font-size:12.5px; color:var(--pc-text-2); margin-top:2px; }
+.pc-authq-actions{ display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
+.pc-authq-group{ border-top:1px solid var(--pc-divider); padding-top:14px; margin-top:14px; }
+.pc-authq-group:first-of-type{ border-top:0; padding-top:0; margin-top:0; }
+.pc-authq-creator{ display:flex; align-items:center; gap:9px; margin-bottom:10px; flex-wrap:wrap; }
+.pc-authq-ava{ width:30px; height:30px; flex:0 0 auto; border-radius:10px; color:#fff; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:800; }
+.pc-seg-count{ margin-left:6px; min-width:18px; height:18px; padding:0 5px; border-radius:999px; background:var(--pc-warn-bg); color:var(--pc-warn-fg); font-size:10.5px; font-weight:800; display:inline-flex; align-items:center; justify-content:center; vertical-align:middle; }
+.pc-seg-btn.active .pc-seg-count{ background:rgba(255,255,255,.24); color:#fff; }
+@media (max-width:768px){ .pc-authq{ padding:14px; } .pc-authq-actions{ width:100%; } .pc-authq-actions .pc-btn{ flex:1; justify-content:center; } }
