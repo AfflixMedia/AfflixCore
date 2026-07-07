@@ -96,7 +96,8 @@ export default function Tasks() {
   const isAdsManager = profile?.role === 'ads_manager';
   const isApc = profile?.role === 'apc' || isAdsManager;
   const isBob = profile?.role === 'bob';
-  // Internal handlers assign to any APC (external handlers never reach /tasks).
+  // Internal handlers assign to the APCs of their brands, and upward to their
+  // brands' Team Lead(s) + any Bob (external handlers never reach /tasks).
   const isInternalHandler = profile?.role === 'paid_collab_handler' && !!profile?.is_internal_handler;
   const canAssign = profile?.role === 'team_lead' || isBob || isInternalHandler;
   // An APC can also create tasks — upward only (their Team Lead + Bobs).
@@ -171,7 +172,7 @@ export default function Tasks() {
       canCreate ? supabase.from('brands').select('id,name').order('name') : Promise.resolve({ data: [], error: null }),
       canAssign ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('role', 'apc').order('full_name') : Promise.resolve({ data: [], error: null }),
       // Internal handlers also load Team Leads — RLS scopes them to the leads
-      // of the handler's own brands (shown as brand owners, not assignable).
+      // of the handler's own brands (assignable upward + shown as brand owners).
       (isBob || isInternalHandler) ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('role', 'team_lead').order('full_name') : Promise.resolve({ data: [], error: null }),
       isBob ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('role', 'paid_collab_handler').eq('is_internal_handler', true).order('full_name') : Promise.resolve({ data: [], error: null }),
       supabase.from('task_folders').select('id,name,color,owner_id').order('name'),
@@ -181,7 +182,7 @@ export default function Tasks() {
       canAssign ? supabase.from('task_recurrences').select('*').order('created_at', { ascending: false }) : Promise.resolve({ data: [], error: null }),
       supabase.from('task_reminders').select('id,task_id,assignee_id,created_by,created_at,acknowledged_at,ack_response').order('created_at', { ascending: false }),
       canAssign ? supabase.from('task_recurrence_runs').select('*').order('run_on', { ascending: false }) : Promise.resolve({ data: [], error: null }),
-      (isBob || isApc) ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('role', 'bob').order('full_name') : Promise.resolve({ data: [], error: null }),
+      (isBob || isApc || isInternalHandler) ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('role', 'bob').order('full_name') : Promise.resolve({ data: [], error: null }),
       // An APC's own Team Lead (their other upward assignment target).
       (isApc && profile?.team_lead_id) ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('id', profile.team_lead_id) : Promise.resolve({ data: [], error: null }),
       isBob ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('role', 'ads_manager').order('full_name') : Promise.resolve({ data: [], error: null }),
@@ -1052,9 +1053,11 @@ export default function Tasks() {
             )}
           </div>
 
-          {/* Right rail: Team Leads + APCs (Bob only) — click an avatar to assign
-              a task. Native scrollbar hidden; up/down arrows appear on overflow. */}
-          {isBob && (teamLeads.length > 0 || myApcs.length > 0 || handlers.length > 0 || adsManagers.length > 0 || otherBobs.length > 0) && (
+          {/* Right rail: click an avatar to assign a task. Bob sees everyone;
+              an internal handler sees the Bobs / Team Leads / APCs of their
+              brands (their upward + APC targets — the other groups come back
+              empty). Native scrollbar hidden; up/down arrows appear on overflow. */}
+          {(isBob || isInternalHandler) && (teamLeads.length > 0 || myApcs.length > 0 || handlers.length > 0 || adsManagers.length > 0 || otherBobs.length > 0) && (
             <aside className="ac-tl-rail" aria-label="Assign a task to a Bob, Team Lead, APC, Ads Manager, or Handler">
               {tlOverflow && (
                 <button type="button" className="ac-tl-arrow" aria-label="Scroll up"
@@ -1187,14 +1190,14 @@ export default function Tasks() {
                     <>
                       <AssigneePicker
                         apcs={myApcs} leads={teamLeads} handlers={handlers} adsManagers={adsManagers} bobs={otherBobs}
-                        isBob={isBob} isApc={isApc}
+                        isBob={isBob} isApc={isApc} isInternalHandler={isInternalHandler}
                         brandsByApc={apcBrandNames}
                         multiple={!editingId}
                         value={form.assignee_ids}
                         onChange={ids => setForm({ ...form, assignee_ids: ids })}
                       />
                       {editingId && <Form.Text className="text-muted">A task has one assignee. To give it to more people, create a new task.</Form.Text>}
-                      {myApcs.length === 0 && teamLeads.length === 0 && handlers.length === 0 && adsManagers.length === 0 && otherBobs.length === 0 && <Form.Text className="text-danger d-block">{isInternalHandler ? 'No APCs to assign to yet.' : isApc ? 'No one to assign a task to yet.' : 'You have no APCs yet.'}</Form.Text>}
+                      {myApcs.length === 0 && teamLeads.length === 0 && handlers.length === 0 && adsManagers.length === 0 && otherBobs.length === 0 && <Form.Text className="text-danger d-block">{isInternalHandler ? 'No one to assign a task to yet.' : isApc ? 'No one to assign a task to yet.' : 'You have no APCs yet.'}</Form.Text>}
                     </>
                   )}
                 </Form.Group>
@@ -1573,9 +1576,9 @@ export default function Tasks() {
 // Lead + the Bobs. APC rows show the brands under that APC. In `multiple`
 // mode (new task) selecting fans the task out to everyone chosen; on edit it acts
 // as a single-select since a task row has one assignee.
-function AssigneePicker({ apcs, leads, handlers = [], adsManagers = [], bobs = [], isBob, isApc = false, brandsByApc, multiple, value, onChange }: {
+function AssigneePicker({ apcs, leads, handlers = [], adsManagers = [], bobs = [], isBob, isApc = false, isInternalHandler = false, brandsByApc, multiple, value, onChange }: {
   apcs: PersonLite[]; leads: PersonLite[]; handlers?: PersonLite[]; adsManagers?: PersonLite[]; bobs?: PersonLite[];
-  isBob: boolean; isApc?: boolean;
+  isBob: boolean; isApc?: boolean; isInternalHandler?: boolean;
   brandsByApc?: Map<string, string[]>; multiple: boolean;
   value: string[]; onChange: (ids: string[]) => void;
 }) {
@@ -1699,7 +1702,7 @@ function AssigneePicker({ apcs, leads, handlers = [], adsManagers = [], bobs = [
                 {fBobs.map(p => Row(p))}
               </>
             )}
-            {(isBob || isApc) && fLeads.length > 0 && (
+            {(isBob || isApc || isInternalHandler) && fLeads.length > 0 && (
               <>
                 <div className="ac-assignee-group">{isApc ? 'My Team Lead' : 'Team Leads'}</div>
                 {fLeads.map(p => Row(p))}
@@ -1707,7 +1710,7 @@ function AssigneePicker({ apcs, leads, handlers = [], adsManagers = [], bobs = [
             )}
             {fApcs.length > 0 && (
               <>
-                {isBob && (fLeads.length > 0 || fHandlers.length > 0 || fAdsManagers.length > 0 || fBobs.length > 0) && <div className="ac-assignee-group">APCs</div>}
+                {(isBob || isInternalHandler) && (fLeads.length > 0 || fHandlers.length > 0 || fAdsManagers.length > 0 || fBobs.length > 0) && <div className="ac-assignee-group">APCs</div>}
                 {fApcs.map(p => Row(p, brandsByApc?.get(p.id)))}
               </>
             )}
