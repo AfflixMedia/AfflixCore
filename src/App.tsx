@@ -36,6 +36,7 @@ import ReportingCanvasEditor from './pages/templates/ReportingCanvasEditor';
 import GlobalChat from './pages/global-chat/GlobalChat';
 import TeamLeads from './pages/TeamLeads';
 import AdsManagers from './pages/AdsManagers';
+import AdsManagerNotes from './pages/AdsManagerNotes';
 import Bobs from './pages/Bobs';
 import Teams from './pages/Teams';
 import Tasks from './pages/Tasks';
@@ -80,6 +81,8 @@ export default function App() {
         <Route path="brands/:id" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead', 'ads_manager']}><BrandDetail /></ProtectedRoute>} />
         <Route path="apcs" element={<ProtectedRoute roles={['bob', 'team_lead']}><APCs /></ProtectedRoute>} />
         <Route path="ads-managers" element={<ProtectedRoute roles={['bob']}><AdsManagers /></ProtectedRoute>} />
+        {/* Ads Manager Keep-style notes board (also reachable via the app-wide floating button). */}
+        <Route path="notes" element={<ProtectedRoute roles={['ads_manager']}><AdsManagerNotes /></ProtectedRoute>} />
         <Route path="team-leads" element={<ProtectedRoute roles={['bob']}><TeamLeads /></ProtectedRoute>} />
         {/* Teams — Bob/Super Boss hub consolidating Team Leads / APCs / Ads Managers /
             Paid Collab Clients / Paid Collab Handlers / Bobs into one tabbed page. */}

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
+import AdsNotesFab from '../components/AdsNotesFab';
 
 const KEY = 'ac_sidebar_collapsed';
 
@@ -23,6 +24,8 @@ export default function Layout() {
           <Outlet />
         </div>
       </div>
+      {/* App-wide floating notes button (Ads Manager only; self-guards on role). */}
+      <AdsNotesFab />
     </div>
   );
 }
