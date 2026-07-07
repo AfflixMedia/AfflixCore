@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState, FormEvent } from 'react';
-import { Button, Card, Modal, Form, Spinner, Alert, Badge, Dropdown } from 'react-bootstrap';
+import { Button, Card, Modal, Form, Spinner, Alert, Badge } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/AuthContext';
+import { useNotifications } from '../notifications/NotificationsContext';
 import Avatar from '../components/Avatar';
 
 type Priority = 'low' | 'mid' | 'high';
 type Repeat = 'none' | 'daily' | 'weekly' | 'monthly' | 'every_n_days';
 type Status = 'open' | 'in_progress' | 'done';
+// Whose tasks the list shows: everything I can see / assigned TO me / assigned BY me.
+type ViewFilter = 'all' | 'mine' | 'byme';
 
 interface Task {
   id: string;
@@ -89,6 +92,7 @@ const ORG_COLORS = ['#ef4444', '#f59e0b', '#3b82f6', '#10b981', '#8b5cf6', '#ec4
 // done. Notifications fire via DB triggers.
 export default function Tasks() {
   const { profile, user } = useAuth();
+  const { notifications, markReadByTypes } = useNotifications();
   const myId = user?.id;
   // Ads Managers use the APC persona on this page: "My tasks" + upward
   // assignment to Bobs only (they have no Team Lead, so the my-lead fetch
@@ -132,7 +136,15 @@ export default function Tasks() {
   // Filters (left rail)
   const [folderFilter, setFolderFilter] = useState<string>('all'); // 'all' | 'none' | folderId
   const [labelFilter, setLabelFilter] = useState<Set<string>>(new Set());
-  const [statusFilter, setStatusFilter] = useState<'all' | Status>('all'); // available to all users
+  const [statusFilter, setStatusFilter] = useState<'all' | Status>('all'); // Active-tab sub-filter
+  const [viewFilter, setViewFilter] = useState<ViewFilter>('all'); // all / assigned to me / assigned by me
+  // Completed tasks live in their own tab — never mixed into the Active list.
+  const [mainTab, setMainTab] = useState<'active' | 'completed'>('active');
+  // Brand quick-assign strip starts collapsed to keep the page calm.
+  const [brandBarOpen, setBrandBarOpen] = useState(() => localStorage.getItem('ac_tasks_brandbar') === '1');
+  const toggleBrandBar = () => {
+    setBrandBarOpen(o => { localStorage.setItem('ac_tasks_brandbar', o ? '0' : '1'); return !o; });
+  };
 
   const [show, setShow] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -151,6 +163,9 @@ export default function Tasks() {
   const [saving, setSaving] = useState(false);
   const [reminded, setReminded] = useState<Set<string>>(new Set());
   const [showOrg, setShowOrg] = useState(false);
+  // Which tab the organize modal opens on — the rail's "+" buttons pick it.
+  const [orgTab, setOrgTab] = useState<'folders' | 'labels'>('folders');
+  const openOrg = (tab: 'folders' | 'labels') => { setOrgTab(tab); setShowOrg(true); };
   const [query, setQuery] = useState('');
 
   // `silent` reloads refresh data in place (after a mutation or a realtime event)
@@ -236,6 +251,15 @@ export default function Tasks() {
     // eslint-disable-next-line
   }, [myId]);
 
+  // Being on the Tasks page means task notifications are "seen": clear them so
+  // the sidebar badge goes away even when the user never opens the bell. Keyed
+  // on a boolean so a new 'task' notification arriving WHILE here clears too.
+  const hasUnreadTaskNotifs = notifications.some(n => !n.read_at && (n.type === 'task' || n.type === 'task_reminder_ack'));
+  useEffect(() => {
+    if (hasUnreadTaskNotifs) markReadByTypes(['task', 'task_reminder_ack']);
+    // eslint-disable-next-line
+  }, [hasUnreadTaskNotifs]);
+
   // Show the right rail's up/down arrows only when its avatars overflow.
   useEffect(() => {
     const el = tlRailRef.current;
@@ -311,11 +335,13 @@ export default function Tasks() {
     return id ? (allPeople.get(id) ?? null) : null;
   };
 
-  // Apply folder + label + text filters (but NOT the status filter yet — we
-  // need this set to compute the per-status counts on the filter control).
+  // Apply view + folder + label + text filters (but NOT the status filter yet —
+  // we need this set to compute the per-status counts on the filter control).
   const scopedTasks = useMemo(() => {
     const q = query.trim().toLowerCase();
     return tasks.filter(t => {
+      if (viewFilter === 'mine' && t.assignee_id !== myId) return false;
+      if (viewFilter === 'byme' && (t.created_by !== myId || t.assignee_id === myId)) return false;
       if (folderFilter === 'none' && t.folder_id) return false;
       if (folderFilter !== 'all' && folderFilter !== 'none' && t.folder_id !== folderFilter) return false;
       if (labelFilter.size > 0 && !t.label_ids?.some(id => labelFilter.has(id))) return false;
@@ -326,7 +352,19 @@ export default function Tasks() {
       }
       return true;
     });
-  }, [tasks, folderFilter, labelFilter, query, brandMap]);
+  }, [tasks, viewFilter, myId, folderFilter, labelFilter, query, brandMap]);
+
+  // Counts for the view tabs (whole task set — not narrowed by other filters)
+  // + how many of my open tasks I haven't opened yet ("new").
+  const viewCounts = useMemo(() => {
+    const open = tasks.filter(t => t.status !== 'done');
+    return {
+      all: open.length,
+      mine: open.filter(t => t.assignee_id === myId).length,
+      byme: open.filter(t => t.created_by === myId && t.assignee_id !== myId).length,
+      mineNew: open.filter(t => t.assignee_id === myId && !t.seen_at).length,
+    };
+  }, [tasks, myId]);
 
   // Counts for the status filter pills (over the folder/label/search scope).
   const statusCounts = useMemo(() => ({
@@ -336,10 +374,12 @@ export default function Tasks() {
     done: scopedTasks.filter(t => t.status === 'done').length,
   }), [scopedTasks]);
 
-  const visibleTasks = useMemo(
-    () => statusFilter === 'all' ? scopedTasks : scopedTasks.filter(t => t.status === statusFilter),
-    [scopedTasks, statusFilter],
-  );
+  // The status sub-filter only applies on the Active tab; the Completed tab
+  // always shows everything (the group split below keeps only fully-done cards).
+  const visibleTasks = useMemo(() => {
+    const sf = mainTab === 'completed' ? 'all' : statusFilter;
+    return sf === 'all' ? scopedTasks : scopedTasks.filter(t => t.status === sf);
+  }, [scopedTasks, statusFilter, mainTab]);
 
   // "Active" = anything not completed (not started + in progress); "Done" = completed.
   const openTasks = visibleTasks.filter(t => t.status !== 'done');
@@ -660,26 +700,36 @@ export default function Tasks() {
     setLabelFilter(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   };
 
-  // Status control: a coloured pill that (for anyone allowed to update) opens a
-  // dropdown to switch between Not started / In progress / Completed. Otherwise
-  // it's a read-only pill. `size` "sm" is used inside grouped per-person rows.
+  // Status control: three one-click buttons (Not started / In progress /
+  // Completed) — the current state shows its label, the others are icon-only.
+  // Read-only pill when the viewer can't update. `size` "sm" is used inside
+  // grouped per-person rows.
   const StatusControl = ({ t, canUpdate, size }: { t: Task; canUpdate: boolean; size?: 'sm' }) => {
     const m = STATUS_META[t.status];
-    const pill = <><i className={`bi ${m.icon} me-1`} />{m.label}</>;
-    if (!canUpdate) return <span className={`ac-status-pill ${m.cls} ${size === 'sm' ? 'sm' : ''}`}>{pill}</span>;
+    if (!canUpdate) {
+      return (
+        <span className={`ac-status-pill ${m.cls} ${size === 'sm' ? 'sm' : ''}`}>
+          <i className={`bi ${m.icon} me-1`} />{m.label}
+        </span>
+      );
+    }
     return (
-      <Dropdown className="ac-status-dd" onClick={e => e.stopPropagation()}>
-        <Dropdown.Toggle as="button" type="button" className={`ac-status-pill ${m.cls} ${size === 'sm' ? 'sm' : ''}`}>
-          {pill}<i className="bi bi-chevron-down ms-1 ac-status-caret" />
-        </Dropdown.Toggle>
-        <Dropdown.Menu align="end">
-          {STATUS_ORDER.map(s => (
-            <Dropdown.Item key={s} active={t.status === s} onClick={() => setStatus(t, s)}>
-              <i className={`bi ${STATUS_META[s].icon} me-2 ac-status-ico ${STATUS_META[s].cls}`} />{STATUS_META[s].label}
-            </Dropdown.Item>
-          ))}
-        </Dropdown.Menu>
-      </Dropdown>
+      <div className={`ac-status-click ${size === 'sm' ? 'sm' : ''}`} role="group"
+        aria-label="Set task status" onClick={e => e.stopPropagation()}>
+        {STATUS_ORDER.map(s => {
+          const sm = STATUS_META[s];
+          const on = t.status === s;
+          return (
+            <button type="button" key={s}
+              className={`ac-status-click-opt ${sm.cls} ${on ? 'on' : ''}`}
+              aria-pressed={on} title={sm.label} aria-label={sm.label}
+              onClick={() => setStatus(t, s)}>
+              <i className={`bi ${sm.icon}`} />
+              {on && <span className="ac-status-click-lbl">{sm.label}</span>}
+            </button>
+          );
+        })}
+      </div>
     );
   };
 
@@ -689,10 +739,12 @@ export default function Tasks() {
     const canDelete = t.created_by === myId || isBob;
     const canEditTask = canCreate && (t.created_by === myId || isBob);
     const canRemind = !isApc && (t.created_by === myId || isBob);
+    // Assigned to me and never opened → highlight as "new" until I open it.
+    const isNew = t.assignee_id === myId && !t.seen_at && t.status !== 'done';
     const folder = t.folder_id ? folderMap.get(t.folder_id) : null;
     const taskLabels = (t.label_ids ?? []).map(id => labelMap.get(id)).filter(Boolean) as OrgItem[];
     return (
-      <div className={`ac-list-row ac-task ac-task--${t.priority} ${t.status === 'done' ? 'opacity-75' : ''}`}>
+      <div className={`ac-list-row ac-task ac-task--${t.priority} ${isNew ? 'ac-task--unseen' : ''} ${t.status === 'done' ? 'opacity-75' : ''}`}>
         <Avatar name={personName(t.assignee_id)} src={personAvatar(t.assignee_id)} size="lg" />
         <div className="ac-row-main ac-task-open" role="button" tabIndex={0}
           title="Open task"
@@ -700,9 +752,9 @@ export default function Tasks() {
           onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDetailId(t.id); } }}>
           <div className="ac-row-name d-flex align-items-center gap-2 flex-wrap">
             <span className={t.status === 'done' ? 'text-decoration-line-through text-muted' : ''}>{t.title}</span>
+            {isNew && <span className="ac-new-pill">New</span>}
             {t.recurrence_id && <i className="bi bi-arrow-repeat ac-recur-mark" title="Created by a recurring schedule" />}
             <span className={`ac-prio-pill prio-${t.priority}`}>{t.priority}</span>
-            <StatusControl t={t} canUpdate={canComplete} />
             {overdue && <Badge bg="danger">Overdue</Badge>}
           </div>
           {t.description && <div className="ac-row-sub ac-clamp1">{t.description}</div>}
@@ -720,27 +772,30 @@ export default function Tasks() {
             {!isApc && ackChip(t.id)}
           </div>
         </div>
-        <div className="ac-row-actions">
-          {canRemind && t.status !== 'done' && (
-            <button className={`ac-icon-btn remind ${reminded.has(t.id) ? 'sent' : ''}`}
-              title={reminded.has(t.id) ? 'Reminder sent' : 'Send blocking reminder'}
-              aria-label={reminded.has(t.id) ? 'Reminder sent' : 'Send blocking reminder to assignee'}
-              disabled={reminded.has(t.id)}
-              onClick={() => sendReminder(t)}>
-              <i className={`bi ${reminded.has(t.id) ? 'bi-check2-circle' : 'bi-alarm'}`} />
-            </button>
-          )}
-          {canEditTask && (
-            <button className="ac-icon-btn" title="Edit task" aria-label="Edit task"
-              onClick={() => openEdit(t)}>
-              <i className="bi bi-pencil" />
-            </button>
-          )}
-          {canDelete && (
-            <button className="ac-icon-btn danger" title="Delete task" aria-label="Delete task" onClick={() => remove(t)}>
-              <i className="bi bi-trash" />
-            </button>
-          )}
+        <div className="ac-task-side">
+          <StatusControl t={t} canUpdate={canComplete} />
+          <div className="ac-row-actions">
+            {canRemind && t.status !== 'done' && (
+              <button className={`ac-icon-btn remind ${reminded.has(t.id) ? 'sent' : ''}`}
+                title={reminded.has(t.id) ? 'Reminder sent' : 'Send blocking reminder'}
+                aria-label={reminded.has(t.id) ? 'Reminder sent' : 'Send blocking reminder to assignee'}
+                disabled={reminded.has(t.id)}
+                onClick={() => sendReminder(t)}>
+                <i className={`bi ${reminded.has(t.id) ? 'bi-check2-circle' : 'bi-alarm'}`} />
+              </button>
+            )}
+            {canEditTask && (
+              <button className="ac-icon-btn" title="Edit task" aria-label="Edit task"
+                onClick={() => openEdit(t)}>
+                <i className="bi bi-pencil" />
+              </button>
+            )}
+            {canDelete && (
+              <button className="ac-icon-btn danger" title="Delete task" aria-label="Delete task" onClick={() => remove(t)}>
+                <i className="bi bi-trash" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -874,6 +929,12 @@ export default function Tasks() {
             <h2>{isApc ? 'My Tasks' : 'Tasks'}</h2>
             <div className="ac-task-stats">
               <span className="ac-task-stat"><span className="ac-task-stat-num">{stats.total}</span> open</span>
+              {viewCounts.mineNew > 0 && (
+                <button type="button" className="ac-task-stat new" title="Tasks assigned to you that you haven't opened yet"
+                  onClick={() => { setMainTab('active'); setViewFilter('mine'); }}>
+                  <i className="bi bi-envelope-exclamation-fill" />{viewCounts.mineNew} new for you
+                </button>
+              )}
               {stats.high > 0 && <span className="ac-task-stat high"><i className="bi bi-flag-fill" />{stats.high} high</span>}
               {stats.overdue > 0 && <span className="ac-task-stat over"><i className="bi bi-exclamation-triangle-fill" />{stats.overdue} overdue</span>}
             </div>
@@ -894,34 +955,46 @@ export default function Tasks() {
         </div>
       </div>
 
-      {/* Brand quick-assign bar — click a brand to start a task with its
-          APC (and Team Lead, for Bob) auto-filled. Team Leads see only their brands. */}
+      {/* Brand quick-assign — collapsed to one calm row by default; expanding
+          shows the brand chips (click one to start a task with its APC / Team
+          Lead auto-filled). Team Leads see only their brands. */}
       {canAssign && brands.length > 0 && (
-        <div className="ac-brandbar">
-          <button type="button" className="ac-brandbar-arrow" aria-label="Scroll brands left"
-            onClick={() => scrollBrandBar(-1)}>
-            <i className="bi bi-chevron-left" />
+        <div className={`ac-brandbar-wrap ${brandBarOpen ? 'open' : ''}`}>
+          <button type="button" className="ac-brandbar-toggle" aria-expanded={brandBarOpen}
+            onClick={toggleBrandBar}>
+            <i className="bi bi-shop" />
+            <span>Quick assign by brand</span>
+            <span className="ac-brandbar-count">{brands.length}</span>
+            <i className={`bi bi-chevron-${brandBarOpen ? 'up' : 'down'} ms-auto`} />
           </button>
-          <div className="ac-brandbar-track" ref={brandBarRef}>
-            {brands.map(b => {
-              const owner = brandOwnerName(b.id);
-              return (
-                <button key={b.id} type="button" className="ac-brand-chip"
-                  onClick={() => openAddForBrand(b.id)}
-                  title={`New task for ${b.name}${owner ? ` · ${owner}` : ''}`}>
-                  <Avatar name={b.name} size="sm" variant="dark" />
-                  <span className="ac-brand-chip-text">
-                    <span className="ac-brand-chip-name">{b.name}</span>
-                    {owner && <span className="ac-brand-chip-owner">{owner}</span>}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-          <button type="button" className="ac-brandbar-arrow" aria-label="Scroll brands right"
-            onClick={() => scrollBrandBar(1)}>
-            <i className="bi bi-chevron-right" />
-          </button>
+          {brandBarOpen && (
+            <div className="ac-brandbar">
+              <button type="button" className="ac-brandbar-arrow" aria-label="Scroll brands left"
+                onClick={() => scrollBrandBar(-1)}>
+                <i className="bi bi-chevron-left" />
+              </button>
+              <div className="ac-brandbar-track" ref={brandBarRef}>
+                {brands.map(b => {
+                  const owner = brandOwnerName(b.id);
+                  return (
+                    <button key={b.id} type="button" className="ac-brand-chip"
+                      onClick={() => openAddForBrand(b.id)}
+                      title={`New task for ${b.name}${owner ? ` · ${owner}` : ''}`}>
+                      <Avatar name={b.name} size="sm" variant="dark" />
+                      <span className="ac-brand-chip-text">
+                        <span className="ac-brand-chip-name">{b.name}</span>
+                        {owner && <span className="ac-brand-chip-owner">{owner}</span>}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <button type="button" className="ac-brandbar-arrow" aria-label="Scroll brands right"
+                onClick={() => scrollBrandBar(1)}>
+                <i className="bi bi-chevron-right" />
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -934,11 +1007,11 @@ export default function Tasks() {
           {/* Left rail: folders + labels */}
           <aside className="ac-tasks-rail">
             <div className="ac-rail-head">
-              <span>Folders</span>
+              <span><i className="bi bi-folder2 me-1" />Folders</span>
               {canAssign && (
-                <button className="ac-icon-btn sm" title="Manage folders & labels"
-                  aria-label="Manage folders and labels" onClick={() => setShowOrg(true)}>
-                  <i className="bi bi-gear" />
+                <button className="ac-rail-add" title="Add folder"
+                  aria-label="Add a folder" onClick={() => openOrg('folders')}>
+                  <i className="bi bi-plus-lg" />
                 </button>
               )}
             </div>
@@ -961,25 +1034,39 @@ export default function Tasks() {
               {stats.noFolder > 0 && <span className="ac-rail-count">{stats.noFolder}</span>}
             </button>
 
-            {myLabels.length > 0 && (
+            {(myLabels.length > 0 || canAssign) && (
               <>
-                <div className="ac-rail-head mt-3"><span>Labels</span></div>
-                <div className="d-flex flex-wrap gap-1 ac-rail-scroll labels">
-                  {myLabels.map(l => (
-                    <button key={l.id}
-                      className={`ac-label-chip btn-reset ${labelFilter.has(l.id) ? 'on' : ''}`}
-                      aria-pressed={labelFilter.has(l.id)}
-                      style={{ background: (l.color ?? '#64748b') + (labelFilter.has(l.id) ? '' : '22'), color: labelFilter.has(l.id) ? '#fff' : (l.color ?? '#64748b') }}
-                      onClick={() => toggleLabelFilter(l.id)}>
-                      <i className="bi bi-tag-fill me-1" />{l.name}
-                      {(stats.label.get(l.id) ?? 0) > 0 && <span className="ac-label-count">{stats.label.get(l.id)}</span>}
+                <div className="ac-rail-head mt-3">
+                  <span><i className="bi bi-tags me-1" />Labels</span>
+                  {canAssign && (
+                    <button className="ac-rail-add" title="Add label"
+                      aria-label="Add a label" onClick={() => openOrg('labels')}>
+                      <i className="bi bi-plus-lg" />
                     </button>
-                  ))}
+                  )}
                 </div>
-                {labelFilter.size > 0 && (
-                  <button className="ac-rail-clear" onClick={() => setLabelFilter(new Set())}>
-                    <i className="bi bi-x-circle me-1" />Clear labels
-                  </button>
+                {myLabels.length === 0 ? (
+                  <div className="ac-rail-empty">No labels yet — add one to tag tasks.</div>
+                ) : (
+                  <>
+                    <div className="d-flex flex-wrap gap-1 ac-rail-scroll labels">
+                      {myLabels.map(l => (
+                        <button key={l.id}
+                          className={`ac-label-chip btn-reset ${labelFilter.has(l.id) ? 'on' : ''}`}
+                          aria-pressed={labelFilter.has(l.id)}
+                          style={{ background: (l.color ?? '#64748b') + (labelFilter.has(l.id) ? '' : '22'), color: labelFilter.has(l.id) ? '#fff' : (l.color ?? '#64748b') }}
+                          onClick={() => toggleLabelFilter(l.id)}>
+                          <i className="bi bi-tag-fill me-1" />{l.name}
+                          {(stats.label.get(l.id) ?? 0) > 0 && <span className="ac-label-count">{stats.label.get(l.id)}</span>}
+                        </button>
+                      ))}
+                    </div>
+                    {labelFilter.size > 0 && (
+                      <button className="ac-rail-clear" onClick={() => setLabelFilter(new Set())}>
+                        <i className="bi bi-x-circle me-1" />Clear labels
+                      </button>
+                    )}
+                  </>
                 )}
               </>
             )}
@@ -987,7 +1074,7 @@ export default function Tasks() {
             {/* Recurring schedules (auto-assigning "alarms") */}
             {canAssign && (
               <>
-                <div className="ac-rail-head mt-3"><span>Automation</span></div>
+                <div className="ac-rail-head mt-3"><span><i className="bi bi-arrow-repeat me-1" />Automation</span></div>
                 <button className="ac-rail-item" onClick={() => setShowRecur(true)}>
                   <i className="bi bi-arrow-repeat" /><span className="ac-rail-label">Recurring</span>
                   {recurrences.length > 0 && <span className="ac-rail-count">{recurrences.filter(r => r.active).length}</span>}
@@ -998,58 +1085,97 @@ export default function Tasks() {
 
           {/* Right pane: task list */}
           <div className="ac-tasks-main">
-            {/* Status filter — available to every user */}
-            <div className="ac-status-filter" role="group" aria-label="Filter by status">
-              <button className={`ac-status-filter-opt ${statusFilter === 'all' ? 'on' : ''}`} onClick={() => setStatusFilter('all')}>
-                All <span className="ac-status-filter-n">{statusCounts.all}</span>
+            {/* Primary tabs: Active work vs Completed (kept apart on purpose) */}
+            <div className="ac-tasks-tabs" role="tablist" aria-label="Active or completed tasks">
+              <button type="button" role="tab" aria-selected={mainTab === 'active'}
+                className={`ac-tasks-tab ${mainTab === 'active' ? 'on' : ''}`}
+                onClick={() => setMainTab('active')}>
+                <i className="bi bi-lightning-charge-fill" />Active
+                <span className="ac-tasks-tab-n">{statusCounts.open + statusCounts.in_progress}</span>
               </button>
-              {STATUS_ORDER.map(s => (
-                <button key={s}
-                  className={`ac-status-filter-opt ${STATUS_META[s].cls} ${statusFilter === s ? 'on' : ''}`}
-                  onClick={() => setStatusFilter(s)}>
-                  <i className={`bi ${STATUS_META[s].icon} me-1`} />{STATUS_META[s].label}
-                  <span className="ac-status-filter-n">{statusCounts[s]}</span>
-                </button>
-              ))}
+              <button type="button" role="tab" aria-selected={mainTab === 'completed'}
+                className={`ac-tasks-tab done ${mainTab === 'completed' ? 'on' : ''}`}
+                onClick={() => setMainTab('completed')}>
+                <i className="bi bi-check2-circle" />Completed
+                <span className="ac-tasks-tab-n">{statusCounts.done}</span>
+              </button>
             </div>
-            {visibleTasks.length === 0 ? (
-              <Card>
-                <Card.Body>
-                  <div className="ac-empty">
-                    <div className="ac-empty-icon"><i className="bi bi-check2-square" /></div>
-                    <h5>No tasks {isApc ? 'assigned to you' : 'here'}</h5>
-                    <p>{canAssign
-                      ? 'Create a task and assign it to one of your APCs.'
-                      : isApc
-                        ? 'Tasks assigned to you appear here — and you can assign a task to your Team Lead or Bob.'
-                        : 'Tasks your Team Lead assigns will appear here.'}</p>
-                    {canCreate && (
-                      <Button className="mt-3" onClick={() => openAdd()}><i className="bi bi-plus-lg me-1" /> New Task</Button>
-                    )}
-                  </div>
-                </Card.Body>
-              </Card>
-            ) : (
-              <>
-                <div className="ac-task-section">
-                  <span className="ac-task-section-dot open" />Open
-                  <span className="ac-task-section-count">{openGroups.length}</span>
+
+            {/* Toolbar: whose tasks (view tabs) + Active-only status sub-filter */}
+            <div className="ac-tasks-toolbar">
+              <div className="ac-view-tabs" role="group" aria-label="Whose tasks to show">
+                <button type="button" className={`ac-view-tab ${viewFilter === 'all' ? 'on' : ''}`}
+                  aria-pressed={viewFilter === 'all'} onClick={() => setViewFilter('all')}>
+                  All <span className="ac-view-tab-n">{viewCounts.all}</span>
+                </button>
+                <button type="button" className={`ac-view-tab ${viewFilter === 'mine' ? 'on' : ''}`}
+                  aria-pressed={viewFilter === 'mine'} onClick={() => setViewFilter('mine')}>
+                  <i className="bi bi-person-check me-1" />Assigned to me
+                  <span className="ac-view-tab-n">{viewCounts.mine}</span>
+                  {viewCounts.mineNew > 0 && <span className="ac-view-tab-new">{viewCounts.mineNew} new</span>}
+                </button>
+                {canCreate && (
+                  <button type="button" className={`ac-view-tab ${viewFilter === 'byme' ? 'on' : ''}`}
+                    aria-pressed={viewFilter === 'byme'} onClick={() => setViewFilter('byme')}>
+                    <i className="bi bi-send me-1" />Assigned by me
+                    <span className="ac-view-tab-n">{viewCounts.byme}</span>
+                  </button>
+                )}
+              </div>
+              {mainTab === 'active' && (
+                <div className="ac-status-filter" role="group" aria-label="Filter by status">
+                  <button className={`ac-status-filter-opt ${statusFilter === 'all' ? 'on' : ''}`} onClick={() => setStatusFilter('all')}>
+                    All <span className="ac-status-filter-n">{statusCounts.open + statusCounts.in_progress}</span>
+                  </button>
+                  {(['open', 'in_progress'] as Status[]).map(s => (
+                    <button key={s}
+                      className={`ac-status-filter-opt ${STATUS_META[s].cls} ${statusFilter === s ? 'on' : ''}`}
+                      onClick={() => setStatusFilter(s)}>
+                      <i className={`bi ${STATUS_META[s].icon} me-1`} />{STATUS_META[s].label}
+                      <span className="ac-status-filter-n">{statusCounts[s]}</span>
+                    </button>
+                  ))}
                 </div>
-                {openGroups.length === 0 ? (
-                  <Card body className="text-muted text-center py-3 mb-4">Nothing open here. 🎉</Card>
-                ) : (
-                  <div className="ac-list mb-4">{openGroups.map(renderItem)}</div>
-                )}
-                {doneGroups.length > 0 && (
-                  <>
-                    <div className="ac-task-section">
-                      <span className="ac-task-section-dot done" />Done
-                      <span className="ac-task-section-count">{doneGroups.length}</span>
+              )}
+            </div>
+
+            {mainTab === 'active' ? (
+              openGroups.length === 0 ? (
+                <Card>
+                  <Card.Body>
+                    <div className="ac-empty">
+                      <div className="ac-empty-icon"><i className="bi bi-check2-square" /></div>
+                      <h5>{viewFilter === 'mine' ? 'No active tasks assigned to you'
+                        : viewFilter === 'byme' ? "You haven't assigned any active tasks"
+                        : 'No active tasks'}</h5>
+                      <p>{canAssign
+                        ? 'Create a task and assign it to one of your APCs.'
+                        : isApc
+                          ? 'Tasks assigned to you appear here — and you can assign a task to your Team Lead or Bob.'
+                          : 'Tasks your Team Lead assigns will appear here.'}</p>
+                      {canCreate && (
+                        <Button className="mt-3" onClick={() => openAdd()}><i className="bi bi-plus-lg me-1" /> New Task</Button>
+                      )}
                     </div>
-                    <div className="ac-list">{doneGroups.map(renderItem)}</div>
-                  </>
-                )}
-              </>
+                  </Card.Body>
+                </Card>
+              ) : (
+                <div className="ac-list">{openGroups.map(renderItem)}</div>
+              )
+            ) : (
+              doneGroups.length === 0 ? (
+                <Card>
+                  <Card.Body>
+                    <div className="ac-empty">
+                      <div className="ac-empty-icon"><i className="bi bi-check2-circle" /></div>
+                      <h5>Nothing completed yet</h5>
+                      <p>Tasks marked Completed move here, out of the active list.</p>
+                    </div>
+                  </Card.Body>
+                </Card>
+              ) : (
+                <div className="ac-list">{doneGroups.map(renderItem)}</div>
+              )
             )}
           </div>
 
@@ -1163,58 +1289,60 @@ export default function Tasks() {
           </Modal.Header>
           <Modal.Body>
             {err && <Alert variant="danger">{err}</Alert>}
-            {/* Two side-by-side columns so the form doesn't need scrolling */}
-            <div className="ac-task-cols">
-              <div className="ac-task-col">
-                <div className="ac-form-eyebrow"><i className="bi bi-people me-1" />Assignment</div>
-                <Form.Group className="mb-3">
-                  <Form.Label>
-                    Assign to
-                    {!editingId && !editingGroupId && form.assignee_ids.length > 1 && (
-                      <span className="text-muted ms-2 small">{form.assignee_ids.length} selected</span>
-                    )}
-                  </Form.Label>
-                  {editingGroupId ? (
-                    // Group edit changes shared fields for a fixed set of people.
-                    <>
-                      <div className="ac-assignee-chips">
-                        {form.assignee_ids.map(id => (
-                          <span key={id} className="ac-assignee-chip static">
-                            <Avatar name={personName(id)} src={personAvatar(id)} size="sm" /> {personName(id)}
-                          </span>
-                        ))}
-                      </div>
-                      <Form.Text className="text-muted">Editing for all {form.assignee_ids.length} people. Changes apply to everyone; each keeps their own status.</Form.Text>
-                    </>
-                  ) : (
-                    <>
-                      <AssigneePicker
-                        apcs={myApcs} leads={teamLeads} handlers={handlers} adsManagers={adsManagers} bobs={otherBobs}
-                        isBob={isBob} isApc={isApc} isInternalHandler={isInternalHandler}
-                        brandsByApc={apcBrandNames}
-                        multiple={!editingId}
-                        value={form.assignee_ids}
-                        onChange={ids => setForm({ ...form, assignee_ids: ids })}
-                      />
-                      {editingId && <Form.Text className="text-muted">A task has one assignee. To give it to more people, create a new task.</Form.Text>}
-                      {myApcs.length === 0 && teamLeads.length === 0 && handlers.length === 0 && adsManagers.length === 0 && otherBobs.length === 0 && <Form.Text className="text-danger d-block">{isInternalHandler ? 'No one to assign a task to yet.' : isApc ? 'No one to assign a task to yet.' : 'You have no APCs yet.'}</Form.Text>}
-                    </>
-                  )}
-                </Form.Group>
-                <Form.Group className="mb-3">
-                  <Form.Label>Title</Form.Label>
-                  <Form.Control required value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="e.g. Upload week 3 creator videos" />
-                </Form.Group>
-                <Form.Group className="mb-3">
-                  <Form.Label>Details <span className="text-muted">(optional)</span></Form.Label>
-                  <Form.Control as="textarea" rows={5} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
-                </Form.Group>
-              </div>
+            {/* The what first (big title + details), then the who, then options. */}
+            <Form.Group className="mb-2">
+              <Form.Label htmlFor="ac-tm-title" className="visually-hidden">Title</Form.Label>
+              <Form.Control id="ac-tm-title" className="ac-tm-title-input" required autoFocus
+                value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}
+                placeholder="Task title — e.g. Upload week 3 creator videos" />
+            </Form.Group>
+            <Form.Group className="mb-3">
+              <Form.Label htmlFor="ac-tm-desc" className="visually-hidden">Details (optional)</Form.Label>
+              <Form.Control id="ac-tm-desc" as="textarea" rows={3} className="ac-tm-desc-input"
+                value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
+                placeholder="Add details… (optional)" />
+            </Form.Group>
 
-              <div className="ac-task-col">
-                <div className="ac-form-eyebrow"><i className="bi bi-sliders me-1" />Details</div>
-                <Form.Group className="mb-3">
-                  <Form.Label>Priority</Form.Label>
+            <div className="ac-tm-block">
+              <div className="ac-form-eyebrow">
+                <i className="bi bi-people me-1" />Assign to
+                {!editingId && !editingGroupId && form.assignee_ids.length > 1 && (
+                  <span className="ac-tm-eyebrow-note">{form.assignee_ids.length} selected</span>
+                )}
+              </div>
+              {editingGroupId ? (
+                // Group edit changes shared fields for a fixed set of people.
+                <>
+                  <div className="ac-assignee-chips">
+                    {form.assignee_ids.map(id => (
+                      <span key={id} className="ac-assignee-chip static">
+                        <Avatar name={personName(id)} src={personAvatar(id)} size="sm" /> {personName(id)}
+                      </span>
+                    ))}
+                  </div>
+                  <Form.Text className="text-muted">Editing for all {form.assignee_ids.length} people. Changes apply to everyone; each keeps their own status.</Form.Text>
+                </>
+              ) : (
+                <>
+                  <AssigneePicker
+                    apcs={myApcs} leads={teamLeads} handlers={handlers} adsManagers={adsManagers} bobs={otherBobs}
+                    isBob={isBob} isApc={isApc} isInternalHandler={isInternalHandler}
+                    brandsByApc={apcBrandNames}
+                    multiple={!editingId}
+                    value={form.assignee_ids}
+                    onChange={ids => setForm({ ...form, assignee_ids: ids })}
+                  />
+                  {editingId && <Form.Text className="text-muted">A task has one assignee. To give it to more people, create a new task.</Form.Text>}
+                  {myApcs.length === 0 && teamLeads.length === 0 && handlers.length === 0 && adsManagers.length === 0 && otherBobs.length === 0 && <Form.Text className="text-danger d-block">{isInternalHandler ? 'No one to assign a task to yet.' : isApc ? 'No one to assign a task to yet.' : 'You have no APCs yet.'}</Form.Text>}
+                </>
+              )}
+            </div>
+
+            <div className="ac-tm-block">
+              <div className="ac-form-eyebrow"><i className="bi bi-sliders me-1" />Options</div>
+              <div className="ac-tm-grid">
+                <Form.Group>
+                  <Form.Label className="ac-tm-lbl">Priority</Form.Label>
                   <div className="ac-prio-choice" role="group" aria-label="Priority">
                     {PRIORITIES.map(p => (
                       <button type="button" key={p.value}
@@ -1226,45 +1354,43 @@ export default function Tasks() {
                     ))}
                   </div>
                 </Form.Group>
-                <div className="d-flex gap-3">
-                  <Form.Group className="mb-3 flex-grow-1">
-                    <Form.Label>Folder <span className="text-muted">(optional)</span></Form.Label>
-                    <Form.Select value={form.folder_id} onChange={e => setForm({ ...form, folder_id: e.target.value })}>
-                      <option value="">No folder</option>
-                      {myFolders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-                    </Form.Select>
+                {/* One-off due date only when the task doesn't repeat. */}
+                {form.repeat === 'none' && (
+                  <Form.Group>
+                    <Form.Label className="ac-tm-lbl" htmlFor="ac-tm-due">Due date <span className="text-muted">(optional)</span></Form.Label>
+                    <Form.Control id="ac-tm-due" type="date" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })} />
                   </Form.Group>
-                  {/* One-off due date only when the task doesn't repeat. */}
-                  {form.repeat === 'none' && (
-                    <Form.Group className="mb-3">
-                      <Form.Label>Due date <span className="text-muted">(optional)</span></Form.Label>
-                      <Form.Control type="date" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })} />
-                    </Form.Group>
-                  )}
-                </div>
-                <Form.Group className="mb-3">
-                  <Form.Label>Brand <span className="text-muted">(optional)</span></Form.Label>
-                  <Form.Select value={form.brand_id} onChange={e => setForm({ ...form, brand_id: e.target.value })}>
+                )}
+                <Form.Group>
+                  <Form.Label className="ac-tm-lbl" htmlFor="ac-tm-brand">Brand <span className="text-muted">(optional)</span></Form.Label>
+                  <Form.Select id="ac-tm-brand" value={form.brand_id} onChange={e => setForm({ ...form, brand_id: e.target.value })}>
                     <option value="">No specific brand</option>
                     {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                   </Form.Select>
                 </Form.Group>
-                {myLabels.length > 0 && (
-                  <Form.Group className="mb-3">
-                    <Form.Label>Labels <span className="text-muted">(optional)</span></Form.Label>
-                    <div className="d-flex flex-wrap gap-1">
-                      {myLabels.map(l => (
-                        <button type="button" key={l.id}
-                          className={`ac-label-chip btn-reset ${form.label_ids.includes(l.id) ? 'on' : ''}`}
-                          style={{ background: (l.color ?? '#64748b') + (form.label_ids.includes(l.id) ? '' : '22'), color: form.label_ids.includes(l.id) ? '#fff' : (l.color ?? '#64748b') }}
-                          onClick={() => toggleFormLabel(l.id)}>
-                          <i className="bi bi-tag-fill me-1" />{l.name}
-                        </button>
-                      ))}
-                    </div>
-                  </Form.Group>
-                )}
+                <Form.Group>
+                  <Form.Label className="ac-tm-lbl" htmlFor="ac-tm-folder">Folder <span className="text-muted">(optional)</span></Form.Label>
+                  <Form.Select id="ac-tm-folder" value={form.folder_id} onChange={e => setForm({ ...form, folder_id: e.target.value })}>
+                    <option value="">No folder</option>
+                    {myFolders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                  </Form.Select>
+                </Form.Group>
               </div>
+              {myLabels.length > 0 && (
+                <Form.Group className="mt-3">
+                  <Form.Label className="ac-tm-lbl">Labels <span className="text-muted">(optional)</span></Form.Label>
+                  <div className="d-flex flex-wrap gap-1">
+                    {myLabels.map(l => (
+                      <button type="button" key={l.id}
+                        className={`ac-label-chip btn-reset ${form.label_ids.includes(l.id) ? 'on' : ''}`}
+                        style={{ background: (l.color ?? '#64748b') + (form.label_ids.includes(l.id) ? '' : '22'), color: form.label_ids.includes(l.id) ? '#fff' : (l.color ?? '#64748b') }}
+                        onClick={() => toggleFormLabel(l.id)}>
+                        <i className="bi bi-tag-fill me-1" />{l.name}
+                      </button>
+                    ))}
+                  </div>
+                </Form.Group>
+              )}
             </div>
 
             {/* Repeat / "alarm" — new one-off tasks only. Creates a schedule that
@@ -1471,7 +1597,7 @@ export default function Tasks() {
       {/* Manage folders & labels */}
       {canAssign && (
         <ManageOrgModal
-          show={showOrg} onHide={() => setShowOrg(false)}
+          show={showOrg} onHide={() => setShowOrg(false)} initialTab={orgTab}
           folders={myFolders} labels={myLabels} myId={myId} isBob={isBob}
           onChanged={() => load({ silent: true })}
         />
@@ -1734,15 +1860,21 @@ function AssigneePicker({ apcs, leads, handlers = [], adsManagers = [], bobs = [
 }
 
 // ---- Folders & labels manager (Bob + Team Leads manage what they own) ----
-function ManageOrgModal({ show, onHide, folders, labels, myId, isBob, onChanged }: {
-  show: boolean; onHide: () => void; folders: OrgItem[]; labels: OrgItem[];
+function ManageOrgModal({ show, onHide, initialTab = 'folders', folders, labels, myId, isBob, onChanged }: {
+  show: boolean; onHide: () => void; initialTab?: 'folders' | 'labels';
+  folders: OrgItem[]; labels: OrgItem[];
   myId?: string; isBob: boolean; onChanged: () => void;
 }) {
-  const [tab, setTab] = useState<'folders' | 'labels'>('folders');
+  const [tab, setTab] = useState<'folders' | 'labels'>(initialTab);
   const [newName, setNewName] = useState('');
   const [newColor, setNewColor] = useState(ORG_COLORS[2]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Each open lands on the tab whose "+" was clicked, with a clean composer.
+  useEffect(() => {
+    if (show) { setTab(initialTab); setNewName(''); setErr(null); }
+  }, [show, initialTab]);
 
   const table = tab === 'folders' ? 'task_folders' : 'task_labels';
   const items = tab === 'folders' ? folders : labels;
@@ -1781,38 +1913,71 @@ function ManageOrgModal({ show, onHide, folders, labels, myId, isBob, onChanged 
   };
 
   return (
-    <Modal show={show} onHide={onHide} centered>
-      <Modal.Header closeButton><Modal.Title>Organize tasks</Modal.Title></Modal.Header>
+    <Modal show={show} onHide={onHide} centered dialogClassName="ac-org-modal">
+      <Modal.Header closeButton>
+        <div className="ac-modal-head">
+          <div className="ac-modal-head-icon"><i className="bi bi-collection" /></div>
+          <div>
+            <Modal.Title>Organize tasks</Modal.Title>
+            <div className="ac-modal-sub">Folders group tasks; labels tag them across folders</div>
+          </div>
+        </div>
+      </Modal.Header>
       <Modal.Body>
         {err && <Alert variant="danger">{err}</Alert>}
-        <div className="ac-seg mb-3">
-          <button className={tab === 'folders' ? 'active' : ''} onClick={() => setTab('folders')}>Folders</button>
-          <button className={tab === 'labels' ? 'active' : ''} onClick={() => setTab('labels')}>Labels</button>
+
+        <div className="ac-org-tabs" role="group" aria-label="Folders or labels">
+          <button type="button" className={`ac-org-tab ${tab === 'folders' ? 'on' : ''}`}
+            aria-pressed={tab === 'folders'} onClick={() => setTab('folders')}>
+            <i className="bi bi-folder2" />Folders
+            <span className="ac-org-tab-n">{folders.length}</span>
+          </button>
+          <button type="button" className={`ac-org-tab ${tab === 'labels' ? 'on' : ''}`}
+            aria-pressed={tab === 'labels'} onClick={() => setTab('labels')}>
+            <i className="bi bi-tags" />Labels
+            <span className="ac-org-tab-n">{labels.length}</span>
+          </button>
         </div>
 
-        <Form onSubmit={add} className="d-flex align-items-end gap-2 mb-3">
-          <Form.Group className="flex-grow-1">
-            <Form.Label className="small text-muted mb-1">New {tab === 'folders' ? 'folder' : 'label'}</Form.Label>
-            <Form.Control value={newName} onChange={e => setNewName(e.target.value)} placeholder="Name…" />
-          </Form.Group>
-          <ColorDots value={newColor} onChange={setNewColor} />
-          <Button type="submit" disabled={busy || !newName.trim()}><i className="bi bi-plus-lg" /></Button>
+        {/* Composer: name + colour + add */}
+        <Form onSubmit={add} className="ac-org-new">
+          <div className="ac-org-new-row">
+            <Form.Label htmlFor="ac-org-name" className="visually-hidden">New {kind} name</Form.Label>
+            <Form.Control id="ac-org-name" value={newName} onChange={e => setNewName(e.target.value)}
+              placeholder={`New ${kind} name…`} />
+            <Button type="submit" disabled={busy || !newName.trim()}>
+              <i className="bi bi-plus-lg me-1" />Add
+            </Button>
+          </div>
+          <div className="ac-org-new-colors">
+            <span className="ac-org-color-lbl">Colour</span>
+            <ColorDots value={newColor} onChange={setNewColor} />
+          </div>
         </Form>
 
-        <div className="ac-list">
-          {items.length === 0 && <div className="text-muted text-center py-2">Nothing yet.</div>}
+        <div className="ac-org-list">
+          {items.length === 0 && (
+            <div className="ac-org-empty">
+              <i className={`bi ${tab === 'folders' ? 'bi-folder2-open' : 'bi-tags'}`} />
+              <span>No {kind}s yet — create your first one above.</span>
+            </div>
+          )}
           {items.map(it => (
-            <div key={it.id} className="ac-list-row align-items-center">
-              <i className={`bi ${tab === 'folders' ? 'bi-folder-fill' : 'bi-tag-fill'}`} style={{ color: it.color ?? undefined, fontSize: 18 }} />
-              <div className="ac-row-main">
+            <div key={it.id} className="ac-org-row">
+              <span className="ac-org-swatch" style={{ background: (it.color ?? '#64748b') + '22', color: it.color ?? '#64748b' }}>
+                <i className={`bi ${tab === 'folders' ? 'bi-folder-fill' : 'bi-tag-fill'}`} />
+              </span>
+              <div className="ac-org-row-main">
                 {canEdit(it)
-                  ? <input className="ac-inline-input" defaultValue={it.name} onBlur={e => { if (e.target.value.trim() && e.target.value !== it.name) rename(it, e.target.value.trim()); }} />
-                  : <span>{it.name}</span>}
+                  ? <input className="ac-inline-input" defaultValue={it.name} aria-label={`Rename ${it.name}`}
+                      onBlur={e => { if (e.target.value.trim() && e.target.value !== it.name) rename(it, e.target.value.trim()); }} />
+                  : <span className="ac-org-row-name">{it.name}</span>}
               </div>
               {canEdit(it) && (
-                <div className="d-flex align-items-center gap-2">
+                <div className="ac-org-row-actions">
                   <ColorDots value={it.color ?? ORG_COLORS[6]} onChange={c => recolor(it, c)} />
-                  <button className="ac-icon-btn danger" title="Delete" onClick={() => del(it)}><i className="bi bi-trash" /></button>
+                  <button className="ac-icon-btn sm danger" title={`Delete ${kind}`} aria-label={`Delete ${it.name}`}
+                    onClick={() => del(it)}><i className="bi bi-trash" /></button>
                 </div>
               )}
             </div>

@@ -21,6 +21,7 @@ interface Ctx {
   markRead: (id: string) => Promise<void>;
   markAllRead: () => Promise<void>;
   markReadByConversation: (conversationId: string) => Promise<void>;
+  markReadByTypes: (types: string[]) => Promise<void>;
   remove: (id: string) => Promise<void>;
 }
 
@@ -113,6 +114,19 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     await supabase.from('notifications').update({ read_at: ts }).in('id', ids);
   };
 
+  // Mark every unread notification of the given types as read — called when the
+  // user opens the page those notifications point at (e.g. /tasks clears the
+  // 'task' badge), so the sidebar count doesn't stick when they skip the bell.
+  // Updates by user+type in the DB (not just loaded ids) to catch rows older
+  // than the in-memory page.
+  const markReadByTypes = async (types: string[]) => {
+    if (!user) return;
+    const ts = new Date().toISOString();
+    setNotifications(prev => prev.map(n => !n.read_at && types.includes(n.type) ? { ...n, read_at: ts } : n));
+    await supabase.from('notifications').update({ read_at: ts })
+      .eq('user_id', user.id).is('read_at', null).in('type', types);
+  };
+
   const remove = async (id: string) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
     await supabase.from('notifications').delete().eq('id', id);
@@ -121,7 +135,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   const unreadCount = notifications.filter(n => !n.read_at).length;
 
   return (
-    <NotificationsContext.Provider value={{ notifications, unreadCount, loading, markRead, markAllRead, markReadByConversation, remove }}>
+    <NotificationsContext.Provider value={{ notifications, unreadCount, loading, markRead, markAllRead, markReadByConversation, markReadByTypes, remove }}>
       {children}
     </NotificationsContext.Provider>
   );
