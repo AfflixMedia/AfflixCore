@@ -14,7 +14,7 @@ import { toISO } from '../../lib/dates';
 import type { BrandProduct } from '../../lib/paidCollabSchema';
 import {
   SampleProduct, DailyEntry, currentMonth, monthLabel, daysInMonth, recentMonths,
-  isWeekend, sumValues, GoalProgressTile, ProductProgressBar,
+  isWeekend, sumValues, productGoalFor, GoalProgressTile, ProductProgressBar,
 } from '../brand/BrandSamplesTab';
 
 const pctColor = (pct: number) =>
@@ -248,7 +248,7 @@ function SamplesModal({ brandId, brandName, onClose }: { brandId: string; brandN
                 <tbody>
                   {products.map((p, i) => {
                     const approved = perProductTotals[p.id] ?? 0;
-                    const pGoal = p.monthly_goal ?? 0;
+                    const pGoal = productGoalFor(p, month) ?? 0;
                     const pct = pGoal > 0 ? Math.min(100, Math.round((approved / pGoal) * 100)) : null;
                     return (
                       <tr key={p.id}>

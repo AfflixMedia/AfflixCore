@@ -13,7 +13,8 @@ export interface SampleProduct {
   brand_id: string;
   external_product_id: string | null;
   name: string;
-  monthly_goal: number | null;
+  monthly_goal: number | null; // legacy single global goal — superseded by monthly_goals
+  monthly_goals: Record<string, number> | null; // 'YYYY-MM' -> goal for that month
   sort_order: number;
 }
 export interface DailyEntry {
@@ -81,6 +82,14 @@ export function isWeekend(iso: string): boolean {
 }
 export const sumValues = (m: Record<string, number>) =>
   Object.values(m).reduce((s, v) => s + (v ?? 0), 0);
+
+// Product goal for a specific month only — never falls back to the legacy
+// global monthly_goal (that fallback is what made one month's goal show in
+// every other month; the migration backfilled it into monthly_goals).
+export function productGoalFor(p: SampleProduct, month: string): number | null {
+  const v = p.monthly_goals?.[month];
+  return typeof v === 'number' && v > 0 ? v : null;
+}
 
 const SECTION_HEADING_STYLE: React.CSSProperties = { textTransform: 'none', letterSpacing: 0 };
 
@@ -183,9 +192,9 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
     products.map(p => ({
       name: p.name.length > 18 ? p.name.slice(0, 18) + '…' : p.name,
       Approved: perProductTotals[p.id] ?? 0,
-      Goal: p.monthly_goal ?? 0,
+      Goal: productGoalFor(p, month) ?? 0,
     })),
-  [products, perProductTotals]);
+  [products, perProductTotals, month]);
 
   const dropReasons = useMemo(() =>
     days
@@ -255,21 +264,31 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
 
   // Products manager
   const [productModal, setProductModal] = useState(false);
+  // monthly_goal on the draft doubles as "goal for the currently selected
+  // month" while the modal is open; it's written to monthly_goals[month].
   const emptyProduct = (): SampleProduct => ({
-    id: '', brand_id: brandId, external_product_id: '', name: '', monthly_goal: null, sort_order: 0,
+    id: '', brand_id: brandId, external_product_id: '', name: '', monthly_goal: null, monthly_goals: {}, sort_order: 0,
   });
   const [productDraft, setProductDraft] = useState<SampleProduct>(emptyProduct());
   const [productEditing, setProductEditing] = useState<SampleProduct | null>(null);
 
   const openAddProduct = () => { setProductEditing(null); setProductDraft(emptyProduct()); setProductModal(true); };
-  const openEditProduct = (p: SampleProduct) => { setProductEditing(p); setProductDraft({ ...p }); setProductModal(true); };
+  const openEditProduct = (p: SampleProduct) => {
+    setProductEditing(p);
+    setProductDraft({ ...p, monthly_goal: productGoalFor(p, month) });
+    setProductModal(true);
+  };
   const submitProduct = async (e: FormEvent) => {
     e.preventDefault();
+    // Merge this month's goal into the per-month map; other months untouched.
+    const goals: Record<string, number> = { ...(productEditing?.monthly_goals ?? {}) };
+    if (productDraft.monthly_goal != null && productDraft.monthly_goal > 0) goals[month] = productDraft.monthly_goal;
+    else delete goals[month];
     const payload: any = {
       brand_id: brandId,
       external_product_id: productDraft.external_product_id?.trim() || null,
       name: productDraft.name.trim(),
-      monthly_goal: productDraft.monthly_goal ?? null,
+      monthly_goals: goals,
     };
     const res = productEditing
       ? await supabase.from('brand_samples_products').update(payload).eq('id', productEditing.id)
@@ -531,7 +550,7 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
                 <tbody>
                   {products.map((p, i) => {
                     const approved = perProductTotals[p.id] ?? 0;
-                    const goal = p.monthly_goal ?? 0;
+                    const goal = productGoalFor(p, month) ?? 0;
                     const pct = goal > 0 ? Math.min(100, Math.round((approved / goal) * 100)) : null;
                     return (
                       <tr key={p.id}>
@@ -894,10 +913,13 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
                   style={{ fontFamily: 'monospace' }} />
               </Col>
               <Col md={12}>
-                <Form.Label className="small fw-semibold">Monthly goal <span className="text-muted">(blank = no goal)</span></Form.Label>
+                <Form.Label className="small fw-semibold">Goal for {monthLabel(month)} <span className="text-muted">(blank = no goal)</span></Form.Label>
                 <NumberInput value={productDraft.monthly_goal ?? 0}
                   placeholder="e.g. 75"
                   onChange={n => setProductDraft({ ...productDraft, monthly_goal: n || null })} />
+                <Form.Text className="text-muted">
+                  Each month has its own goal — switch the month above to set goals for other months.
+                </Form.Text>
               </Col>
             </Row>
           </Modal.Body>
