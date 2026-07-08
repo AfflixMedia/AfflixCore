@@ -7,7 +7,7 @@ import BrandResourcesTab from './brand/BrandResourcesTab';
 import BrandReportingTab from './brand/BrandReportingTab';
 import BrandGmvMaxTab from './brand/BrandGmvMaxTab';
 import BrandSamplesTab from './brand/BrandSamplesTab';
-import BrandPaidCollabTab from './brand/BrandPaidCollabTab';
+import BrandPaidCollabTab, { isPendingAuthCode } from './brand/BrandPaidCollabTab';
 import BrandProductsTab from './brand/BrandProductsTab';
 import BrandBillingTab from './brand/BrandBillingTab';
 import PaymentControlsTab from '../components/paidcollab/PaymentControlsTab';
@@ -74,13 +74,17 @@ export default function BrandDetail() {
   // of the same status; the funnel lets you override.
   const [navStatus, setNavStatus] = useState<'all' | ClientStatus>('in_progress');
   const [filterOpen, setFilterOpen] = useState(false);
+  // Not-yet-authorised paid-collab videos for this brand — drives the red dot on
+  // the Paid Collab tab. Fetched on load; the tab reports live changes upward so
+  // the dot clears as videos get authorised.
+  const [pendingAuthCount, setPendingAuthCount] = useState(0);
 
   const tabFromUrl = (params.get('tab') as TabKey) || 'resources';
 
   useEffect(() => {
     (async () => {
       setLoading(true); setErr(null);
-      const [{ data: b, error: bErr }, { data: assigns }, { data: siblings }] = await Promise.all([
+      const [{ data: b, error: bErr }, { data: assigns }, { data: siblings }, { data: authRows }] = await Promise.all([
         supabase.from('brands').select('id,name,client,client_id,share_enabled,client_status').eq('id', id).maybeSingle(),
         isApc
           ? supabase.from('apc_brands').select('brand_id').eq('apc_id', profile?.id ?? '').eq('brand_id', id ?? '')
@@ -92,6 +96,9 @@ export default function BrandDetail() {
         // RLS already scopes this to brands the user can see (Bob sees all,
         // APC sees their assigned brands).
         supabase.from('brands').select('id,name,client_status').order('name'),
+        // Pending-authorisation videos for the Paid Collab tab dot. RLS returns
+        // rows only to users with brand access; errors just leave the dot off.
+        supabase.from('handler_collab_creators').select('video_codes').eq('brand_id', id ?? ''),
       ]);
       if (bErr) { setErr(bErr.message); setLoading(false); return; }
       if (!b) { setErr('Brand not found.'); setLoading(false); return; }
@@ -102,6 +109,8 @@ export default function BrandDetail() {
       const st = ((b as Brand).client_status ?? 'in_progress') as ClientStatus;
       setNavStatus(prev => (prev === 'all' || prev === st) ? prev : st);
       setAssignedToMe(((assigns as any[])?.length ?? 0) > 0);
+      setPendingAuthCount(((authRows as any[]) ?? []).reduce((n, r) =>
+        n + (Array.isArray(r.video_codes) ? r.video_codes.filter(isPendingAuthCode).length : 0), 0));
       setSiblings(((siblings as any[]) ?? []).map(x => ({
         id: x.id, name: x.name, status: (x.client_status ?? 'in_progress') as ClientStatus,
       })));
@@ -378,6 +387,12 @@ export default function BrandDetail() {
               <Nav.Item key={t.key}>
                 <Nav.Link eventKey={t.key}>
                   <i className={`bi ${t.icon} me-1`} />{t.label}
+                  {t.key === 'paid-collab' && pendingAuthCount > 0 && (
+                    <span
+                      className="ac-tab-dot"
+                      title={`${pendingAuthCount} video${pendingAuthCount === 1 ? '' : 's'} awaiting authorisation`}
+                    />
+                  )}
                 </Nav.Link>
               </Nav.Item>
             ))}
@@ -390,7 +405,7 @@ export default function BrandDetail() {
       {currentTab === 'gmv-max'     && <BrandGmvMaxTab brandId={brand.id} canEdit={canEditGmvMax} />}
       {currentTab === 'samples'     && <BrandSamplesTab brandId={brand.id} canEdit={canEditSamples} />}
       {currentTab === 'products'    && <BrandProductsTab brandId={brand.id} canEdit={canEditProducts} />}
-      {currentTab === 'paid-collab' && <BrandPaidCollabTab brandId={brand.id} brandName={brand.name} canEdit={canEditPaidCollab} />}
+      {currentTab === 'paid-collab' && <BrandPaidCollabTab brandId={brand.id} brandName={brand.name} canEdit={canEditPaidCollab} onPendingAuthChange={setPendingAuthCount} />}
       {currentTab === 'payments'    && <PaymentControlsTab brandId={brand.id} brandName={brand.name} canEdit={isBob && brandActive} />}
       {currentTab === 'billing'     && <BrandBillingTab brandId={brand.id} />}
     </div>

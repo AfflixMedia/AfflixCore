@@ -14,7 +14,15 @@ interface Props {
   brandId: string;
   brandName: string;
   canEdit: boolean;
+  /** Reports the live count of not-yet-authorised videos (drives the tab-strip dot in BrandDetail). */
+  onPendingAuthChange?: (count: number) => void;
 }
+
+// A video row counts as "awaiting authorisation" once it has a video link or an
+// ad code but no auth flag (empty placeholders skipped). Shared with BrandDetail,
+// which uses it to show a dot on the Paid Collab tab itself.
+export const isPendingAuthCode = (code: any): boolean =>
+  !!code && !code.auth && !!((code.video || '').trim() || (code.adCode || '').trim());
 
 /* ════════════════════════════════════════════════════════════
    Paid Collab tab for THIS brand, styled like the handler Workspace drilldown (pc-*
@@ -26,7 +34,7 @@ interface Props {
      through store.setCreatorMonthly (SECURITY DEFINER RPC, so APCs can write too).
    Creator/budget editing still happens in the handler's own workspace.
 ════════════════════════════════════════════════════════════ */
-export default function BrandPaidCollabTab({ brandId, brandName, canEdit }: Props) {
+export default function BrandPaidCollabTab({ brandId, brandName, canEdit, onPendingAuthChange }: Props) {
   const [months, setMonths] = useState<HandlerBrandMonth[]>([]);
   const [creators, setCreators] = useState<HandlerCreator[]>([]);
   const [loading, setLoading] = useState(true);
@@ -97,13 +105,17 @@ export default function BrandPaidCollabTab({ brandId, brandName, canEdit }: Prop
         creator: c,
         rows: (Array.isArray(c.video_codes) ? c.video_codes : [])
           .map((code, index) => ({ code, index }))
-          .filter(r => r.code && !r.code.auth
-            && ((r.code.video || '').trim() || (r.code.adCode || '').trim())),
+          .filter(r => isPendingAuthCode(r.code)),
       }))
       .filter(g => g.rows.length > 0)
       .sort((a, b) => String(a.creator.name || '').localeCompare(String(b.creator.name || '')));
   }, [creators]);
   const pendingCount = useMemo(() => pendingAuth.reduce((n, g) => n + g.rows.length, 0), [pendingAuth]);
+
+  // Keep BrandDetail's tab-strip dot in sync as videos get authorised in here.
+  useEffect(() => {
+    if (!loading) onPendingAuthChange?.(pendingCount);
+  }, [loading, pendingCount, onPendingAuthChange]);
   const pendingCodes = useMemo(
     () => pendingAuth.flatMap(g => g.rows.map(r => (r.code.adCode || '').trim()).filter(Boolean)),
     [pendingAuth],
