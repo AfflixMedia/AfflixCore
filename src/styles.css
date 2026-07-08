@@ -3046,6 +3046,25 @@ input[type="number"] {
 .ac-tl-avatar-btn:hover .ac-tl-tip,
 .ac-tl-avatar-btn:focus-visible .ac-tl-tip { opacity: 1; }
 
+/* Rail person popup: the person's open tasks, click-through to details */
+.ac-person-tasks { display: flex; flex-direction: column; gap: 8px; }
+.ac-person-task {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  border: 1px solid #e2e8f0; background: #fff; border-radius: 10px;
+  padding: 10px 12px; cursor: pointer;
+  transition: border-color .12s ease, box-shadow .12s ease;
+}
+.ac-person-task:hover,
+.ac-person-task:focus-visible { border-color: var(--ac-primary); box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+.ac-person-task-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ac-person-task-title {
+  font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ac-person-task-sub {
+  display: flex; flex-wrap: wrap; gap: 10px;
+  font-size: .78rem; color: var(--ac-text-muted);
+}
+
 /* Compact task cards: clickable body + single-line description */
 .ac-task-open { cursor: pointer; }
 .ac-clamp1 {
@@ -3078,23 +3097,25 @@ input[type="number"] {
   .ac-tl-tip { display: none; }
 }
 
-/* Priority background tints on task rows (red / amber / blue) */
-.ac-task { border-left-width: 4px; }
-.ac-task--high {
-  background: rgba(239,68,68,.06);
-  border-left-color: #ef4444;
+/* Priority colouring on task rows (red / amber / blue): full background tint
+   + the whole border in the priority colour (left edge kept thicker as the
+   at-a-glance accent). Hover deepens both. */
+.ac-task { border-width: 2px; border-left-width: 5px; }
+.ac-task.ac-task--high {
+  background: rgba(239,68,68,.10);
+  border-color: #ef4444;
 }
-.ac-task--high:hover { border-color: rgba(239,68,68,.4); border-left-color: #ef4444; }
-.ac-task--mid {
-  background: rgba(245,158,11,.07);
-  border-left-color: #f59e0b;
+.ac-task.ac-task--high:hover { background: rgba(239,68,68,.15); border-color: #dc2626; }
+.ac-task.ac-task--mid {
+  background: rgba(245,158,11,.11);
+  border-color: #f59e0b;
 }
-.ac-task--mid:hover { border-color: rgba(245,158,11,.4); border-left-color: #f59e0b; }
-.ac-task--low {
-  background: rgba(59,130,246,.06);
-  border-left-color: #3b82f6;
+.ac-task.ac-task--mid:hover { background: rgba(245,158,11,.17); border-color: #d97706; }
+.ac-task.ac-task--low {
+  background: rgba(59,130,246,.10);
+  border-color: #3b82f6;
 }
-.ac-task--low:hover { border-color: rgba(59,130,246,.4); border-left-color: #3b82f6; }
+.ac-task.ac-task--low:hover { background: rgba(59,130,246,.15); border-color: #2563eb; }
 
 /* Priority pill */
 .ac-prio-pill {

@@ -151,6 +151,8 @@ export default function Tasks() {
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null); // editing a whole multi-assignee group
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [detailId, setDetailId] = useState<string | null>(null); // task open in detail popup
+  // Right-rail person whose task list popup is open (null = closed).
+  const [railPerson, setRailPerson] = useState<PersonLite | null>(null);
   const brandBarRef = useRef<HTMLDivElement>(null);
   const tlRailRef = useRef<HTMLDivElement>(null);
   const [tlOverflow, setTlOverflow] = useState(false); // show up/down arrows on the Team Lead rail
@@ -409,7 +411,11 @@ export default function Tasks() {
   // Ordered list the detail popup arrows step through (open first, then done).
   const ordered = useMemo(() => [...openTasks, ...doneTasks], [openTasks, doneTasks]);
   const detailIdx = detailId ? ordered.findIndex(t => t.id === detailId) : -1;
-  const detailTask = detailIdx >= 0 ? ordered[detailIdx] : null;
+  // Fall back to the full task set so a task opened from outside the filtered
+  // list (e.g. the rail person popup) still shows; prev/next just disable.
+  const detailTask = detailIdx >= 0
+    ? ordered[detailIdx]
+    : (detailId ? tasks.find(t => t.id === detailId) ?? null : null);
 
   // Opening a task I'm assigned marks it seen (read receipt for the assigner).
   useEffect(() => {
@@ -735,7 +741,10 @@ export default function Tasks() {
 
   const TaskCard = ({ t }: { t: Task }) => {
     const overdue = t.status !== 'done' && t.due_date && t.due_date < new Date().toISOString().slice(0, 10);
-    const canComplete = t.assignee_id === myId || t.created_by === myId || isBob;
+    // Status belongs to the person the task is assigned to — the assigner
+    // (even Bob) only reads it. Nudging happens via Remind, not by flipping
+    // someone else's status.
+    const canSetStatus = t.assignee_id === myId;
     const canDelete = t.created_by === myId || isBob;
     const canEditTask = canCreate && (t.created_by === myId || isBob);
     const canRemind = !isApc && (t.created_by === myId || isBob);
@@ -773,7 +782,7 @@ export default function Tasks() {
           </div>
         </div>
         <div className="ac-task-side">
-          <StatusControl t={t} canUpdate={canComplete} />
+          <StatusControl t={t} canUpdate={canSetStatus} />
           <div className="ac-row-actions">
             {canRemind && t.status !== 'done' && (
               <button className={`ac-icon-btn remind ${reminded.has(t.id) ? 'sent' : ''}`}
@@ -867,7 +876,8 @@ export default function Tasks() {
                   <div key={t.id} className="ac-group-person">
                     <Avatar name={personName(t.assignee_id)} src={personAvatar(t.assignee_id)} size="sm" />
                     <span className="ac-group-person-name">{personName(t.assignee_id)}{seenTick(t)}</span>
-                    <StatusControl t={t} canUpdate={canManage} size="sm" />
+                    {/* Each member's status is theirs alone — assigners only read it. */}
+                    <StatusControl t={t} canUpdate={t.assignee_id === myId} size="sm" />
                     {overdue && <span className="ac-group-status over"><i className="bi bi-exclamation-triangle me-1" />Overdue</span>}
                     {ackChip(t.id)}
                     <div className="ac-group-person-actions">
@@ -919,6 +929,26 @@ export default function Tasks() {
   const renderItem = (g: TaskGroup) => g.isGroup
     ? <GroupCard key={g.key} g={g} />
     : <TaskCard key={g.tasks[0].id} t={g.tasks[0]} />;
+
+  // One avatar in the right rail. With open tasks it opens the person's task
+  // list popup (assign from there); with none it jumps straight to New Task.
+  const RailBtn = ({ p, variant }: { p: PersonLite; variant?: 'dark' }) => {
+    const name = p.full_name || p.email;
+    const open = tasks.filter(t => t.assignee_id === p.id && t.status !== 'done').length;
+    return (
+      <button type="button" className="ac-tl-avatar-btn"
+        onClick={() => (open > 0 ? setRailPerson(p) : openAdd(p.id))}
+        aria-label={open > 0
+          ? `View ${name}'s ${open} open task${open === 1 ? '' : 's'}`
+          : `Assign a new task to ${name}`}>
+        <Avatar name={name} src={p.avatar_url} size="lg" variant={variant} />
+        {open > 0 && <span className="ac-tl-badge">{open}</span>}
+        <span className="ac-tl-tip">{open > 0
+          ? `${name} · ${open} open task${open === 1 ? '' : 's'}`
+          : `Assign task to ${name}`}</span>
+      </button>
+    );
+  };
 
   return (
     <>
@@ -1179,10 +1209,12 @@ export default function Tasks() {
             )}
           </div>
 
-          {/* Right rail: click an avatar to assign a task. Bob sees everyone;
-              an internal handler sees the Bobs / Team Leads / APCs of their
-              brands (their upward + APC targets — the other groups come back
-              empty). Native scrollbar hidden; up/down arrows appear on overflow. */}
+          {/* Right rail: click an avatar to see that person's open tasks (and
+              assign more from there) — or, when they have none, to start a new
+              task straight away. Bob sees everyone; an internal handler sees
+              the Bobs / Team Leads / APCs of their brands (their upward + APC
+              targets — the other groups come back empty). Native scrollbar
+              hidden; up/down arrows appear on overflow. */}
           {(isBob || isInternalHandler) && (teamLeads.length > 0 || myApcs.length > 0 || handlers.length > 0 || adsManagers.length > 0 || otherBobs.length > 0) && (
             <aside className="ac-tl-rail" aria-label="Assign a task to a Bob, Team Lead, APC, Ads Manager, or Handler">
               {tlOverflow && (
@@ -1191,75 +1223,15 @@ export default function Tasks() {
               )}
               <div className="ac-tl-track" ref={tlRailRef}>
                 {otherBobs.length > 0 && <div className="ac-tl-rail-head">Bobs</div>}
-                {otherBobs.map(b => {
-                  const name = b.full_name || b.email;
-                  const open = tasks.filter(t => t.assignee_id === b.id && t.status !== 'done').length;
-                  return (
-                    <button key={b.id} type="button" className="ac-tl-avatar-btn"
-                      onClick={() => openAdd(b.id)}
-                      aria-label={`Assign a new task to ${name}`}>
-                      <Avatar name={name} src={b.avatar_url} size="lg" variant="dark" />
-                      {open > 0 && <span className="ac-tl-badge">{open}</span>}
-                      <span className="ac-tl-tip">Assign task to {name}</span>
-                    </button>
-                  );
-                })}
+                {otherBobs.map(b => <RailBtn key={b.id} p={b} variant="dark" />)}
                 {teamLeads.length > 0 && <div className={`ac-tl-rail-head ${otherBobs.length > 0 ? 'mt-2' : ''}`}>Team Leads</div>}
-                {teamLeads.map(tl => {
-                  const name = tl.full_name || tl.email;
-                  const open = tasks.filter(t => t.assignee_id === tl.id && t.status !== 'done').length;
-                  return (
-                    <button key={tl.id} type="button" className="ac-tl-avatar-btn"
-                      onClick={() => openAdd(tl.id)}
-                      aria-label={`Assign a new task to ${name}`}>
-                      <Avatar name={name} src={tl.avatar_url} size="lg" variant="dark" />
-                      {open > 0 && <span className="ac-tl-badge">{open}</span>}
-                      <span className="ac-tl-tip">Assign task to {name}</span>
-                    </button>
-                  );
-                })}
+                {teamLeads.map(tl => <RailBtn key={tl.id} p={tl} variant="dark" />)}
                 {myApcs.length > 0 && <div className="ac-tl-rail-head mt-2">APCs</div>}
-                {myApcs.map(apc => {
-                  const name = apc.full_name || apc.email;
-                  const open = tasks.filter(t => t.assignee_id === apc.id && t.status !== 'done').length;
-                  return (
-                    <button key={apc.id} type="button" className="ac-tl-avatar-btn"
-                      onClick={() => openAdd(apc.id)}
-                      aria-label={`Assign a new task to ${name}`}>
-                      <Avatar name={name} src={apc.avatar_url} size="lg" />
-                      {open > 0 && <span className="ac-tl-badge">{open}</span>}
-                      <span className="ac-tl-tip">Assign task to {name}</span>
-                    </button>
-                  );
-                })}
+                {myApcs.map(apc => <RailBtn key={apc.id} p={apc} />)}
                 {adsManagers.length > 0 && <div className="ac-tl-rail-head mt-2">Ads Managers</div>}
-                {adsManagers.map(am => {
-                  const name = am.full_name || am.email;
-                  const open = tasks.filter(t => t.assignee_id === am.id && t.status !== 'done').length;
-                  return (
-                    <button key={am.id} type="button" className="ac-tl-avatar-btn"
-                      onClick={() => openAdd(am.id)}
-                      aria-label={`Assign a new task to ${name}`}>
-                      <Avatar name={name} src={am.avatar_url} size="lg" />
-                      {open > 0 && <span className="ac-tl-badge">{open}</span>}
-                      <span className="ac-tl-tip">Assign task to {name}</span>
-                    </button>
-                  );
-                })}
+                {adsManagers.map(am => <RailBtn key={am.id} p={am} />)}
                 {handlers.length > 0 && <div className="ac-tl-rail-head mt-2">Handlers</div>}
-                {handlers.map(h => {
-                  const name = h.full_name || h.email;
-                  const open = tasks.filter(t => t.assignee_id === h.id && t.status !== 'done').length;
-                  return (
-                    <button key={h.id} type="button" className="ac-tl-avatar-btn"
-                      onClick={() => openAdd(h.id)}
-                      aria-label={`Assign a new task to ${name}`}>
-                      <Avatar name={name} src={h.avatar_url} size="lg" />
-                      {open > 0 && <span className="ac-tl-badge">{open}</span>}
-                      <span className="ac-tl-tip">Assign task to {name}</span>
-                    </button>
-                  );
-                })}
+                {handlers.map(h => <RailBtn key={h.id} p={h} />)}
               </div>
               {tlOverflow && (
                 <button type="button" className="ac-tl-arrow" aria-label="Scroll down"
@@ -1496,7 +1468,8 @@ export default function Tasks() {
           const today = new Date().toISOString().slice(0, 10);
           const overdue = t.status !== 'done' && t.due_date && t.due_date < today;
           const sm = STATUS_META[t.status];
-          const canComplete = t.assignee_id === myId || t.created_by === myId || isBob;
+          // Only the assignee moves the status; assigners (incl. Bob) just read it.
+          const canSetStatus = t.assignee_id === myId;
           const canDelete = t.created_by === myId || isBob;
           const canEditTask = canCreate && (t.created_by === myId || isBob);
           const canRemind = !isApc && (t.created_by === myId || isBob);
@@ -1510,7 +1483,7 @@ export default function Tasks() {
                 <div className="ac-task-detail-nav">
                   <button className="ac-icon-btn" disabled={detailIdx <= 0} onClick={goPrev}
                     title="Previous task" aria-label="Previous task"><i className="bi bi-chevron-left" /></button>
-                  <span className="ac-task-detail-pos">{detailIdx + 1} / {ordered.length}</span>
+                  <span className="ac-task-detail-pos">{detailIdx >= 0 ? detailIdx + 1 : '–'} / {ordered.length}</span>
                   <button className="ac-icon-btn" disabled={detailIdx >= ordered.length - 1} onClick={goNext}
                     title="Next task" aria-label="Next task"><i className="bi bi-chevron-right" /></button>
                 </div>
@@ -1566,7 +1539,7 @@ export default function Tasks() {
               </Modal.Body>
               <Modal.Footer className="justify-content-between">
                 <div className="d-flex align-items-center gap-2 flex-wrap">
-                  {canComplete && (
+                  {canSetStatus && (
                     <div className="ac-status-seg" role="group" aria-label="Task status">
                       {STATUS_ORDER.map(s => (
                         <button type="button" key={s}
@@ -1588,6 +1561,74 @@ export default function Tasks() {
                   {canEditTask && <Button variant="outline-secondary" size="sm" onClick={() => { setDetailId(null); openEdit(t); }}><i className="bi bi-pencil me-1" />Edit</Button>}
                   {canDelete && <Button variant="outline-danger" size="sm" onClick={() => { remove(t); setDetailId(null); }}><i className="bi bi-trash me-1" />Delete</Button>}
                 </div>
+              </Modal.Footer>
+            </>
+          );
+        })()}
+      </Modal>
+
+      {/* Person tasks popup — opened from the right rail when the person has
+          open tasks: their list first (click one → task detail), plus a button
+          to assign them another task. */}
+      <Modal show={!!railPerson} onHide={() => setRailPerson(null)} centered>
+        {railPerson && (() => {
+          const p = railPerson;
+          const name = p.full_name || p.email;
+          const theirs = tasks.filter(t => t.assignee_id === p.id);
+          const active = theirs.filter(t => t.status !== 'done');
+          const doneCount = theirs.length - active.length;
+          const today = new Date().toISOString().slice(0, 10);
+          return (
+            <>
+              <Modal.Header closeButton>
+                <div className="ac-modal-head">
+                  <Avatar name={name} src={p.avatar_url} size="lg" />
+                  <div>
+                    <Modal.Title>{name}</Modal.Title>
+                    <div className="ac-modal-sub">
+                      {active.length} open task{active.length === 1 ? '' : 's'}
+                      {doneCount > 0 && <> · {doneCount} completed</>}
+                    </div>
+                  </div>
+                </div>
+              </Modal.Header>
+              <Modal.Body>
+                {active.length === 0 ? (
+                  <div className="text-muted text-center py-3">No open tasks.</div>
+                ) : (
+                  <div className="ac-person-tasks">
+                    {active.map(t => {
+                      const m = STATUS_META[t.status];
+                      const overdue = t.due_date && t.due_date < today;
+                      return (
+                        <button key={t.id} type="button" className="ac-person-task"
+                          title="Open task details"
+                          onClick={() => { setRailPerson(null); setDetailId(t.id); }}>
+                          <span className={`ac-prio-pill prio-${t.priority}`}>{t.priority}</span>
+                          <span className="ac-person-task-main">
+                            <span className="ac-person-task-title">{t.title}</span>
+                            <span className="ac-person-task-sub">
+                              {t.brand_id && <span><i className="bi bi-shop me-1" />{brandMap.get(t.brand_id) ?? 'Brand'}</span>}
+                              {t.due_date && (
+                                <span className={overdue ? 'text-danger' : ''}>
+                                  <i className="bi bi-calendar-event me-1" />due {new Date(t.due_date).toLocaleDateString()}
+                                </span>
+                              )}
+                            </span>
+                          </span>
+                          {overdue && <Badge bg="danger">Overdue</Badge>}
+                          <span className={`ac-status-pill ${m.cls} sm`}><i className={`bi ${m.icon} me-1`} />{m.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </Modal.Body>
+              <Modal.Footer>
+                <Button variant="light" onClick={() => setRailPerson(null)}>Close</Button>
+                <Button onClick={() => { setRailPerson(null); openAdd(p.id); }}>
+                  <i className="bi bi-plus-lg me-1" />Assign another task
+                </Button>
               </Modal.Footer>
             </>
           );
