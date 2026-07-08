@@ -17,8 +17,8 @@ interface Brand {
   created_at: string;
 }
 interface ClientLite { id: string; name: string; }
-interface LeadLite { id: string; email: string; full_name: string | null; }
-interface ApcLite { id: string; email: string; full_name: string | null; team_lead_id: string | null; }
+interface LeadLite { id: string; email: string; full_name: string | null; avatar_url?: string | null; }
+interface ApcLite { id: string; email: string; full_name: string | null; team_lead_id: string | null; avatar_url?: string | null; }
 
 type ClientStatus = 'onboarding' | 'in_progress' | 'paused' | 'closed';
 
@@ -77,8 +77,9 @@ export default function Brands() {
 
   const [brands, setBrands] = useState<Brand[]>([]);
   const [clients, setClients] = useState<ClientLite[]>([]);
-  // Bob-only: Team Leads + APCs (and who currently owns each brand) so Bob can
-  // assign the brand to a team while creating/editing it.
+  // Team Leads + APCs and who currently owns each brand. Bob uses them for the
+  // assignment sidebar + the Team Lead filter; every viewer gets the owner
+  // chips on the cards (RLS scopes what each role can actually read).
   const [leads, setLeads] = useState<LeadLite[]>([]);
   const [apcs, setApcs] = useState<ApcLite[]>([]);
   const [brandLeadOwner, setBrandLeadOwner] = useState<Record<string, string>>({});
@@ -91,6 +92,8 @@ export default function Brands() {
   const [statusFilter, setStatusFilter] = useState<'all' | ClientStatus>('in_progress');
   const [clientFilter, setClientFilter] = useState('');
   const [scopeFilter, setScopeFilter] = useState<ScopeKey | ''>('');
+  // '' = all, 'none' = brands without a Team Lead, else a team_lead id.
+  const [leadFilter, setLeadFilter] = useState('');
 
   const [show, setShow] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -124,23 +127,24 @@ export default function Brands() {
       const map: Record<string, number> = {};
       (billing ?? []).forEach((r: any) => { map[r.brand_id] = Number(r.monthly_fee ?? 0); });
       setFeeByBrand(map);
-
-      // Team Leads + APCs + current brand ownership for the assignment sidebar.
-      const [leadRes, apcRes, tlbRes, abRes] = await Promise.all([
-        supabase.from('profiles').select('id,email,full_name').eq('role', 'team_lead').order('full_name'),
-        supabase.from('profiles').select('id,email,full_name,team_lead_id').eq('role', 'apc').order('full_name'),
-        supabase.from('team_lead_brands').select('team_lead_id,brand_id'),
-        supabase.from('apc_brands').select('apc_id,brand_id'),
-      ]);
-      setLeads((leadRes.data as LeadLite[]) ?? []);
-      setApcs((apcRes.data as ApcLite[]) ?? []);
-      const leadOwn: Record<string, string> = {};
-      (tlbRes.data ?? []).forEach((r: any) => { leadOwn[r.brand_id] = r.team_lead_id; });
-      setBrandLeadOwner(leadOwn);
-      const apcOwn: Record<string, string> = {};
-      (abRes.data ?? []).forEach((r: any) => { apcOwn[r.brand_id] = r.apc_id; });
-      setBrandApcOwner(apcOwn);
     }
+    // Team Leads + APCs + current brand ownership — assignment sidebar +
+    // Team Lead filter (Bob) and the owner avatars on every card. RLS scopes
+    // each role to the rows it may read (e.g. an APC gets just their own lead).
+    const [leadRes, apcRes, tlbRes, abRes] = await Promise.all([
+      supabase.from('profiles').select('id,email,full_name,avatar_url').eq('role', 'team_lead').order('full_name'),
+      supabase.from('profiles').select('id,email,full_name,team_lead_id,avatar_url').eq('role', 'apc').order('full_name'),
+      supabase.from('team_lead_brands').select('team_lead_id,brand_id'),
+      supabase.from('apc_brands').select('apc_id,brand_id'),
+    ]);
+    setLeads((leadRes.data as LeadLite[]) ?? []);
+    setApcs((apcRes.data as ApcLite[]) ?? []);
+    const leadOwn: Record<string, string> = {};
+    (tlbRes.data ?? []).forEach((r: any) => { leadOwn[r.brand_id] = r.team_lead_id; });
+    setBrandLeadOwner(leadOwn);
+    const apcOwn: Record<string, string> = {};
+    (abRes.data ?? []).forEach((r: any) => { apcOwn[r.brand_id] = r.apc_id; });
+    setBrandApcOwner(apcOwn);
     setLoading(false);
   };
 
@@ -152,13 +156,15 @@ export default function Brands() {
       if (statusFilter !== 'all' && b.client_status !== statusFilter) return false;
       if (clientFilter && b.client_id !== clientFilter) return false;
       if (scopeFilter && !b.scope.includes(scopeFilter)) return false;
+      if (leadFilter === 'none' && brandLeadOwner[b.id]) return false;
+      if (leadFilter && leadFilter !== 'none' && brandLeadOwner[b.id] !== leadFilter) return false;
       if (q) {
         const hay = `${b.name} ${b.client ?? ''} ${b.shop_code ?? ''} ${b.scope.join(' ')}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
-  }, [brands, search, statusFilter, clientFilter, scopeFilter]);
+  }, [brands, search, statusFilter, clientFilter, scopeFilter, leadFilter, brandLeadOwner]);
 
   const counts = useMemo(() => {
     const c: Record<ClientStatus, number> = { onboarding: 0, in_progress: 0, paused: 0, closed: 0 };
@@ -174,6 +180,13 @@ export default function Brands() {
     leads.forEach(l => { m[l.id] = l.full_name || l.email; });
     return m;
   }, [leads]);
+  // id → display name + photo for the owner chips on the brand cards.
+  const personById = useMemo(() => {
+    const m = new Map<string, { name: string; avatar: string | null }>();
+    leads.forEach(l => m.set(l.id, { name: l.full_name || l.email, avatar: l.avatar_url ?? null }));
+    apcs.forEach(a => m.set(a.id, { name: a.full_name || a.email, avatar: a.avatar_url ?? null }));
+    return m;
+  }, [leads, apcs]);
   // APCs on the currently-selected lead's team (control 2).
   const teamApcs = useMemo(
     () => (assignLeadId ? apcs.filter(a => a.team_lead_id === assignLeadId) : []),
@@ -384,10 +397,20 @@ export default function Brands() {
                   ))}
                 </Form.Select>
               </Col>
-              {(statusFilter !== 'all' || clientFilter || scopeFilter || search) && (
+              {leads.length > 0 && (
+                <Col md="auto">
+                  <Form.Select size="sm" value={leadFilter} aria-label="Filter by Team Lead"
+                    onChange={e => setLeadFilter(e.target.value)}>
+                    <option value="">All team leads</option>
+                    <option value="none">No team lead</option>
+                    {leads.map(l => <option key={l.id} value={l.id}>{l.full_name || l.email}</option>)}
+                  </Form.Select>
+                </Col>
+              )}
+              {(statusFilter !== 'all' || clientFilter || scopeFilter || leadFilter || search) && (
                 <Col md="auto">
                   <Button size="sm" variant="link" className="text-muted"
-                    onClick={() => { setSearch(''); setStatusFilter('all'); setClientFilter(''); setScopeFilter(''); }}>
+                    onClick={() => { setSearch(''); setStatusFilter('all'); setClientFilter(''); setScopeFilter(''); setLeadFilter(''); }}>
                     Clear filters
                   </Button>
                 </Col>
@@ -472,8 +495,33 @@ export default function Brands() {
                     </div>
                   )}
 
+                  {/* Who runs this brand: its Team Lead + APC (with photos). */}
+                  {(() => {
+                    const lead = brandLeadOwner[b.id] ? personById.get(brandLeadOwner[b.id]) : null;
+                    const apc = brandApcOwner[b.id] ? personById.get(brandApcOwner[b.id]) : null;
+                    if (!lead && !apc) return null;
+                    return (
+                      <div className="ac-brand-owners mt-auto pt-2">
+                        {lead && (
+                          <span className="ac-owner-chip" title={`Team Lead: ${lead.name}`}>
+                            <Avatar name={lead.name} src={lead.avatar} size="sm" variant="dark" />
+                            <span className="ac-owner-name">{lead.name}</span>
+                            <span className="ac-owner-role">TL</span>
+                          </span>
+                        )}
+                        {apc && (
+                          <span className="ac-owner-chip" title={`APC: ${apc.name}`}>
+                            <Avatar name={apc.name} src={apc.avatar} size="sm" />
+                            <span className="ac-owner-name">{apc.name}</span>
+                            <span className="ac-owner-role">APC</span>
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   {b.scope.length > 0 && (
-                    <div className="mt-auto pt-2 ac-chip-group">
+                    <div className={`${brandLeadOwner[b.id] || brandApcOwner[b.id] ? '' : 'mt-auto'} pt-2 ac-chip-group`}>
                       {b.scope.map(k => (
                         <span key={k} className="ac-chip">
                           <i className={`bi ${SCOPE_ICON[k] ?? 'bi-tag'}`} /> {SCOPE_LABEL[k] ?? k}

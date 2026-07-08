@@ -508,6 +508,22 @@ a:hover { color: var(--ac-primary-2); }
 }
 .ac-shop-code:hover { background: rgba(232,134,46,.10); border-color: rgba(232,134,46,.25); color: var(--ac-primary); }
 
+/* Brand-card owner chips: the Team Lead + APC the brand is assigned to */
+.ac-brand-owners { display: flex; flex-wrap: wrap; gap: 6px; }
+.ac-owner-chip {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  background: rgba(20,22,32,.04); border: 1px solid rgba(20,22,32,.10);
+  border-radius: var(--ac-radius-pill, 999px); padding: 3px 10px 3px 4px;
+}
+.ac-owner-name {
+  font-size: .78rem; font-weight: 600; color: var(--ac-text-dark);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 110px;
+}
+.ac-owner-role {
+  font-size: .6rem; font-weight: 800; letter-spacing: .5px;
+  color: var(--ac-text-muted); text-transform: uppercase;
+}
+
 /* Stat pill — small summary card at top of a list page */
 .ac-stat-pill {
   display: inline-flex; align-items: center; gap: 8px;
