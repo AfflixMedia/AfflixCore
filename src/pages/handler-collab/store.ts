@@ -368,6 +368,8 @@ export interface HandlerNote {
   reminder_at: string | null;
   reminder_done: boolean;
   reminder_sent_at: string | null;
+  // Super Boss only: Ads Managers can read (not edit) this note.
+  shared_with_ads: boolean;
   created_at: string;
   updated_at: string;
 }
