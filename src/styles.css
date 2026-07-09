@@ -2360,29 +2360,34 @@ input[type="number"] {
    + Products/Reports pill buttons, opening their popups. */
 .ac-brandbar-chat { display: flex; align-items: center; gap: 6px; flex: none; }
 .ac-brandbar-progress {
-  display: inline-flex; align-items: center; gap: 6px;
-  border: 1px solid var(--ac-line-l); background: #fff; padding: 4px 10px;
+  display: inline-flex; align-items: center; gap: 8px;
+  border: 1px solid var(--ac-line-l); background: #fff; padding: 4px 12px 4px 5px;
   border-radius: 999px; cursor: pointer; color: var(--ac-text-dark); font-size: .75rem;
 }
 .ac-brandbar-progress:hover { background: rgba(0,0,0,.05); }
-.ac-brandbar-label { font-weight: 600; flex: none; }
+.ac-brandbar-ring { flex: none; display: block; }
+.ac-brandbar-stat {
+  display: inline-flex; flex-direction: column; align-items: center;
+  gap: 1px; line-height: 1.1;
+}
+.ac-brandbar-mi { font-size: 1rem; line-height: 1; }
+.ac-brandbar-sub { font-size: .72rem; font-weight: 600; color: var(--ac-text-muted); white-space: nowrap; }
 .ac-brandbar-track-chat {
   width: 64px; height: 6px; border-radius: 999px;
   background: rgba(0,0,0,.08); overflow: hidden; flex: none;
 }
 .ac-brandbar-fill { height: 100%; border-radius: 999px; transition: width .3s ease; }
-.ac-brandbar-pct { flex: none; font-weight: 600; white-space: nowrap; font-size: .72rem; }
 .ac-brandbar-btn {
-  flex: none; display: inline-flex; align-items: center; gap: 6px;
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px;
   border: 1px solid var(--ac-line-l); background: #fff; color: var(--ac-text-dark);
-  font-size: .75rem; font-weight: 600; padding: 4px 10px; border-radius: 999px; cursor: pointer;
+  font-size: 1.05rem; border-radius: 50%; cursor: pointer;
 }
-.ac-brandbar-btn:hover { background: rgba(0,0,0,.05); }
-/* Narrow screens: keep the header on one line — icons + bar only. */
+.ac-brandbar-btn:hover { background: rgba(0,0,0,.05); color: var(--ac-primary); }
+/* Narrow screens: keep the header on one line — rings + icons only. */
 @media (max-width: 900px) {
-  .ac-brandbar-label, .ac-brandbar-pct, .ac-brandbar-btn span { display: none; }
-  .ac-brandbar-track-chat { width: 44px; }
-  .ac-brandbar-btn, .ac-brandbar-progress { padding: 4px 8px; }
+  .ac-brandbar-sub { display: none; }
+  .ac-brandbar-progress { padding: 4px 8px 4px 5px; }
 }
 
 .ac-mention-pop {

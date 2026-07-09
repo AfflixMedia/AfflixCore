@@ -20,20 +20,65 @@ import {
 const pctColor = (pct: number) =>
   pct >= 100 ? '#198754' : pct >= 75 ? '#e8862e' : pct >= 40 ? '#fd7e14' : '#dc3545';
 
+const fmtUsd = (v: number) =>
+  `$${Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+
 function monthBounds(yyyymm: string): { first: string; last: string } {
   const [y, m] = yyyymm.split('-').map(Number);
   return { first: `${yyyymm}-01`, last: toISO(new Date(y, m, 0)) };
 }
 
+// Footer action that closes the popup and navigates to the matching Brand
+// Detail tab (replaces the plain "Close" — the ✕ in the header still closes).
+function MoveToButton({ brandId, tab, label, onClose }: {
+  brandId: string; tab: string; label: string; onClose: () => void;
+}) {
+  const navigate = useNavigate();
+  return (
+    <Button
+      variant="primary"
+      onClick={() => { onClose(); navigate(`/brands/${brandId}?tab=${tab}`); }}
+    >
+      Move to {label} <i className="bi bi-arrow-right ms-1" />
+    </Button>
+  );
+}
+
+// Circular progress ring with the percentage in the centre.
+function CircularProgress({ pct, color, label, size = 40, stroke = 4 }: {
+  pct: number; color: string; label?: string; size?: number; stroke?: number;
+}) {
+  const r = (size - stroke) / 2;
+  const circ = 2 * Math.PI * r;
+  const dash = (Math.max(0, Math.min(100, pct)) / 100) * circ;
+  const mid = size / 2;
+  return (
+    <svg className="ac-brandbar-ring" width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
+      <circle cx={mid} cy={mid} r={r} fill="none" stroke="rgba(0,0,0,.1)" strokeWidth={stroke} />
+      <circle
+        cx={mid} cy={mid} r={r} fill="none" stroke={color} strokeWidth={stroke}
+        strokeLinecap="round" strokeDasharray={`${dash} ${circ}`}
+        transform={`rotate(-90 ${mid} ${mid})`}
+        style={{ transition: 'stroke-dasharray .4s ease' }}
+      />
+      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle"
+        style={{ fontSize: size * 0.3, fontWeight: 700, fill: color }}>
+        {label ?? pct}
+      </text>
+    </svg>
+  );
+}
+
 const approvedOf = (rows: Pick<DailyEntry, 'product_counts' | 'others_count'>[]) =>
   rows.reduce((s, d) => s + sumValues(d.product_counts ?? {}) + (d.others_count ?? 0), 0);
 
-type BarModal = 'samples' | 'products' | 'reports' | null;
+type BarModal = 'samples' | 'products' | 'reports' | 'gmv' | null;
 
 export default function BrandChatBar({ brandId, brandName }: { brandId: string; brandName: string }) {
   const { profile } = useAuth();
   const [modal, setModal] = useState<BarModal>(null);
   const [summary, setSummary] = useState<{ approved: number; goal: number } | null>(null);
+  const [gmv, setGmv] = useState<{ adSpend: number; budget: number } | null>(null);
 
   // Roles with RLS read access to brand_samples_* / brand_products / the report
   // tables + the /reporting routes. Internal handlers stay excluded (no such reads).
@@ -44,21 +89,35 @@ export default function BrandChatBar({ brandId, brandName }: { brandId: string; 
     if (!isStaff) return;
     let on = true;
     setSummary(null);
+    setGmv(null);
     (async () => {
       const month = currentMonth();
       const { first, last } = monthBounds(month);
-      const [gRes, dRes] = await Promise.all([
+      const [gRes, dRes, mRes, wRes] = await Promise.all([
         supabase.from('brand_samples_periods')
           .select('total_goal').eq('brand_id', brandId).eq('month', month).maybeSingle(),
         supabase.from('brand_samples_daily')
           .select('product_counts, others_count').eq('brand_id', brandId)
           .gte('entry_date', first).lte('entry_date', last),
+        supabase.from('brand_gmv_max_monthly')
+          .select('allocated_budget').eq('brand_id', brandId).eq('month', month).maybeSingle(),
+        // Weeks overlapping the current month (matches the GMV Max tab total).
+        supabase.from('brand_gmv_max_weekly')
+          .select('ad_spend').eq('brand_id', brandId)
+          .lte('week_start', last).gte('week_end', first),
       ]);
-      if (!on || gRes.error || dRes.error) return;
-      setSummary({
-        approved: approvedOf((dRes.data ?? []) as DailyEntry[]),
-        goal: (gRes.data as any)?.total_goal ?? 0,
-      });
+      if (!on) return;
+      if (!gRes.error && !dRes.error) {
+        setSummary({
+          approved: approvedOf((dRes.data ?? []) as DailyEntry[]),
+          goal: (gRes.data as any)?.total_goal ?? 0,
+        });
+      }
+      if (!mRes.error && !wRes.error) {
+        const adSpend = ((wRes.data ?? []) as { ad_spend: number }[])
+          .reduce((s, w) => s + (Number(w.ad_spend) || 0), 0);
+        setGmv({ adSpend, budget: (mRes.data as any)?.allocated_budget ?? 0 });
+      }
     })();
     return () => { on = false; };
   }, [brandId, isStaff]);
@@ -70,6 +129,11 @@ export default function BrandChatBar({ brandId, brandName }: { brandId: string; 
     : 0;
   const color = pctColor(pct);
 
+  const adColor = '#0d6efd';
+  const budgetPct = gmv && gmv.budget > 0
+    ? Math.min(100, Math.round((gmv.adSpend / gmv.budget) * 100))
+    : 0;
+
   return (
     <>
       <div className="ac-brandbar-chat">
@@ -79,22 +143,33 @@ export default function BrandChatBar({ brandId, brandName }: { brandId: string; 
           title="Sample seeding this month — click for details"
           onClick={() => setModal('samples')}
         >
-          <i className="bi bi-box-seam" style={{ color }} />
-          <span className="ac-brandbar-label">Samples</span>
-          <div className="ac-brandbar-track-chat">
-            <div className="ac-brandbar-fill" style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${color} 0%, ${color}cc 100%)` }} />
-          </div>
-          <span className="ac-brandbar-pct" style={{ color }}>
-            {summary
-              ? (summary.goal > 0 ? `${summary.approved}/${summary.goal} · ${pct}%` : `${summary.approved} approved`)
-              : '…'}
+          <CircularProgress pct={pct} color={color} />
+          <span className="ac-brandbar-stat">
+            <i className="bi bi-box-seam ac-brandbar-mi" style={{ color }} />
+            <span className="ac-brandbar-sub">
+              {summary
+                ? (summary.goal > 0 ? `${summary.approved}/${summary.goal}` : `${summary.approved} approved`)
+                : '…'}
+            </span>
+          </span>
+        </button>
+        <button
+          type="button"
+          className="ac-brandbar-progress"
+          title="GMV Max ad spend this month — click for details"
+          onClick={() => setModal('gmv')}
+        >
+          <CircularProgress pct={budgetPct} color={adColor} label={gmv && gmv.budget > 0 ? undefined : '$'} />
+          <span className="ac-brandbar-stat">
+            <i className="bi bi-cash-coin ac-brandbar-mi" style={{ color: adColor }} />
+            <span className="ac-brandbar-sub">{gmv ? fmtUsd(gmv.adSpend) : '…'}</span>
           </span>
         </button>
         <button type="button" className="ac-brandbar-btn" title="Products" onClick={() => setModal('products')}>
-          <i className="bi bi-tags" /><span>Products</span>
+          <i className="bi bi-tags" />
         </button>
         <button type="button" className="ac-brandbar-btn" title="Reports" onClick={() => setModal('reports')}>
-          <i className="bi bi-file-earmark-bar-graph" /><span>Reports</span>
+          <i className="bi bi-file-earmark-bar-graph" />
         </button>
       </div>
 
@@ -106,6 +181,9 @@ export default function BrandChatBar({ brandId, brandName }: { brandId: string; 
       )}
       {modal === 'reports' && (
         <ReportsModal brandId={brandId} brandName={brandName} onClose={() => setModal(null)} />
+      )}
+      {modal === 'gmv' && (
+        <GmvModal brandId={brandId} brandName={brandName} onClose={() => setModal(null)} />
       )}
     </>
   );
@@ -278,7 +356,7 @@ function SamplesModal({ brandId, brandName, onClose }: { brandId: string; brandN
         )}
       </Modal.Body>
       <Modal.Footer>
-        <Button variant="secondary" onClick={onClose}>Close</Button>
+        <MoveToButton brandId={brandId} tab="samples" label="Sample Seeding" onClose={onClose} />
       </Modal.Footer>
     </Modal>
   );
@@ -359,7 +437,160 @@ function ProductsModal({ brandId, brandName, onClose }: { brandId: string; brand
         )}
       </Modal.Body>
       <Modal.Footer>
-        <Button variant="secondary" onClick={onClose}>Close</Button>
+        <MoveToButton brandId={brandId} tab="products" label="Products" onClose={onClose} />
+      </Modal.Footer>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// GMV Max popup — read-only view of the brand's GMV Max ad spend for the
+// latest 3 months: budget + spend + GMV + ROI KPIs and a weekly breakdown.
+// ---------------------------------------------------------------------------
+
+interface GmvWeek {
+  week_start: string; week_end: string;
+  ad_spend: number; roi: number; orders: number; gmv: number;
+}
+
+function GmvModal({ brandId, brandName, onClose }: { brandId: string; brandName: string; onClose: () => void }) {
+  const [month, setMonth] = useState(currentMonth());
+  const [budget, setBudget] = useState(0);
+  const [weeks, setWeeks] = useState<GmvWeek[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let on = true;
+    setLoading(true); setErr(null);
+    (async () => {
+      const { first, last } = monthBounds(month);
+      const [mRes, wRes] = await Promise.all([
+        supabase.from('brand_gmv_max_monthly')
+          .select('allocated_budget').eq('brand_id', brandId).eq('month', month).maybeSingle(),
+        supabase.from('brand_gmv_max_weekly')
+          .select('week_start, week_end, ad_spend, roi, orders, gmv').eq('brand_id', brandId)
+          .lte('week_start', last).gte('week_end', first).order('week_start', { ascending: true }),
+      ]);
+      if (!on) return;
+      const bad = mRes.error ?? wRes.error;
+      if (bad) { setErr(bad.message); setLoading(false); return; }
+      setBudget((mRes.data as any)?.allocated_budget ?? 0);
+      setWeeks((wRes.data ?? []) as GmvWeek[]);
+      setLoading(false);
+    })();
+    return () => { on = false; };
+  }, [brandId, month]);
+
+  const totalSpend = useMemo(() => weeks.reduce((s, w) => s + (Number(w.ad_spend) || 0), 0), [weeks]);
+  const totalGmv = useMemo(() => weeks.reduce((s, w) => s + (Number(w.gmv) || 0), 0), [weeks]);
+  const totalOrders = useMemo(() => weeks.reduce((s, w) => s + (Number(w.orders) || 0), 0), [weeks]);
+  const roi = totalSpend > 0 ? totalGmv / totalSpend : 0;
+  const budgetPct = budget > 0 ? Math.min(100, Math.round((totalSpend / budget) * 100)) : 0;
+
+  return (
+    <Modal show onHide={onClose} centered size="lg" scrollable>
+      <Modal.Header closeButton>
+        <Modal.Title>
+          <i className="bi bi-cash-coin me-2" />
+          GMV Max — {brandName}
+        </Modal.Title>
+      </Modal.Header>
+      <Modal.Body>
+        <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+          <div className="btn-group" role="group" aria-label="Choose month">
+            {recentMonths(3).map(m => (
+              <Button
+                key={m}
+                size="sm"
+                variant={m === month ? 'primary' : 'outline-secondary'}
+                onClick={() => setMonth(m)}
+              >
+                {new Date(Number(m.split('-')[0]), Number(m.split('-')[1]) - 1, 1)
+                  .toLocaleString('en-US', { month: 'short', year: '2-digit' })}
+              </Button>
+            ))}
+          </div>
+          <div className="text-muted small">{monthLabel(month)}</div>
+        </div>
+
+        {loading ? (
+          <div className="text-center py-5"><Spinner animation="border" /></div>
+        ) : err ? (
+          <Alert variant="danger">{err}</Alert>
+        ) : (
+          <>
+            <Row className="g-2">
+              <Col xs={6} md={3}>
+                <MiniKpi icon="bi-wallet2" color="#6610f2" label="Budget" value={budget > 0 ? fmtUsd(budget) : '—'} />
+              </Col>
+              <Col xs={6} md={3}>
+                <MiniKpi icon="bi-cash-coin" color="#0d6efd" label="Ad Spend" value={fmtUsd(totalSpend)} />
+              </Col>
+              <Col xs={6} md={3}>
+                <MiniKpi icon="bi-graph-up-arrow" color="#198754" label="GMV" value={fmtUsd(totalGmv)} />
+              </Col>
+              <Col xs={6} md={3}>
+                <MiniKpi icon="bi-bullseye" color="#e8862e" label="ROI" value={`${roi.toFixed(2)}x`} />
+              </Col>
+            </Row>
+
+            {budget > 0 && (
+              <div className="mt-3">
+                <div className="d-flex justify-content-between small text-muted mb-1">
+                  <span>Budget used</span>
+                  <span>{fmtUsd(totalSpend)} / {fmtUsd(budget)} · {budgetPct}%</span>
+                </div>
+                <div className="ac-brandbar-track-chat" style={{ width: '100%', height: 8 }}>
+                  <div className="ac-brandbar-fill" style={{
+                    width: `${budgetPct}%`,
+                    background: `linear-gradient(90deg, ${pctColor(budgetPct)} 0%, ${pctColor(budgetPct)}cc 100%)`,
+                  }} />
+                </div>
+              </div>
+            )}
+
+            <div className="fw-semibold mt-4 mb-2">Weekly breakdown</div>
+            {weeks.length === 0 ? (
+              <p className="text-muted text-center py-3 mb-0">No GMV Max weeks for {monthLabel(month)}.</p>
+            ) : (
+              <Table size="sm" responsive className="align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Week</th>
+                    <th className="text-end">Ad Spend</th>
+                    <th className="text-end">GMV</th>
+                    <th className="text-end">ROI</th>
+                    <th className="text-end">Orders</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {weeks.map((w, i) => (
+                    <tr key={i}>
+                      <td className="fw-semibold">{shortDate(w.week_start)} – {shortDate(w.week_end)}</td>
+                      <td className="text-end">{fmtUsd(w.ad_spend)}</td>
+                      <td className="text-end">{fmtUsd(w.gmv)}</td>
+                      <td className="text-end">{(Number(w.roi) || 0).toFixed(2)}x</td>
+                      <td className="text-end">{Number(w.orders) || 0}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="fw-semibold border-top">
+                    <td>Total</td>
+                    <td className="text-end">{fmtUsd(totalSpend)}</td>
+                    <td className="text-end">{fmtUsd(totalGmv)}</td>
+                    <td className="text-end">{roi.toFixed(2)}x</td>
+                    <td className="text-end">{totalOrders}</td>
+                  </tr>
+                </tfoot>
+              </Table>
+            )}
+          </>
+        )}
+      </Modal.Body>
+      <Modal.Footer>
+        <MoveToButton brandId={brandId} tab="gmv-max" label="GMV Max" onClose={onClose} />
       </Modal.Footer>
     </Modal>
   );
@@ -489,7 +720,7 @@ function ReportsModal({ brandId, brandName, onClose }: { brandId: string; brandN
         )}
       </Modal.Body>
       <Modal.Footer>
-        <Button variant="secondary" onClick={onClose}>Close</Button>
+        <MoveToButton brandId={brandId} tab="reporting" label="Reporting" onClose={onClose} />
       </Modal.Footer>
     </Modal>
   );
