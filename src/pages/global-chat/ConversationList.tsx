@@ -76,7 +76,7 @@ export default function ConversationList({ views, activeId, myId, brandLeadByBra
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
     const leadSel = filter.startsWith('lead:') ? filter.slice(5) : null;
-    return views.filter(v => {
+    let list = views.filter(v => {
       // Archived chats live only under the Archive tab; every other tab hides them.
       if (filter === 'archived' ? !v.archived : v.archived) return false;
       if (filter === 'unread' && v.unread === 0) return false;
@@ -91,6 +91,10 @@ export default function ConversationList({ views, activeId, myId, brandLeadByBra
       if (needle && !`${v.title} ${v.lastBody ?? ''}`.toLowerCase().includes(needle)) return false;
       return true;
     });
+    // Lead filters show only brand chats — order them alphabetically (the
+    // recency ordering stays on the other tabs).
+    if (leadSel !== null) list = [...list].sort((a, b) => a.title.localeCompare(b.title));
+    return list;
   }, [views, filter, q, brandLeadByBrand]);
 
   return (

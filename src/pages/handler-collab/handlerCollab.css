@@ -1157,9 +1157,9 @@ a.pc-vx-prod:hover{ text-decoration:none; filter:brightness(.97); }
 .pc-notesfab:active{ transform:scale(.93); }
 .pc-notesfab-badge{ position:absolute; top:-2px; right:-2px; min-width:20px; height:20px; padding:0 5px; border-radius:999px; background:var(--pc-warn-fg); color:#fff; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center; border:2px solid var(--pc-bg); }
 @media (max-width:768px){ .pc-notesfab{ right:16px; bottom:84px; width:50px; height:50px; font-size:20px; } }
-/* floating brand-chat button (Brand Detail) — green, stacks above the notes fab */
-.pc-notesfab.pc-chatfab{ background:#16a34a; box-shadow:0 8px 28px rgba(22,163,74,.36); }
-.pc-notesfab.pc-chatfab:hover{ box-shadow:0 12px 34px rgba(22,163,74,.46); }
+/* floating brand-chat button (Brand Detail) — primary, stacks above the notes fab */
+.pc-notesfab.pc-chatfab{ background:var(--ac-primary, #e8862e); box-shadow:0 8px 28px rgba(232,134,46,.36); }
+.pc-notesfab.pc-chatfab:hover{ box-shadow:0 12px 34px rgba(232,134,46,.46); }
 .pc-notesfab.pc-fab-up{ bottom:92px; }
 @media (max-width:768px){ .pc-notesfab.pc-fab-up{ bottom:150px; } }
 

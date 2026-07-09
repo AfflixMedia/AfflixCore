@@ -44,14 +44,16 @@ function MoveToButton({ brandId, tab, label, onClose }: {
   );
 }
 
-// Circular progress ring with the percentage in the centre.
-function CircularProgress({ pct, color, label, size = 40, stroke = 4 }: {
+// Circular progress ring with the percentage in the centre (e.g. "82%").
+// Sized to line up with the 38px header icon buttons.
+function CircularProgress({ pct, color, label, size = 36, stroke = 3.5 }: {
   pct: number; color: string; label?: string; size?: number; stroke?: number;
 }) {
   const r = (size - stroke) / 2;
   const circ = 2 * Math.PI * r;
   const dash = (Math.max(0, Math.min(100, pct)) / 100) * circ;
   const mid = size / 2;
+  const text = label ?? `${pct}%`;
   return (
     <svg className="ac-brandbar-ring" width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
       <circle cx={mid} cy={mid} r={r} fill="none" stroke="rgba(0,0,0,.1)" strokeWidth={stroke} />
@@ -62,8 +64,8 @@ function CircularProgress({ pct, color, label, size = 40, stroke = 4 }: {
         style={{ transition: 'stroke-dasharray .4s ease' }}
       />
       <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle"
-        style={{ fontSize: size * 0.3, fontWeight: 700, fill: color }}>
-        {label ?? pct}
+        style={{ fontSize: size * (text.length > 3 ? 0.26 : 0.3), fontWeight: 700, fill: color }}>
+        {text}
       </text>
     </svg>
   );
