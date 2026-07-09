@@ -2084,7 +2084,7 @@ input[type="number"] {
 .ac-chat-list-head { padding: 14px 14px 8px; border-bottom: 1px solid var(--ac-line-l); }
 .ac-chat-filters { display: flex; gap: 6px; align-items: baseline; min-width: 0; flex-wrap: wrap; }
 .ac-chat-filters-strip {
-  display: flex; gap: 6px; flex: 1; min-width: 0; flex-wrap: wrap;
+  display: flex; gap: 6px; flex: 1; min-width: 0; overflow-x: auto; padding-bottom: 2px;
   scrollbar-width: none; -ms-overflow-style: none;   /* hide the scrollbar */
 }
 .ac-chat-filters-strip::-webkit-scrollbar { display: none; }
@@ -2378,12 +2378,29 @@ input[type="number"] {
 }
 .ac-brandbar-fill { height: 100%; border-radius: 999px; transition: width .3s ease; }
 .ac-brandbar-btn {
+  position: relative;
   flex: none; display: inline-flex; align-items: center; justify-content: center;
   width: 40px; height: 40px;
   border: 1px solid var(--ac-line-l); background: #fff; color: var(--ac-text-dark);
   font-size: 1.05rem; border-radius: 50%; cursor: pointer;
 }
 .ac-brandbar-btn:hover { background: rgba(0,0,0,.05); color: var(--ac-primary); }
+.ac-brandbar-dot {
+  position: absolute; top: 3px; right: 3px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #dc3545; border: 2px solid #fff;
+}
+/* Brand chat Tasks popup */
+.ac-bt-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 12px; margin-bottom: 8px;
+  border: 1px solid var(--ac-line-l); border-radius: 10px; background: #fff;
+}
+.ac-bt-status {
+  flex: none; appearance: none; border: none; border-radius: 999px;
+  font-size: .72rem; font-weight: 700; padding: 5px 11px; white-space: nowrap;
+}
+.ac-bt-status:disabled { opacity: 1; }
 /* Narrow screens: keep the header on one line — rings + icons only. */
 @media (max-width: 900px) {
   .ac-brandbar-sub { display: none; }
@@ -2797,9 +2814,10 @@ input[type="number"] {
   background: rgba(100,116,139,.12); color: #475569;
 }
 .ac-status-pill.sm { font-size: .68rem; padding: 1px 8px; }
-.ac-status-pill.todo  { background: rgba(100,116,139,.12); color: #475569; }
-.ac-status-pill.doing { background: rgba(59,130,246,.14); color: #2563eb; }
-.ac-status-pill.done  { background: rgba(16,185,129,.14); color: #059669; }
+.ac-status-pill.todo   { background: rgba(100,116,139,.12); color: #475569; }
+.ac-status-pill.doing  { background: rgba(59,130,246,.14); color: #2563eb; }
+.ac-status-pill.review { background: rgba(139,92,246,.14); color: #7c3aed; }
+.ac-status-pill.done   { background: rgba(16,185,129,.14); color: #059669; }
 
 /* One-click status control: the three states sit in a pill track — the current
    one shows its label, the others are icon-only. A single click sets the state. */
@@ -2815,13 +2833,15 @@ input[type="number"] {
   transition: background .15s ease, color .15s ease, box-shadow .15s ease;
 }
 .ac-status-click-opt:hover { background: #fff; box-shadow: 0 1px 4px rgba(20,22,32,.12); }
-.ac-status-click-opt.todo:hover  { color: #475569; }
-.ac-status-click-opt.doing:hover { color: #2563eb; }
-.ac-status-click-opt.done:hover  { color: #059669; }
+.ac-status-click-opt.todo:hover   { color: #475569; }
+.ac-status-click-opt.doing:hover  { color: #2563eb; }
+.ac-status-click-opt.review:hover { color: #7c3aed; }
+.ac-status-click-opt.done:hover   { color: #059669; }
 .ac-status-click-opt.on { background: #fff; box-shadow: 0 1px 4px rgba(20,22,32,.14); cursor: default; }
-.ac-status-click-opt.todo.on  { color: #475569; }
-.ac-status-click-opt.doing.on { color: #2563eb; }
-.ac-status-click-opt.done.on  { color: #059669; }
+.ac-status-click-opt.todo.on   { color: #475569; }
+.ac-status-click-opt.doing.on  { color: #2563eb; }
+.ac-status-click-opt.review.on { color: #7c3aed; }
+.ac-status-click-opt.done.on   { color: #059669; }
 .ac-status-click.sm .ac-status-click-opt { padding: 2px 7px; font-size: .68rem; }
 
 /* Segmented status control (task detail footer) */
@@ -2834,9 +2854,10 @@ input[type="number"] {
   transition: border-color .12s ease, background .12s ease, color .12s ease;
 }
 .ac-status-seg-opt:hover { border-color: var(--ac-text-muted); }
-.ac-status-seg-opt.todo.on  { background: rgba(100,116,139,.14); border-color: #64748b; color: #475569; }
-.ac-status-seg-opt.doing.on { background: rgba(59,130,246,.12); border-color: #3b82f6; color: #2563eb; }
-.ac-status-seg-opt.done.on  { background: rgba(16,185,129,.12); border-color: #10b981; color: #059669; }
+.ac-status-seg-opt.todo.on   { background: rgba(100,116,139,.14); border-color: #64748b; color: #475569; }
+.ac-status-seg-opt.doing.on  { background: rgba(59,130,246,.12); border-color: #3b82f6; color: #2563eb; }
+.ac-status-seg-opt.review.on { background: rgba(139,92,246,.12); border-color: #8b5cf6; color: #7c3aed; }
+.ac-status-seg-opt.done.on   { background: rgba(16,185,129,.12); border-color: #10b981; color: #059669; }
 
 /* Status filter row (top of task list, all users) */
 .ac-status-filter { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
@@ -2854,10 +2875,25 @@ input[type="number"] {
 }
 .ac-status-filter-opt.on { color: #fff; border-color: transparent; }
 .ac-status-filter-opt.on .ac-status-filter-n { background: rgba(255,255,255,.28); color: #fff; }
-.ac-status-filter-opt.on:not(.todo):not(.doing):not(.done) { background: var(--ac-primary); } /* All */
-.ac-status-filter-opt.todo.on  { background: #64748b; }
-.ac-status-filter-opt.doing.on { background: #3b82f6; }
-.ac-status-filter-opt.done.on  { background: #10b981; }
+.ac-status-filter-opt.on:not(.todo):not(.doing):not(.review):not(.done) { background: var(--ac-primary); } /* All */
+.ac-status-filter-opt.todo.on   { background: #64748b; }
+.ac-status-filter-opt.doing.on  { background: #3b82f6; }
+.ac-status-filter-opt.review.on { background: #8b5cf6; }
+.ac-status-filter-opt.done.on   { background: #10b981; }
+
+/* Review decision buttons (assigner, on an in-review task) */
+.ac-review-actions { display: inline-flex; gap: 6px; }
+.ac-review-btn {
+  appearance: none; display: inline-flex; align-items: center; gap: 4px;
+  border: 1px solid; background: #fff; border-radius: var(--ac-radius-pill);
+  font-size: .72rem; font-weight: 700; padding: 3px 10px; cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+}
+.ac-review-btn.accept { border-color: #10b981; color: #059669; }
+.ac-review-btn.accept:hover { background: #10b981; color: #fff; }
+.ac-review-btn.reject { border-color: #ef4444; color: #dc2626; }
+.ac-review-btn.reject:hover { background: #ef4444; color: #fff; }
+.ac-review-actions.sm .ac-review-btn { font-size: .66rem; padding: 2px 8px; }
 
 /* Tasks toolbar: view tabs (whose tasks) left, status filter right */
 .ac-tasks-toolbar {

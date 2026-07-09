@@ -7,7 +7,7 @@ import Avatar from '../components/Avatar';
 
 type Priority = 'low' | 'mid' | 'high';
 type Repeat = 'none' | 'daily' | 'weekly' | 'monthly' | 'every_n_days';
-type Status = 'open' | 'in_progress' | 'done';
+type Status = 'open' | 'in_progress' | 'in_review' | 'done';
 // Whose tasks the list shows: everything I can see / assigned TO me / assigned BY me.
 type ViewFilter = 'all' | 'mine' | 'byme';
 
@@ -28,6 +28,7 @@ interface Task {
   group_id: string | null;
   seen_at: string | null;
   recurrence_id: string | null;
+  review_note: string | null;
 }
 // One firing of a recurrence (history record).
 interface RecurrenceRun {
@@ -78,10 +79,10 @@ const PRIORITIES: { value: Priority; label: string }[] = [
   { value: 'mid', label: 'Medium' },
   { value: 'high', label: 'High' },
 ];
-const STATUS_ORDER: Status[] = ['open', 'in_progress', 'done'];
 const STATUS_META: Record<Status, { label: string; icon: string; cls: string }> = {
   open:        { label: 'Not started', icon: 'bi-circle', cls: 'todo' },
   in_progress: { label: 'In progress', icon: 'bi-hourglass-split', cls: 'doing' },
+  in_review:   { label: 'In review', icon: 'bi-send-check', cls: 'review' },
   done:        { label: 'Completed', icon: 'bi-check2-circle', cls: 'done' },
 };
 const ORG_COLORS = ['#ef4444', '#f59e0b', '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#64748b'];
@@ -100,6 +101,7 @@ export default function Tasks() {
   const isAdsManager = profile?.role === 'ads_manager';
   const isApc = profile?.role === 'apc' || isAdsManager;
   const isBob = profile?.role === 'bob';
+  const isSuperBob = isBob && !!profile?.is_superbob;
   // Internal handlers assign to the APCs of their brands, and upward to their
   // brands' Team Lead(s) + any Bob (external handlers never reach /tasks).
   const isInternalHandler = profile?.role === 'paid_collab_handler' && !!profile?.is_internal_handler;
@@ -373,6 +375,7 @@ export default function Tasks() {
     all: scopedTasks.length,
     open: scopedTasks.filter(t => t.status === 'open').length,
     in_progress: scopedTasks.filter(t => t.status === 'in_progress').length,
+    in_review: scopedTasks.filter(t => t.status === 'in_review').length,
     done: scopedTasks.filter(t => t.status === 'done').length,
   }), [scopedTasks]);
 
@@ -580,13 +583,44 @@ export default function Tasks() {
     }
   };
 
-  // Move a task between the three states. completed_at only set when completed.
+  // Move a task between states. completed_at only set when completed.
   const setStatus = async (t: Task, status: Status) => {
     if (t.status === status) return;
     const prev = tasks;
     const completed_at = status === 'done' ? new Date().toISOString() : null;
     setTasks(tasks.map(x => x.id === t.id ? { ...x, status, completed_at } : x));
     const { error } = await supabase.from('tasks').update({ status, completed_at }).eq('id', t.id);
+    if (error) { setTasks(prev); alert(error.message); }
+  };
+
+  // Statuses the current viewer can set on a task. Tasks assigned by someone
+  // else end at "Submit for review" — only the assigner completes them. Two
+  // exceptions: a BOB assignee completes directly (no upward review for the
+  // boss), and the SUPER BOSS has the full set on any task. Self-created /
+  // creator-less tasks keep the direct done option.
+  const statusOptionsFor = (t: Task): Status[] => {
+    if (isSuperBob) return ['open', 'in_progress', 'in_review', 'done'];
+    if (isBob) return ['open', 'in_progress', 'done'];
+    return t.created_by && t.created_by !== t.assignee_id
+      ? ['open', 'in_progress', 'in_review']
+      : ['open', 'in_progress', 'done'];
+  };
+
+  // Assigner's decision on an in-review task: Accept → done, Reject → back to
+  // in progress (optional note stored on the task + sent in the notification).
+  const decideReview = async (t: Task, accept: boolean) => {
+    let review_note: string | null = null;
+    if (!accept) {
+      const note = prompt('Optional note for the assignee (why is it going back?):');
+      if (note === null) return;                 // cancelled the reject
+      review_note = note.trim() || null;
+    }
+    const status: Status = accept ? 'done' : 'in_progress';
+    const completed_at = accept ? new Date().toISOString() : null;
+    const prev = tasks;
+    setTasks(tasks.map(x => x.id === t.id ? { ...x, status, completed_at, review_note } : x));
+    const { error } = await supabase.from('tasks')
+      .update({ status, completed_at, review_note }).eq('id', t.id);
     if (error) { setTasks(prev); alert(error.message); }
   };
 
@@ -722,13 +756,14 @@ export default function Tasks() {
     return (
       <div className={`ac-status-click ${size === 'sm' ? 'sm' : ''}`} role="group"
         aria-label="Set task status" onClick={e => e.stopPropagation()}>
-        {STATUS_ORDER.map(s => {
+        {statusOptionsFor(t).map(s => {
           const sm = STATUS_META[s];
           const on = t.status === s;
+          const title = s === 'in_review' && !on ? 'Submit for review' : sm.label;
           return (
             <button type="button" key={s}
               className={`ac-status-click-opt ${sm.cls} ${on ? 'on' : ''}`}
-              aria-pressed={on} title={sm.label} aria-label={sm.label}
+              aria-pressed={on} title={title} aria-label={title}
               onClick={() => setStatus(t, s)}>
               <i className={`bi ${sm.icon}`} />
               {on && <span className="ac-status-click-lbl">{sm.label}</span>}
@@ -739,12 +774,28 @@ export default function Tasks() {
     );
   };
 
+  // Accept / Reject controls the ASSIGNER (creator, or Bob) sees on a task
+  // that was submitted for review.
+  const ReviewActions = ({ t, size }: { t: Task; size?: 'sm' }) => (
+    <div className={`ac-review-actions ${size === 'sm' ? 'sm' : ''}`} onClick={e => e.stopPropagation()}>
+      <button type="button" className="ac-review-btn accept" title="Accept — mark completed"
+        onClick={() => decideReview(t, true)}>
+        <i className="bi bi-check-lg" />Accept
+      </button>
+      <button type="button" className="ac-review-btn reject" title="Send back to the assignee"
+        onClick={() => decideReview(t, false)}>
+        <i className="bi bi-arrow-counterclockwise" />Reject
+      </button>
+    </div>
+  );
+  const canReview = (t: Task) => t.status === 'in_review' && (t.created_by === myId || isBob);
+
   const TaskCard = ({ t }: { t: Task }) => {
     const overdue = t.status !== 'done' && t.due_date && t.due_date < new Date().toISOString().slice(0, 10);
     // Status belongs to the person the task is assigned to — the assigner
-    // (even Bob) only reads it. Nudging happens via Remind, not by flipping
-    // someone else's status.
-    const canSetStatus = t.assignee_id === myId;
+    // (even a regular Bob) only reads it; nudging happens via Remind. The
+    // Super Boss is the exception: full status control over any task.
+    const canSetStatus = t.assignee_id === myId || isSuperBob;
     const canDelete = t.created_by === myId || isBob;
     const canEditTask = canCreate && (t.created_by === myId || isBob);
     const canRemind = !isApc && (t.created_by === myId || isBob);
@@ -765,6 +816,11 @@ export default function Tasks() {
             {t.recurrence_id && <i className="bi bi-arrow-repeat ac-recur-mark" title="Created by a recurring schedule" />}
             <span className={`ac-prio-pill prio-${t.priority}`}>{t.priority}</span>
             {overdue && <Badge bg="danger">Overdue</Badge>}
+            {t.review_note && t.status !== 'done' && t.status !== 'in_review' && (
+              <Badge bg="warning" text="dark" title={t.review_note}>
+                <i className="bi bi-arrow-counterclockwise me-1" />Sent back
+              </Badge>
+            )}
           </div>
           {t.description && <div className="ac-row-sub ac-clamp1">{t.description}</div>}
           <div className="ac-row-sub d-flex align-items-center flex-wrap gap-2 mt-1">
@@ -783,6 +839,7 @@ export default function Tasks() {
         </div>
         <div className="ac-task-side">
           <StatusControl t={t} canUpdate={canSetStatus} />
+          {canReview(t) && <ReviewActions t={t} />}
           <div className="ac-row-actions">
             {canRemind && t.status !== 'done' && (
               <button className={`ac-icon-btn remind ${reminded.has(t.id) ? 'sent' : ''}`}
@@ -876,8 +933,9 @@ export default function Tasks() {
                   <div key={t.id} className="ac-group-person">
                     <Avatar name={personName(t.assignee_id)} src={personAvatar(t.assignee_id)} size="sm" />
                     <span className="ac-group-person-name">{personName(t.assignee_id)}{seenTick(t)}</span>
-                    {/* Each member's status is theirs alone — assigners only read it. */}
-                    <StatusControl t={t} canUpdate={t.assignee_id === myId} size="sm" />
+                    {/* Each member's status is theirs alone — assigners only read it (Super Boss excepted). */}
+                    <StatusControl t={t} canUpdate={t.assignee_id === myId || isSuperBob} size="sm" />
+                    {canReview(t) && <ReviewActions t={t} size="sm" />}
                     {overdue && <span className="ac-group-status over"><i className="bi bi-exclamation-triangle me-1" />Overdue</span>}
                     {ackChip(t.id)}
                     <div className="ac-group-person-actions">
@@ -1121,7 +1179,7 @@ export default function Tasks() {
                 className={`ac-tasks-tab ${mainTab === 'active' ? 'on' : ''}`}
                 onClick={() => setMainTab('active')}>
                 <i className="bi bi-lightning-charge-fill" />Active
-                <span className="ac-tasks-tab-n">{statusCounts.open + statusCounts.in_progress}</span>
+                <span className="ac-tasks-tab-n">{statusCounts.open + statusCounts.in_progress + statusCounts.in_review}</span>
               </button>
               <button type="button" role="tab" aria-selected={mainTab === 'completed'}
                 className={`ac-tasks-tab done ${mainTab === 'completed' ? 'on' : ''}`}
@@ -1155,9 +1213,9 @@ export default function Tasks() {
               {mainTab === 'active' && (
                 <div className="ac-status-filter" role="group" aria-label="Filter by status">
                   <button className={`ac-status-filter-opt ${statusFilter === 'all' ? 'on' : ''}`} onClick={() => setStatusFilter('all')}>
-                    All <span className="ac-status-filter-n">{statusCounts.open + statusCounts.in_progress}</span>
+                    All <span className="ac-status-filter-n">{statusCounts.open + statusCounts.in_progress + statusCounts.in_review}</span>
                   </button>
-                  {(['open', 'in_progress'] as Status[]).map(s => (
+                  {(['open', 'in_progress', 'in_review'] as Status[]).map(s => (
                     <button key={s}
                       className={`ac-status-filter-opt ${STATUS_META[s].cls} ${statusFilter === s ? 'on' : ''}`}
                       onClick={() => setStatusFilter(s)}>
@@ -1468,8 +1526,9 @@ export default function Tasks() {
           const today = new Date().toISOString().slice(0, 10);
           const overdue = t.status !== 'done' && t.due_date && t.due_date < today;
           const sm = STATUS_META[t.status];
-          // Only the assignee moves the status; assigners (incl. Bob) just read it.
-          const canSetStatus = t.assignee_id === myId;
+          // Only the assignee moves the status; assigners just read it —
+          // except the Super Boss, who has full status control.
+          const canSetStatus = t.assignee_id === myId || isSuperBob;
           const canDelete = t.created_by === myId || isBob;
           const canEditTask = canCreate && (t.created_by === myId || isBob);
           const canRemind = !isApc && (t.created_by === myId || isBob);
@@ -1508,6 +1567,9 @@ export default function Tasks() {
                     </div>
                   )}
                   {t.created_by && <div><span className="lbl">Assigned by</span><span className="val">{personName(t.created_by)}</span></div>}
+                  {t.review_note && t.status !== 'done' && (
+                    <div><span className="lbl">Review note</span><span className="val"><i className="bi bi-chat-left-text me-1" />{t.review_note}</span></div>
+                  )}
                   {t.brand_id && <div><span className="lbl">Brand</span><span className="val"><i className="bi bi-shop me-1" />{brandMap.get(t.brand_id) ?? 'Brand'}</span></div>}
                   {t.due_date && <div><span className="lbl">Due</span><span className="val"><i className="bi bi-calendar-event me-1" />{new Date(t.due_date).toLocaleDateString()}</span></div>}
                   {folder && <div><span className="lbl">Folder</span><span className="val"><i className="bi bi-folder me-1" style={{ color: folder.color ?? undefined }} />{folder.name}</span></div>}
@@ -1541,16 +1603,18 @@ export default function Tasks() {
                 <div className="d-flex align-items-center gap-2 flex-wrap">
                   {canSetStatus && (
                     <div className="ac-status-seg" role="group" aria-label="Task status">
-                      {STATUS_ORDER.map(s => (
+                      {statusOptionsFor(t).map(s => (
                         <button type="button" key={s}
                           className={`ac-status-seg-opt ${STATUS_META[s].cls} ${t.status === s ? 'on' : ''}`}
                           aria-pressed={t.status === s}
                           onClick={() => setStatus(t, s)}>
-                          <i className={`bi ${STATUS_META[s].icon} me-1`} />{STATUS_META[s].label}
+                          <i className={`bi ${STATUS_META[s].icon} me-1`} />
+                          {s === 'in_review' && t.status !== 'in_review' ? 'Submit for review' : STATUS_META[s].label}
                         </button>
                       ))}
                     </div>
                   )}
+                  {canReview(t) && <ReviewActions t={t} />}
                   {canRemind && t.status !== 'done' && (
                     <Button variant="outline-warning" size="sm" disabled={reminded.has(t.id)} onClick={() => sendReminder(t)}>
                       <i className={`bi ${reminded.has(t.id) ? 'bi-check2-circle' : 'bi-alarm'} me-1`} />{reminded.has(t.id) ? 'Reminder sent' : 'Remind'}
