@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { Spinner, Alert } from 'react-bootstrap';
 import { supabase } from '../../lib/supabase';
-import { setCreatorVideoAuth } from '../handler-collab/store';
+import { applyFollowUps, setCreatorVideoAuth } from '../handler-collab/store';
 import type { HandlerBrandMonth, HandlerCreator } from '../handler-collab/store';
 import { BrandPerformancePane } from '../handler-collab/HandlerCollabApp';
 import { copyText, showToast } from '../../lib/copyToast';
@@ -50,6 +50,9 @@ export default function BrandPaidCollabTab({ brandId, brandName, canEdit, onPend
     let cancelled = false;
     (async () => {
       setLoading(true); setErr(null);
+      // Apply the follow-up / payment-pending status rules server-side before reading
+      // (1-week stall sweep — same call the handler workspace makes on load).
+      await applyFollowUps();
       const [{ data: mRows, error: mErr }, { data: cRows, error: cErr }] = await Promise.all([
         supabase.from('handler_collab_brand_months').select('*').eq('brand_id', brandId),
         supabase.from('handler_collab_creators').select('*').eq('brand_id', brandId),

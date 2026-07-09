@@ -126,10 +126,14 @@ function fmtDate(dateStr) {
   if (isNaN(d.getTime())) return dateStr;
   return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
 }
-// Status flow: starts at "Videos in Progress" → auto "Payment Pending" once all videos
-// are added → user marks "Paid" from the inline dropdown after sending payment.
+// Status flow: starts at "Follow-up Required" (zero posted videos) → auto "Videos in
+// Progress" when the first video lands → back to "Follow-up Required" if no new video
+// for 1 week (server sweep) → auto "Payment Pending" once all videos are added →
+// user marks "Paid" from the inline dropdown after sending payment. The zero-video /
+// first-video / stall rules live in the DB (trigger + handler_collab_apply_follow_ups).
 const STATUS_OPTIONS = [
   { value: 'videos_in_progress', label: 'Videos in Progress', cls: 'progress' },
+  { value: 'follow_up', label: 'Follow-up Required', cls: 'followup' },
   { value: 'pending', label: 'Payment Pending', cls: 'pending' },
   { value: 'paid', label: 'Payment Sent', cls: 'sent' },
 ];
@@ -138,7 +142,7 @@ function deriveStatus(c) {
   return STATUS_OPTIONS.find(s => s.value === c.payment_status) || STATUS_OPTIONS[0];
 }
 // Drilldown groups creators by payment status in this top→bottom order.
-const STATUS_GROUP_ORDER = ['pending', 'videos_in_progress', 'paid'];
+const STATUS_GROUP_ORDER = ['pending', 'follow_up', 'videos_in_progress', 'paid'];
 function focusProductList(bm) {
   const raw = bm?.focus_product_url || '';
   if (!raw) return [];
@@ -1252,7 +1256,7 @@ function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCr
   const bm = row?.bm || {};
   const products = focusProductList(bm);
   const notesHas = !!(notesText && notesText.trim());
-  // group creators by payment status — Payment Pending → Videos in Progress → Payment Sent,
+  // group creators by payment status — Payment Pending → Follow-up Required → Videos in Progress → Payment Sent,
   // each introduced by a labelled divider. The # index runs continuously top-to-bottom.
   const statusGroups = useMemo(() => {
     let n = 0;
@@ -1590,6 +1594,7 @@ function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, onToggleVisible, select
 ════════════════════════════════════════════════════════════ */
 const RD_STATUS = {
   videos_in_progress: { label: 'In progress', cls: 'prog', color: '#1259C3' },
+  follow_up:          { label: 'Follow-up',   cls: 'fup',  color: '#C62828' },
   pending:            { label: 'Pending pay',  cls: 'pend', color: '#E8862E' },
   paid:               { label: 'Paid',         cls: 'paid', color: '#198754' },
 };
@@ -1675,7 +1680,7 @@ function ReportingView({ brands, brandById, creators, month, comments = [], onOp
   [scoped, month, isWeekly, activeWeek]);
 
   const payMix = useMemo(() => {
-    const m = { videos_in_progress: 0, pending: 0, paid: 0 };
+    const m = { videos_in_progress: 0, follow_up: 0, pending: 0, paid: 0 };
     scoped.forEach(c => { m[c.payment_status] = (m[c.payment_status] || 0) + 1; });
     return Object.keys(RD_STATUS).map(k => ({ name: RD_STATUS[k].label, value: m[k] || 0, color: RD_STATUS[k].color })).filter(s => s.value > 0);
   }, [scoped]);
@@ -2505,10 +2510,10 @@ function CreatorExpand({ c, onEdit, onDelete, patchCreatorLocal }) {
     saving.current = true;
     setSaveState('saving');
     const patch = { video_codes: next };
-    // once every video row has a URL: stamp completed-on date + advance Videos in Progress → Payment Pending
+    // once every video row has a URL: stamp completed-on date + advance Videos in Progress / Follow-up → Payment Pending
     const allFilled = next.length > 0 && next.every(r => (r.video || '').trim());
     if (allFilled) {
-      if (c.payment_status === 'videos_in_progress') patch.payment_status = 'pending';
+      if (c.payment_status === 'videos_in_progress' || c.payment_status === 'follow_up') patch.payment_status = 'pending';
       if (!c.completed_on) patch.completed_on = todayISO();
     }
     patchCreatorLocal(c.id, patch);

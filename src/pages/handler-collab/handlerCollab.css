@@ -215,6 +215,7 @@
 .pc-ct-group-count{ font-size:11px; font-weight:700; color:var(--pc-text-2); background:var(--pc-card-2); border-radius:var(--pc-pill); padding:1px 8px; min-width:20px; text-align:center; }
 .pc-ct-group.pending .pc-ct-group-label{ color:var(--pc-warn-fg); }
 .pc-ct-group.progress .pc-ct-group-label{ color:var(--pc-info-fg); }
+.pc-ct-group.followup .pc-ct-group-label{ color:var(--pc-error-fg); }
 .pc-ct-group.sent .pc-ct-group-label{ color:var(--pc-success-fg); }
 
 /* inline status dropdown (custom, portal menu) */
@@ -230,6 +231,7 @@
 .pc-statusdot.sent{ background:var(--pc-success-fg); }
 .pc-statusdot.pending{ background:var(--pc-warn-fg); }
 .pc-statusdot.progress{ background:var(--pc-info-fg); }
+.pc-statusdot.followup{ background:var(--pc-error-fg); }
 
 /* "Payment Pending" client-visibility toggle (handler workspace only) */
 .pc-visbtn{
@@ -410,6 +412,7 @@
 .pc-rd-pill{ display:inline-flex; align-items:center; height:23px; padding:0 10px; border-radius:999px; font-size:11px; font-weight:800; white-space:nowrap; }
 .pc-rd-pill.prog{ background:var(--pc-accent-light); color:var(--pc-accent); }
 .pc-rd-pill.pend{ background:#FFF1E0; color:#B45309; }
+.pc-rd-pill.fup{ background:var(--pc-error-bg); color:var(--pc-error-fg); }
 .pc-rd-pill.paid{ background:#E6F5EC; color:#198754; }
 
 /* insights */
@@ -750,6 +753,7 @@ a.pc-payoutline-val:hover{ text-decoration:underline; }
 .pc-badge.sent{ background:var(--pc-success-bg); color:var(--pc-success-fg); }
 .pc-badge.pending{ background:var(--pc-warn-bg); color:var(--pc-warn-fg); }
 .pc-badge.progress{ background:var(--pc-info-bg); color:var(--pc-info-fg); }
+.pc-badge.followup{ background:var(--pc-error-bg); color:var(--pc-error-fg); }
 
 /* ── Creator expand / video editor ── */
 .pc-expand{ background:var(--pc-card-2); border-bottom:1px solid var(--pc-divider); padding:13px 16px 17px; animation:pc-slide .26s var(--pc-ease); }
