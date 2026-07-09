@@ -17,10 +17,19 @@ function monthLabel(ym: string) {
   return new Date(y, m - 1, 1).toLocaleString(undefined, { month: 'long', year: 'numeric' });
 }
 
-function shiftMonth(ym: string, delta: number) {
+function recentMonths(count: number): string[] {
+  const now = new Date();
+  const out: string[] = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+  return out;
+}
+
+function shortMonthLabel(ym: string) {
   const [y, m] = ym.split('-').map(Number);
-  const d = new Date(y, m - 1 + delta, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  return new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'short', year: '2-digit' });
 }
 
 // Deterministic colored avatar palette — assigns each brand a stable color.
@@ -277,26 +286,20 @@ export default function WeeklyReports() {
       {/* Header */}
       <div className="wr-header">
         <div className="wr-header-left">
-          <Button variant="link" className="wr-icon-btn" onClick={() => setFMonth(m => shiftMonth(m, -1))} title="Previous month">
-            <i className="bi bi-chevron-left" />
-          </Button>
-          <div className="wr-month-picker">
-            <i className="bi bi-calendar3 me-2" />
-            <span>{monthLabel(fMonth)}</span>
-            <input
-              type="month"
-              value={fMonth}
-              onChange={e => e.target.value && setFMonth(e.target.value)}
-              className="wr-month-input"
-              aria-label="Pick month"
-            />
+          <div className="wr-month-seg" role="group" aria-label="Recent months">
+            <i className="bi bi-calendar3 wr-month-seg-ico" />
+            {recentMonths(3).map(m => (
+              <button
+                key={m}
+                type="button"
+                className={`wr-month-seg-btn${m === fMonth ? ' is-active' : ''}`}
+                onClick={() => setFMonth(m)}
+                aria-pressed={m === fMonth}
+              >
+                {shortMonthLabel(m)}
+              </button>
+            ))}
           </div>
-          <Button variant="link" className="wr-icon-btn" onClick={() => setFMonth(m => shiftMonth(m, 1))} title="Next month">
-            <i className="bi bi-chevron-right" />
-          </Button>
-          <Button size="sm" variant="outline-secondary" className="wr-today-btn" onClick={() => setFMonth(currentMonth())}>
-            Today
-          </Button>
         </div>
 
         <div className="wr-header-search">

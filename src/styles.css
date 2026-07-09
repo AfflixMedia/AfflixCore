@@ -1235,6 +1235,52 @@ input[type="number"] {
 }
 .wr-today-btn { margin-left: 4px; }
 
+/* Month segmented control (weekly/monthly report list header) */
+.wr-month-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 4px 4px 10px;
+  background: var(--ac-bg-light);
+  border: 1px solid var(--ac-line-l);
+  border-radius: 12px;
+}
+.wr-month-seg-ico {
+  color: var(--ac-text-muted);
+  font-size: 0.9rem;
+  margin-right: 4px;
+}
+.wr-month-seg-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--ac-text-muted);
+  font-weight: 600;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 7px 14px;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease, box-shadow .15s ease;
+}
+.wr-month-seg-btn:hover {
+  color: var(--ac-text-dark);
+  background: rgba(0, 0, 0, .04);
+}
+.wr-month-seg-btn.is-active {
+  color: #fff;
+  background: linear-gradient(135deg, var(--ac-primary), var(--ac-primary-2));
+  box-shadow: 0 2px 6px rgba(232, 134, 46, .35);
+}
+.wr-month-seg-btn.is-active:hover {
+  color: #fff;
+  background: linear-gradient(135deg, var(--ac-primary), var(--ac-primary-2));
+}
+.wr-month-seg-btn:focus-visible {
+  outline: 2px solid var(--ac-primary);
+  outline-offset: 1px;
+}
+
 .wr-header-search { flex: 1 1 260px; min-width: 200px; }
 
 .wr-header-right {
