@@ -75,7 +75,9 @@ function reminderLabel(iso) {
   return d.toLocaleString(undefined, opts);
 }
 
-export default function NotesBoard({ brands = [], brandById = {}, month }) {
+// ownerOnly: load ONLY the signed-in user's notes (Bob's read-all RLS would
+// otherwise mix everyone's notes into his personal board).
+export default function NotesBoard({ brands = [], brandById = {}, month, ownerOnly = false }) {
   const { user } = useAuth();
   // Foreign notes (e.g. a Super Boss note shared with Ads Managers) are
   // readable via RLS but not writable — render them read-only.
@@ -90,9 +92,9 @@ export default function NotesBoard({ brands = [], brandById = {}, month }) {
   const busyRef = useRef(false);
 
   const reload = useCallback(async () => {
-    try { setNotes(await store.loadNotes()); setErr(''); }
+    try { setNotes(await store.loadNotes(ownerOnly ? user?.id : undefined)); setErr(''); }
     catch (e) { setErr(e.message || 'Failed to load notes'); }
-  }, []);
+  }, [ownerOnly, user?.id]);
 
   useEffect(() => { (async () => { setLoading(true); await reload(); setLoading(false); })(); }, [reload]);
   useEffect(() => { busyRef.current = !!editor; }, [editor]);

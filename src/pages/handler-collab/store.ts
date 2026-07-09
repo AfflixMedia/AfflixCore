@@ -390,12 +390,16 @@ export interface HandlerNote {
 
 export type NotePatch = Partial<Omit<HandlerNote, 'id' | 'owner_id' | 'created_at' | 'updated_at'>>;
 
-export async function loadNotes(): Promise<HandlerNote[]> {
-  const { data, error } = await supabase
+// ownerId: restrict to one owner's notes — needed for Bob, whose read-all RLS
+// would otherwise pull every user's notes onto his personal board.
+export async function loadNotes(ownerId?: string): Promise<HandlerNote[]> {
+  let q = supabase
     .from('handler_notes')
     .select('*')
     .order('pinned', { ascending: false })
     .order('updated_at', { ascending: false });
+  if (ownerId) q = q.eq('owner_id', ownerId);
+  const { data, error } = await q;
   if (error) throw error;
   return (data || []) as HandlerNote[];
 }

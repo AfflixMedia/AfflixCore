@@ -63,8 +63,12 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
             <NavLink to="/resources" title="Resources">
               <i className="bi bi-folder2" /> <span className="ac-nav-label">Resources</span>
             </NavLink>
-            {isAdsManager && (
+            {isAdsManager ? (
               <NavLink to="/notes" title="Notes">
+                <i className="bi bi-journal-text" /> <span className="ac-nav-label">Notes</span>
+              </NavLink>
+            ) : (
+              <NavLink to="/my-notes" title="Notes">
                 <i className="bi bi-journal-text" /> <span className="ac-nav-label">Notes</span>
               </NavLink>
             )}
@@ -79,6 +83,9 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
             </NavLink>
             <NavLink to="/resources" title="Resources">
               <i className="bi bi-folder2" /> <span className="ac-nav-label">Resources</span>
+            </NavLink>
+            <NavLink to="/my-notes" title="Notes">
+              <i className="bi bi-journal-text" /> <span className="ac-nav-label">Notes</span>
             </NavLink>
           </>
         ) : (
@@ -122,6 +129,9 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
                 )}
                 <NavLink to="/resources" title="Resources">
                   <i className="bi bi-folder2" /> <span className="ac-nav-label">Resources</span>
+                </NavLink>
+                <NavLink to="/my-notes" title="Notes">
+                  <i className="bi bi-journal-text" /> <span className="ac-nav-label">Notes</span>
                 </NavLink>
                 <NavLink to="/templates" title="Reporting Canvas">
                   <i className="bi bi-easel2" /> <span className="ac-nav-label">Reporting Canvas</span>

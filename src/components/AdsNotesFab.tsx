@@ -9,7 +9,7 @@ import '../pages/handler-collab/handlerCollab.css';
 // NotesBoard.tsx is @ts-nocheck, so its exports infer `never[]` prop types; treat as any.
 const AllNotesDrawer = AllNotesDrawerImpl as any;
 
-/* Floating notes button — mounted app-wide (Layout). Two audiences:
+/* Floating notes button — mounted app-wide (Layout). Three audiences:
    - Ads Manager (everywhere): their own Keep-style notes in the owner-scoped
      `handler_notes` table + notes a Super Boss shared with them (read-only,
      policy "handler_notes ads read shared"). On a Brand Detail page the
@@ -17,7 +17,11 @@ const AllNotesDrawer = AllNotesDrawerImpl as any;
    - Super Boss (Brand Detail, GMV Max tab ONLY): that brand's Ads Manager
      notes + his own (owner chip per note). He can add notes (auto-linked to
      the brand) and share his own with Ads Managers ("Share with Ads
-     Managers" toggle → `shared_with_ads`). */
+     Managers" toggle → `shared_with_ads`).
+   - Bob / Team Lead / APC (everywhere, own-notes mode): their OWN notes only
+     — the floating counterpart of the /my-notes board. Loads owner-scoped
+     (Bob's read-all RLS would otherwise include everyone's notes) and pins
+     to the brand on Brand Detail pages like the Ads Manager view. */
 
 function thisMonthKey() {
   const d = new Date();
@@ -40,7 +44,9 @@ export default function AdsNotesFab() {
   // Super Boss only (not regular Bobs), and ONLY on a brand's GMV Max tab.
   const isBossView = !!profile?.is_superbob && profile?.role === 'bob'
     && !!brandId && tab === 'gmv-max';
-  const active = isAdsManager || isBossView;
+  // Bob / Team Lead / APC: personal own-notes mode (boss view wins where both apply).
+  const isOwnView = !isBossView && ['bob', 'team_lead', 'apc'].includes(profile?.role ?? '');
+  const active = isAdsManager || isBossView || isOwnView;
 
   const [open, setOpen] = useState(false);
   const [notes, setNotes] = useState<any[]>([]);
@@ -48,6 +54,11 @@ export default function AdsNotesFab() {
 
   const reload = useCallback(async () => {
     try {
+      if (isOwnView) {
+        // Own notes only — Bob's read-all RLS would otherwise include everyone's.
+        setNotes(profile?.id ? await store.loadNotes(profile.id) : []);
+        return;
+      }
       if (isAdsManager) {
         // Own notes + shared Super Boss notes (read-only). Tag foreign notes
         // with the sharer's name so the drawer shows who they came from.
@@ -83,7 +94,7 @@ export default function AdsNotesFab() {
       if (error) throw error;
       setNotes(((data as any[]) ?? []).map(n => ({ ...n, owner_name: nameById[n.owner_id] })));
     } catch { /* ignore */ }
-  }, [isAdsManager, profile?.id]);
+  }, [isAdsManager, isOwnView, profile?.id]);
 
   // Initial load: notes + brands (for the brand link/chips + brand-wise filter).
   useEffect(() => {
@@ -96,12 +107,12 @@ export default function AdsNotesFab() {
   // Fire due reminders in-app (like the handler workspace) so they surface even
   // without pg_cron, and refresh the badge when any fire. Owners only.
   useEffect(() => {
-    if (!isAdsManager) return;
+    if (!isAdsManager && !isOwnView) return;
     const tick = () => { store.fireDueNoteReminders().then(c => { if (c > 0) reload(); }).catch(() => {}); };
     tick();
     const iv = setInterval(tick, 60000);
     return () => clearInterval(iv);
-  }, [isAdsManager, reload]);
+  }, [isAdsManager, isOwnView, reload]);
 
   // Live sync across tabs/devices.
   useEffect(() => {
@@ -135,7 +146,7 @@ export default function AdsNotesFab() {
 
   const title = fixedBrand
     ? `${fixedBrand.name} — notes`
-    : isBossView ? 'Ads Manager notes' : 'All notes';
+    : isBossView ? 'Ads Manager notes' : isOwnView ? 'My notes' : 'All notes';
 
   // display:contents keeps the .pc-app font/token context (for the pc-* drawer)
   // without painting the full-screen .pc-app background box.

@@ -34,16 +34,13 @@ export default function BrandChatFab() {
 
   if (!brandId || !chatRole || !convId) return null;
 
-  // The notes fab shows for Ads Managers everywhere and for the Super Boss on
-  // the GMV Max tab — lift the chat fab above it when both are visible.
-  const tab = new URLSearchParams(location.search).get('tab');
-  const notesFabVisible = role === 'ads_manager'
-    || (!!profile?.is_superbob && role === 'bob' && tab === 'gmv-max');
-
+  // The notes fab now shows app-wide for every chat-capable role (Ads Manager
+  // board, Super Boss GMV-Max oversight, own-notes mode for bob/team_lead/apc),
+  // so the chat fab always stacks above it here.
   return (
     <div className="pc-app" style={{ display: 'contents' }}>
       <button
-        className={`pc-notesfab pc-chatfab ${notesFabVisible ? 'pc-fab-up' : ''}`}
+        className="pc-notesfab pc-chatfab pc-fab-up"
         title="Open brand chat" aria-label="Open brand chat"
         onClick={() => nav(`/chats?c=${convId}`)}>
         <i className="bi bi-chat-dots" />
