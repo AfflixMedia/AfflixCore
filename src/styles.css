@@ -2082,9 +2082,9 @@ input[type="number"] {
   min-height: 0;   /* allow the inner scroll area to shrink + scroll */
 }
 .ac-chat-list-head { padding: 14px 14px 8px; border-bottom: 1px solid var(--ac-line-l); }
-.ac-chat-filters { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.ac-chat-filters { display: flex; gap: 6px; align-items: baseline; min-width: 0; flex-wrap: wrap; }
 .ac-chat-filters-strip {
-  display: flex; gap: 6px; flex: 1; min-width: 0; overflow-x: auto;
+  display: flex; gap: 6px; flex: 1; min-width: 0; flex-wrap: wrap;
   scrollbar-width: none; -ms-overflow-style: none;   /* hide the scrollbar */
 }
 .ac-chat-filters-strip::-webkit-scrollbar { display: none; }
@@ -2106,7 +2106,7 @@ input[type="number"] {
 
 /* Brands → Team Lead secondary filter strip */
 .ac-chat-subfilters {
-  display: flex; gap: 6px; margin-top: 8px; overflow-x: auto;
+  display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;
   scrollbar-width: none; -ms-overflow-style: none;
 }
 .ac-chat-subfilters::-webkit-scrollbar { display: none; }

@@ -21,17 +21,15 @@ const FILTERS: { key: ChatFilter; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'unread', label: 'Unread' },
   { key: 'groups', label: 'Groups' },
-  { key: 'brands', label: 'Brands' },
   { key: 'archived', label: 'Archive' },
 ];
 
 export default function ConversationList({ views, activeId, myId, brandLeadByBrand, onSelect, onStartChat, onOpenAnnouncement }: Props) {
-  const [filter, setFilter] = useState<ChatFilter>('unread');
-  // Brands sub-filter: 'all' | Team Lead id | 'none' (brands with no Team Lead).
-  const [leadFilter, setLeadFilter] = useState<string>('all');
+  // A single primary filter. Base tabs ('all' | 'unread' | 'groups' | 'archived')
+  // plus per-Team-Lead brand filters keyed 'lead:<id>' (and 'lead:none' for brand
+  // groups with no Team Lead) — the lead chips sit in the same row and act like tabs.
+  const [filter, setFilter] = useState<string>('unread');
   const [q, setQ] = useState('');
-  // The lead sub-filter only applies inside the Brands tab — reset on tab change.
-  useEffect(() => { setLeadFilter('all'); }, [filter]);
 
   // Filter strip overflow: hidden scrollbar + left/right nudge arrows.
   const stripRef = useRef<HTMLDivElement>(null);
@@ -75,29 +73,25 @@ export default function ConversationList({ views, activeId, myId, brandLeadByBra
     const leads = Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
     return { leads, noneCount };
   }, [views, brandLeadByBrand]);
-  // Only worth showing when there's more than one bucket to choose between.
-  const showLeadStrip = filter === 'brands'
-    && (leadChips.leads.length + (leadChips.noneCount > 0 ? 1 : 0)) >= 2;
-
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
+    const leadSel = filter.startsWith('lead:') ? filter.slice(5) : null;
     return views.filter(v => {
-      // Archived chats live only under the Archive tab.
+      // Archived chats live only under the Archive tab; every other tab hides them.
       if (filter === 'archived' ? !v.archived : v.archived) return false;
       if (filter === 'unread' && v.unread === 0) return false;
-      // Groups tab excludes brand groups — those live under the Brands tab.
+      // Groups tab excludes brand groups (those have their own lead filters).
       if (filter === 'groups' && (!v.conversation.is_group || v.conversation.brand_id)) return false;
-      if (filter === 'brands') {
+      if (leadSel !== null) {
+        // Lead filter: only that Team Lead's brand groups (nothing else mixed in).
         if (!v.conversation.brand_id) return false;
-        if (leadFilter !== 'all') {
-          const leadId = brandLeadByBrand.get(v.conversation.brand_id)?.id ?? 'none';
-          if (leadId !== leadFilter) return false;
-        }
+        const leadId = brandLeadByBrand.get(v.conversation.brand_id)?.id ?? 'none';
+        if (leadId !== leadSel) return false;
       }
       if (needle && !`${v.title} ${v.lastBody ?? ''}`.toLowerCase().includes(needle)) return false;
       return true;
     });
-  }, [views, filter, q, leadFilter, brandLeadByBrand]);
+  }, [views, filter, q, brandLeadByBrand]);
 
   return (
     <div className="ac-chat-list">
@@ -129,6 +123,30 @@ export default function ConversationList({ views, activeId, myId, brandLeadByBra
                 {f.key === 'archived' && archivedCount > 0 && <span className="ms-1">({archivedCount})</span>}
               </button>
             ))}
+            {/* Per-Team-Lead brand filters — act like tabs, isolate that lead's brand groups */}
+            {leadChips.leads.map(l => (
+              <button
+                key={l.id}
+                type="button"
+                title={`${l.name}'s brand groups`}
+                className={`ac-chat-filter ${filter === `lead:${l.id}` ? 'active' : ''}`}
+                onClick={() => setFilter(`lead:${l.id}`)}
+              >
+                <i className="bi bi-person-badge me-1" />{l.name}
+                <span className="ms-1">({l.count})</span>
+              </button>
+            ))}
+            {leadChips.noneCount > 0 && (
+              <button
+                type="button"
+                title="Brand groups with no Team Lead"
+                className={`ac-chat-filter ${filter === 'lead:none' ? 'active' : ''}`}
+                onClick={() => setFilter('lead:none')}
+              >
+                <i className="bi bi-shop me-1" />Unassigned
+                <span className="ms-1">({leadChips.noneCount})</span>
+              </button>
+            )}
           </div>
           {canRight && (
             <button type="button" className="ac-chat-filter-arrow" aria-label="Scroll filters right"
@@ -145,39 +163,6 @@ export default function ConversationList({ views, activeId, myId, brandLeadByBra
             <i className="bi bi-megaphone-fill" />
           </button>
         </div>
-        {showLeadStrip && (
-          <div className="ac-chat-subfilters">
-            <button
-              type="button"
-              className={`ac-chat-subfilter ${leadFilter === 'all' ? 'active' : ''}`}
-              onClick={() => setLeadFilter('all')}
-            >
-              All leads
-            </button>
-            {leadChips.leads.map(l => (
-              <button
-                key={l.id}
-                type="button"
-                className={`ac-chat-subfilter ${leadFilter === l.id ? 'active' : ''}`}
-                onClick={() => setLeadFilter(l.id)}
-              >
-                <i className="bi bi-person-badge" />
-                {l.name}
-                <span className="ac-chat-subfilter-n">{l.count}</span>
-              </button>
-            ))}
-            {leadChips.noneCount > 0 && (
-              <button
-                type="button"
-                className={`ac-chat-subfilter ${leadFilter === 'none' ? 'active' : ''}`}
-                onClick={() => setLeadFilter('none')}
-              >
-                Unassigned
-                <span className="ac-chat-subfilter-n">{leadChips.noneCount}</span>
-              </button>
-            )}
-          </div>
-        )}
       </div>
 
       <div className="ac-chat-list-scroll">
