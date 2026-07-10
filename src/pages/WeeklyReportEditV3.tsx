@@ -63,6 +63,8 @@ export default function WeeklyReportEditV3() {
   // Auto-fetch UI state (one per AUTO section) — all manual, button-driven.
   const [fetchingSampling, setFetchingSampling] = useState(false);
   const [samplingMsg, setSamplingMsg] = useState<Msg>(null);
+  const [fetchingScore, setFetchingScore] = useState(false);
+  const [scoreMsg, setScoreMsg] = useState<Msg>(null);
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [productsMsg, setProductsMsg] = useState<Msg>(null);
   const [fetchingGmv, setFetchingGmv] = useState(false);
@@ -259,6 +261,37 @@ export default function WeeklyReportEditV3() {
     const videos = rows.reduce((s, d) => s + (Number(d.new_videos) || 0), 0);
     setC(prev => ({ ...prev, sampling: { ...prev.sampling, samples_approved: approved, new_videos_posted: videos } }));
     setSamplingMsg({ kind: 'success', text: `Pulled ${approved} approved sample${approved === 1 ? '' : 's'} and ${videos} new video${videos === 1 ? '' : 's'} for ${label}. Don't forget to save.` });
+  };
+
+  // ----- §2 Shop Performance Score — weekly avg SPS from the Sample-Seeding page.
+  //  Mirrors the "Avg SPS" the Sample Seeding tab shows: the mean of the week's
+  //  logged daily SPS values (weekend rows carry no SPS, so filtering non-null
+  //  already excludes them). Only fills Shop Performance Score — every other
+  //  Overall metric (GMV, orders, Shop Ranking, …) stays manual.
+  const fetchShopScoreFromBrand = async () => {
+    if (!report) return;
+    setFetchingScore(true); setScoreMsg(null);
+    const label = formatRange(report.week_start, report.week_end);
+    const { data, error } = await supabase
+      .from('brand_samples_daily')
+      .select('entry_date,daily_sps')
+      .eq('brand_id', report.brand_id)
+      .gte('entry_date', report.week_start)
+      .lte('entry_date', report.week_end);
+    setFetchingScore(false);
+    if (error) { setScoreMsg({ kind: 'danger', text: error.message }); return; }
+    const vals = ((data as any[]) ?? [])
+      .map(d => d.daily_sps)
+      .filter((n: any) => n != null)
+      .map(Number)
+      .filter((n: number) => Number.isFinite(n));
+    if (vals.length === 0) {
+      setScoreMsg({ kind: 'warning', text: `No daily SPS logged for ${label} on this brand's Sample Seeding page. Enter the Shop Performance Score manually here.` });
+      return;
+    }
+    const avg = Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
+    setC(prev => ({ ...prev, overall: { ...prev.overall, shop_performance_score: avg } }));
+    setScoreMsg({ kind: 'success', text: `Set Shop Performance Score to ${avg.toFixed(1)} — the average of ${vals.length} daily SPS entr${vals.length === 1 ? 'y' : 'ies'} for ${label}. Don't forget to save.` });
   };
 
   // ----- §3 Product Analytics — load the brand's product catalogue into rows --
@@ -573,6 +606,15 @@ export default function WeeklyReportEditV3() {
         <>
           <AutoFetchBar label="Auto-fill from Sample Seeding" busy={fetchingSampling}
             onClick={fetchSamplingFromBrand} msg={samplingMsg} onClose={() => setSamplingMsg(null)} />
+          <ScalarSectionBodyV3 def={def} data={(c as any)[def.id]} onField={(k, v) => setSec(def.id, k, v)} />
+        </>
+      );
+    }
+    if (def.special === 'shop_score') {
+      return (
+        <>
+          <AutoFetchBar label="Pull Shop Performance Score (Sample Seeding)" busy={fetchingScore}
+            onClick={fetchShopScoreFromBrand} msg={scoreMsg} onClose={() => setScoreMsg(null)} />
           <ScalarSectionBodyV3 def={def} data={(c as any)[def.id]} onField={(k, v) => setSec(def.id, k, v)} />
         </>
       );

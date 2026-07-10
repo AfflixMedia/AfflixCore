@@ -75,10 +75,11 @@ export interface SectionDefV3 {
   /**
    * Editor/dashboard behaviour flag for AUTO-fetched sections:
    *   'sampling'        -> pull samples-approved / new-videos from Sample Seeding
+   *   'shop_score'      -> pull Shop Performance Score (weekly avg SPS) from Sample Seeding
    *   'product_catalog' -> load the brand's product list into the rows
    *   'gmv_max_product' -> pull per-product ad spend from GMV Max
    */
-  special?: 'sampling' | 'product_catalog' | 'gmv_max_product';
+  special?: 'sampling' | 'shop_score' | 'product_catalog' | 'gmv_max_product';
 }
 
 // ---- tiny formula helpers --------------------------------------------------
@@ -111,8 +112,8 @@ export const WEEKLY_SECTIONS_V3: SectionDefV3[] = [
   // 2 ──────────────────────────────────────────────────────────────────────
   {
     id: 'overall', num: '2', title: 'Overall Performance', kind: 'scalar',
-    chart: 'bars',
-    blurb: 'The headline shop numbers for the week.',
+    chart: 'bars', special: 'shop_score',
+    blurb: 'The headline shop numbers for the week. Shop Performance Score can be auto-pulled from Sample Seeding; the rest are entered manually.',
     fields: [
       { key: 'total_gmv', label: 'Total GMV', format: 'currency', comparable: true },
       { key: 'orders', label: 'Orders', format: 'number', comparable: true },
