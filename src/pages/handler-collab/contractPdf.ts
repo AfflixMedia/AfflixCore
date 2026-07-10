@@ -141,22 +141,22 @@ export async function downloadCreatorContract(input: ContractInput) {
   para([{ t: 'Effective Date:', b: true }, { t: dateTxt }], { after: 4 });
 
   heading('1. Purpose');
-  para([{ t: `The Creator agrees to create and publish ${nWords} original TikTok videos featuring ${featuring} on the Creator's official TikTok account.` }]);
+  para([{ t: 'The Creator agrees to create and publish' }, { t: `${nWords} original TikTok videos`, b: true }, { t: `featuring ${featuring} on the Creator's official TikTok account.` }]);
 
   heading('2. Deliverables');
   para([{ t: 'The Creator agrees to:' }], { after: 4 });
   para([{ t: 'Create and publish a total of' }, { t: `${nWords} TikTok videos`, b: true }, { t: `featuring ${brand}.` }], { indent: 22, bullet: 'dot', after: 2 });
   para([{ t: "Keep the videos publicly available on the Creator's TikTok account." }], { indent: 22, bullet: 'dot', after: 2 });
-  para([{ t: `After all ${nShort} videos have been posted, provide the Brand with:` }], { indent: 22, bullet: 'dot', after: 2 });
-  para([{ t: `The links to all ${nShort} published TikTok videos.` }], { indent: 44, bullet: 'circle', after: 2 });
-  para([{ t: 'The TikTok Spark Ad Codes (Ad Authorization Codes) for each video.' }], { indent: 44, bullet: 'circle' });
+  para([{ t: 'After all' }, { t: `${nShort} videos`, b: true }, { t: 'have been posted, provide the Brand with:' }], { indent: 22, bullet: 'dot', after: 2 });
+  para([{ t: 'The links to all' }, { t: `${nShort} published TikTok videos.`, b: true }], { indent: 44, bullet: 'circle', after: 2 });
+  para([{ t: 'The TikTok Spark Ad Codes (Ad Authorization Codes) for each video for 365 days.' }], { indent: 44, bullet: 'circle' });
 
   heading('3. Compensation');
   para([{ t: 'Upon successful completion of all deliverables outlined in this Agreement, the Brand agrees to pay the Creator:' }], { after: 4 });
-  para([{ t: 'Payment Amount:', b: true }, { t: amountTxt }], { after: 2 });
-  para([{ t: 'Payment Method:', b: true }, { t: method }], { after: 8 });
+  para([{ t: 'Payment Amount:', b: true }, { t: amountTxt, b: true }], { after: 2 });
+  para([{ t: 'Payment Method:', b: true }, { t: method, b: true }], { after: 8 });
   para([{ t: 'Payment will be sent after the Brand has received and verified:' }], { after: 4 });
-  para([{ t: `All ${nWords} published TikTok video links; and` }], { indent: 22, bullet: 'dot', after: 2 });
+  para([{ t: 'All' }, { t: `${nWords} published TikTok video links;`, b: true }, { t: 'and' }], { indent: 22, bullet: 'dot', after: 2 });
   para([{ t: 'The corresponding TikTok Spark Ad Codes.' }], { indent: 22, bullet: 'dot' });
 
   heading('4. Creator Responsibilities');
@@ -168,7 +168,7 @@ export async function downloadCreatorContract(input: ContractInput) {
   heading('5. Brand Responsibilities');
   para([{ t: 'The Brand agrees to:' }], { after: 4 });
   para([{ t: 'Review the submitted deliverables in a timely manner.' }], { indent: 22, bullet: 'dot', after: 2 });
-  para([{ t: `Send the full payment of ${amountTxt} via ${method} after all agreed deliverables have been completed and received.` }], { indent: 22, bullet: 'dot' });
+  para([{ t: 'Send the full payment of' }, { t: amountTxt, b: true }, { t: 'via' }, { t: method, b: true }, { t: 'after all agreed deliverables have been completed and received.' }], { indent: 22, bullet: 'dot' });
 
   heading('6. Ownership');
   para([{ t: 'The Creator retains ownership of the original content. Any additional content usage rights beyond the delivery of Spark Ad Codes must be agreed upon separately in writing.' }]);
@@ -217,7 +217,7 @@ export async function downloadCreatorContract(input: ContractInput) {
   para([{ t: 'Username:', b: true }, { t: username || '____________________' }], { after: 6 });
   para([{ t: 'Name:', b: true }, { t: input.creatorName || '______________________' }], { after: 6 });
   para([{ t: 'Signature:', b: true }, { t: '____________________' }], { after: 6 });
-  para([{ t: 'Date:', b: true }, { t: dateTxt || '______________________' }]);
+  para([{ t: 'Date:', b: true }, { t: '______________________' }]);
 
   const safe = (s: string) => s.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
   const who = input.creatorName || username || 'Creator';
