@@ -6,9 +6,11 @@ import { fnError } from '../lib/functionError';
 import { addDays, formatRange, formatHuman, formatWeekShort, fromISO } from '../lib/dates';
 import { WeeklyReportContent, normalizeContent } from '../lib/reportSchema';
 import { normalizeContentV2 } from '../lib/reportSchemaV2';
+import { normalizeContentV3 } from '../lib/reportSchemaV3';
 import { MonthlyReportContent, normalizeMonthlyContent } from '../lib/monthlyReportSchema';
 import ReportDashboard, { TrendPoint, ApprovalDecisionView } from '../components/ReportDashboard';
 import ReportDashboardV2 from '../components/ReportDashboardV2';
+import ReportDashboardV3 from '../components/ReportDashboardV3';
 import MonthlyReportDashboard from '../components/MonthlyReportDashboard';
 import SectionComments, { Comment, CommentSection } from '../components/SectionComments';
 import { resourceIcon } from '../lib/resourceIcon';
@@ -231,7 +233,7 @@ export default function SharedReports() {
       .map(t => {
         const cn: any = t.content ?? {};
         const gmv = cn?.snapshot?.total_gmv ?? cn?.gmv_performance?.total_gmv ?? cn?.overall?.total_gmv;
-        const aff = cn?.snapshot?.affiliate_gmv ?? cn?.gmv_performance?.affiliate_gmv ?? cn?.overall?.affiliate_gmv;
+        const aff = cn?.snapshot?.affiliate_gmv ?? cn?.gmv_performance?.affiliate_gmv ?? cn?.overall?.affiliate_gmv ?? cn?.affiliate?.affiliate_gmv;
         return {
           label: formatWeekShort(t.week_start, t.week_end),
           GMV: Number(gmv) || 0,
@@ -447,17 +449,21 @@ export default function SharedReports() {
     const idx = sameBrand.findIndex(r => r.id === openReport.id);
     const newer = idx > 0 ? sameBrand[idx - 1] : null;          // index-1 is more recent
     const older = idx >= 0 && idx < sameBrand.length - 1 ? sameBrand[idx + 1] : null;
-    // New (14-section) reports render on the v2 dashboard; older reports stay classic.
-    const isOpenV2 = (openReport.content as any)?.format_version === 'v2';
-    const WeeklyDash: any = isOpenV2 ? ReportDashboardV2 : ReportDashboard;
-    const normWeekly = isOpenV2 ? normalizeContentV2 : normalizeContent;
+    // v3 (12-section) and v2 (14-section) reports render on their premium client
+    // dashboards; older reports stay on the classic layout.
+    const openFmt = (openReport.content as any)?.format_version;
+    const isOpenV3 = openFmt === 'v3';
+    const isOpenV2 = openFmt === 'v2';
+    const isClientDash = isOpenV3 || isOpenV2;   // both use the sidebar client view
+    const WeeklyDash: any = isOpenV3 ? ReportDashboardV3 : isOpenV2 ? ReportDashboardV2 : ReportDashboard;
+    const normWeekly = isOpenV3 ? normalizeContentV3 : isOpenV2 ? normalizeContentV2 : normalizeContent;
     return (
       <PublicShell clientName={clientName}>
         <div className="d-flex align-items-start gap-3 mb-4 flex-wrap">
           <button type="button" className="ac-back-btn" onClick={() => setOpenId(null)}>
             <i className="bi bi-arrow-left" /> Back
           </button>
-          {!isOpenV2 && (
+          {!isClientDash && (
             <div className="flex-grow-1 min-w-0">
               <div className="text-muted small">{activeBrand.name}</div>
               <h4 className="mb-0">Week #{openReport.week_number} — {formatRange(openReport.week_start, openReport.week_end)}</h4>
@@ -469,8 +475,8 @@ export default function SharedReports() {
           p={prevReport ? normWeekly(prevReport.content) : null}
           trendData={trendData}
           hasPrev={!!prevReport}
-          audience={isOpenV2 ? 'client' : undefined}
-          reportMeta={isOpenV2 ? {
+          audience={isClientDash ? 'client' : undefined}
+          reportMeta={isClientDash ? {
             title: `${activeBrand.name} — Weekly Performance`,
             period: formatRange(openReport.week_start, openReport.week_end),
             compare: prevReport ? `Week #${openReport.week_number} vs #${prevReport.week_number}` : `Week #${openReport.week_number}`,

@@ -269,20 +269,26 @@ export function buildMetricBagFromReportContent(content: any): Record<string, nu
   const overall = content.overall ?? {};
   const videoPerf = content.video_performance ?? {};
   const gmvMax = content.gmv_max ?? {};
+  // v3 (12-section) shape: affiliate GMV and new-videos live under their own
+  // sections, GMV Max is a per-product array, product units use `items_sold`.
+  const affiliate = content.affiliate ?? {};
+  const sampling = content.sampling ?? {};
+  const gmvMaxRows = Array.isArray(content.gmv_max) ? content.gmv_max : [];
 
   const sum = (k: string) => products.reduce((s: number, p: any) => s + (Number(p?.[k]) || 0), 0);
+  const sumRows = (rows: any[], k: string) => rows.reduce((s: number, r: any) => s + (Number(r?.[k]) || 0), 0);
   const pick = (...vals: any[]) => { for (const v of vals) { const n = num(v); if (n != null) return n; } return null; };
 
   return {
     gmv:            pick(snap.total_gmv, gmvPerf.total_gmv, overall.total_gmv),
-    affiliate_gmv:  pick(snap.affiliate_gmv, gmvPerf.affiliate_gmv, overall.affiliate_gmv),
-    paid_gmv:       pick(adOverall.gmv_generated, gmvMax.gmv),
+    affiliate_gmv:  pick(snap.affiliate_gmv, gmvPerf.affiliate_gmv, overall.affiliate_gmv, affiliate.affiliate_gmv),
+    paid_gmv:       pick(adOverall.gmv_generated, gmvMax.gmv, gmvMaxRows.length ? sumRows(gmvMaxRows, 'gross_revenue') : null),
     revenue:        null,
     commission:     null,
     orders:         pick(snap.orders, content.shop_analytics?.orders, overall.orders),
-    units_sold:     sum('items') || null,
+    units_sold:     (sum('items') || sum('items_sold')) || null,
     affiliate_units: null,
-    videos_live:    pick(snap.new_videos_posted, activity.new_videos_posted, videoPerf.total_videos_posted),
+    videos_live:    pick(snap.new_videos_posted, activity.new_videos_posted, sampling.new_videos_posted, affiliate.new_videos_posted, videoPerf.total_videos_posted),
     videos_pipeline: null,
     creators_active: Array.isArray(content.top_creators) ? content.top_creators.length : null,
     views:          num(videoPerf.video_views),

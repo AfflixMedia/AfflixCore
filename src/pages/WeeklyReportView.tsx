@@ -10,8 +10,10 @@ import { useNotifications } from '../notifications/NotificationsContext';
 import { addDays, formatRange, formatHuman, formatWeekShort } from '../lib/dates';
 import { normalizeContent } from '../lib/reportSchema';
 import { normalizeContentV2 } from '../lib/reportSchemaV2';
+import { normalizeContentV3 } from '../lib/reportSchemaV3';
 import ReportDashboard, { TrendPoint, ApprovalDecisionView } from '../components/ReportDashboard';
 import ReportDashboardV2 from '../components/ReportDashboardV2';
+import ReportDashboardV3 from '../components/ReportDashboardV3';
 import { ChronoPoint } from '../components/report/ChronologyChart';
 
 /** Pull §2 chronology metrics from a report's content (v2 or legacy shape). */
@@ -176,17 +178,18 @@ export default function WeeklyReportView() {
     })();
   }, [id]);
 
-  // New (14-section) reports carry content.format_version === 'v2'; everything
-  // else renders on the original classic dashboard.
-  const isV2 = (report?.content as any)?.format_version === 'v2';
-  const c = useMemo<any>(() => isV2 ? normalizeContentV2(report?.content) : normalizeContent(report?.content), [report, isV2]);
-  const p = useMemo<any>(() => !prev ? null : (isV2 ? normalizeContentV2(prev.content) : normalizeContent(prev.content)), [prev, isV2]);
-  // GMV trend reads the raw content for either format, so a brand whose history
-  // mixes classic + v2 reports still charts correctly.
+  // Reports carry content.format_version: 'v3' (12-section) or 'v2' (14-section);
+  // anything else renders on the original classic dashboard.
+  const fv = (report?.content as any)?.format_version;
+  const fmt: 'classic' | 'v2' | 'v3' = fv === 'v3' ? 'v3' : fv === 'v2' ? 'v2' : 'classic';
+  const c = useMemo<any>(() => fmt === 'v3' ? normalizeContentV3(report?.content) : fmt === 'v2' ? normalizeContentV2(report?.content) : normalizeContent(report?.content), [report, fmt]);
+  const p = useMemo<any>(() => !prev ? null : (fmt === 'v3' ? normalizeContentV3(prev.content) : fmt === 'v2' ? normalizeContentV2(prev.content) : normalizeContent(prev.content)), [prev, fmt]);
+  // GMV trend reads the raw content for every format, so a brand whose history
+  // mixes classic + v2 + v3 reports still charts correctly.
   const trendData: TrendPoint[] = useMemo(() => trend.map(t => {
     const cn: any = t.content ?? {};
     const gmv = cn?.snapshot?.total_gmv ?? cn?.gmv_performance?.total_gmv ?? cn?.overall?.total_gmv;
-    const aff = cn?.snapshot?.affiliate_gmv ?? cn?.gmv_performance?.affiliate_gmv ?? cn?.overall?.affiliate_gmv;
+    const aff = cn?.snapshot?.affiliate_gmv ?? cn?.gmv_performance?.affiliate_gmv ?? cn?.overall?.affiliate_gmv ?? cn?.affiliate?.affiliate_gmv;
     return {
       label: formatWeekShort(t.week_start, t.week_end),
       GMV: Number(gmv) || 0,
@@ -296,7 +299,23 @@ export default function WeeklyReportView() {
           </div>
         )}
 
-        {isV2 ? (
+        {fmt === 'v3' ? (
+          <ReportDashboardV3
+            c={c}
+            p={p}
+            trendData={trendData}
+            hasPrev={!!prev}
+            openSectionOnLoad={openSection}
+            highlightCommentId={highlightCommentId}
+            approvalDecisions={decisions}
+            commentsConfig={{
+              mode: 'authed',
+              comments,
+              currentAuthorName: profile?.full_name || profile?.email || 'User',
+              onAdd: addComment,
+            }}
+          />
+        ) : fmt === 'v2' ? (
           <ReportDashboardV2
             c={c}
             p={p}

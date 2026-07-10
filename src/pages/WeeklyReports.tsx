@@ -123,8 +123,9 @@ export default function WeeklyReports() {
   const [anchorPick, setAnchorPick] = useState('');
   // Optional Reporting Canvas template — null = legacy layout.
   const [createTemplateId, setCreateTemplateId] = useState<string | null>(null);
-  // Which report format to create: 'v2' = new 14-section, 'classic' = previous.
-  const [createFormat, setCreateFormat] = useState<'classic' | 'v2'>('v2');
+  // Which report format to create: 'v3' = new 12-section (default), 'v2' =
+  // earlier 14-section, 'classic' = original layout.
+  const [createFormat, setCreateFormat] = useState<'classic' | 'v2' | 'v3'>('v3');
   const [saving, setSaving] = useState(false);
 
   const load = async () => {
@@ -211,7 +212,7 @@ export default function WeeklyReports() {
     }
     setCreateBrand(b);
     setAnchorPick(settings[b.id] ?? '');
-    setCreateFormat('v2');
+    setCreateFormat('v3');
     setErr(null);
     setShow(true);
     setPickerOpen(false);
@@ -253,7 +254,7 @@ export default function WeeklyReports() {
         status: 'draft',
         template_id: createTemplateId,
         // Stamp the chosen format into content; classic stays null (unchanged behaviour).
-        content: createFormat === 'v2' ? { format_version: 'v2' } : null,
+        content: createFormat === 'classic' ? null : { format_version: createFormat },
       }).select('id').single();
       if (error) throw error;
       setShow(false);
@@ -567,13 +568,21 @@ export default function WeeklyReports() {
             <div className="mb-3">
               <Form.Label className="small fw-semibold mb-2">Report template</Form.Label>
               <div className="d-flex flex-column gap-2">
+                <label className={`d-flex align-items-start gap-2 p-2 rounded border ${createFormat === 'v3' ? 'border-primary bg-light' : ''}`} style={{ cursor: 'pointer' }}>
+                  <Form.Check type="radio" name="report-format" checked={createFormat === 'v3'}
+                    onChange={() => setCreateFormat('v3')} className="mt-1" />
+                  <span>
+                    <span className="fw-semibold">New — 12-section TikTok-Shop format</span>
+                    <span className="badge bg-primary ms-2">New</span>
+                    <div className="text-muted small">Latest layout: Sampling &amp; Videos, Overall, Product Analytics, Channel, Offsite, Affiliate, Top Creators / Videos / LIVEs, with auto-filled Sampling and GMV Max ad spend.</div>
+                  </span>
+                </label>
                 <label className={`d-flex align-items-start gap-2 p-2 rounded border ${createFormat === 'v2' ? 'border-primary bg-light' : ''}`} style={{ cursor: 'pointer' }}>
                   <Form.Check type="radio" name="report-format" checked={createFormat === 'v2'}
                     onChange={() => setCreateFormat('v2')} className="mt-1" />
                   <span>
-                    <span className="fw-semibold">New — 14-section format</span>
-                    <span className="badge bg-primary ms-2">New</span>
-                    <div className="text-muted small">TikTok-Shop performance layout with auto-calculations, GMV Max auto-fill, charts and advanced insights dividers.</div>
+                    <span className="fw-semibold">14-section format</span>
+                    <div className="text-muted small">The earlier TikTok-Shop layout with auto-calculations, GMV Max auto-fill, charts and advanced insights dividers.</div>
                   </span>
                 </label>
                 <label className={`d-flex align-items-start gap-2 p-2 rounded border ${createFormat === 'classic' ? 'border-primary bg-light' : ''}`} style={{ cursor: 'pointer' }}>
@@ -581,7 +590,7 @@ export default function WeeklyReports() {
                     onChange={() => setCreateFormat('classic')} className="mt-1" />
                   <span>
                     <span className="fw-semibold">Previous format</span>
-                    <div className="text-muted small">The original report layout. All existing reports use this.</div>
+                    <div className="text-muted small">The original report layout. Older reports use this.</div>
                   </span>
                 </label>
               </div>
