@@ -2,9 +2,10 @@
 // brand's current-month sample-seeding progress, plus quick popups for
 // Samples (read-only Samples-tab summary, latest 3 months), the brand's
 // Products catalog, and the latest 3 months of weekly/monthly reports
-// (click-through to the report). Staff-only (bob / team_lead / apc) —
-// internal paid-collab handlers in the group have no RLS access to these
-// tables, so the strip self-hides for them.
+// (click-through to the report). Shown to staff (bob / team_lead / apc /
+// ads_manager) AND internal paid-collab handlers — the 20260809 migration
+// gives internal handlers read access to the tables the strip queries,
+// scoped to their assigned brands. External handlers never reach /chats.
 import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Modal, Button, Table, Spinner, Alert, Badge, Row, Col, Form } from 'react-bootstrap';
@@ -33,7 +34,13 @@ function monthBounds(yyyymm: string): { first: string; last: string } {
 function MoveToButton({ brandId, tab, label, onClose }: {
   brandId: string; tab: string; label: string; onClose: () => void;
 }) {
+  const { profile } = useAuth();
   const navigate = useNavigate();
+  // Internal paid-collab handlers have no /brands/:id route — plain Close
+  // instead of a navigation that would dead-end on the denied page.
+  if (profile?.role === 'paid_collab_handler') {
+    return <Button variant="outline-secondary" onClick={onClose}>Close</Button>;
+  }
   return (
     <Button
       variant="primary"
@@ -86,8 +93,12 @@ export default function BrandChatBar({ brandId, brandName }: { brandId: string; 
   const [taskTick, setTaskTick] = useState(0);
 
   // Roles with RLS read access to brand_samples_* / brand_products / the report
-  // tables + the /reporting routes. Internal handlers stay excluded (no such reads).
-  const isStaff = !!profile && ['bob', 'team_lead', 'apc', 'ads_manager'].includes(profile.role);
+  // tables + the report view routes. Internal paid-collab handlers included
+  // since 20260809 (read-only, scoped to their brands).
+  const isInternalHandler =
+    profile?.role === 'paid_collab_handler' && !!profile?.is_internal_handler;
+  const isStaff = (!!profile && ['bob', 'team_lead', 'apc', 'ads_manager'].includes(profile.role))
+    || isInternalHandler;
 
   // Current-month seeding rollup for the strip.
   useEffect(() => {
@@ -649,7 +660,11 @@ const shortDate = (iso: string) =>
   new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
 function ReportsModal({ brandId, brandName, onClose }: { brandId: string; brandName: string; onClose: () => void }) {
+  const { profile } = useAuth();
   const navigate = useNavigate();
+  // Internal paid-collab handlers have no /reporting routes — the popup is a
+  // status list for them (rows don't navigate).
+  const canOpen = profile?.role !== 'paid_collab_handler';
   const [weekly, setWeekly] = useState<WeeklyRow[]>([]);
   const [monthly, setMonthly] = useState<MonthlyRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -720,8 +735,9 @@ function ReportsModal({ brandId, brandName, onClose }: { brandId: string; brandN
                   <button
                     key={r.id}
                     type="button"
-                    className="list-group-item list-group-item-action d-flex align-items-center justify-content-between gap-2"
-                    onClick={() => openReport('weekly', r.id)}
+                    className={`list-group-item d-flex align-items-center justify-content-between gap-2 ${canOpen ? 'list-group-item-action' : ''}`}
+                    style={canOpen ? undefined : { cursor: 'default' }}
+                    onClick={canOpen ? () => openReport('weekly', r.id) : undefined}
                   >
                     <span>
                       <i className="bi bi-calendar-week me-2 text-muted" />
@@ -745,8 +761,9 @@ function ReportsModal({ brandId, brandName, onClose }: { brandId: string; brandN
                   <button
                     key={r.id}
                     type="button"
-                    className="list-group-item list-group-item-action d-flex align-items-center justify-content-between gap-2"
-                    onClick={() => openReport('monthly', r.id)}
+                    className={`list-group-item d-flex align-items-center justify-content-between gap-2 ${canOpen ? 'list-group-item-action' : ''}`}
+                    style={canOpen ? undefined : { cursor: 'default' }}
+                    onClick={canOpen ? () => openReport('monthly', r.id) : undefined}
                   >
                     <span>
                       <i className="bi bi-calendar-month me-2 text-muted" />
@@ -802,6 +819,9 @@ function TasksModal({ brandId, brandName, onClose, onChanged }: {
   const isSuperBob = isBob && !!profile?.is_superbob;
   const isTeamLead = role === 'team_lead';
   const isApcLike = role === 'apc' || role === 'ads_manager';
+  // Only INTERNAL handlers reach the chat; they assign to their brands' APCs
+  // (insert RLS gated by handler_can_assign).
+  const isHandler = role === 'paid_collab_handler';
 
   const [tasks, setTasks] = useState<BrandTask[]>([]);
   const [people, setPeople] = useState<Map<string, PersonLite>>(new Map());
@@ -827,10 +847,11 @@ function TasksModal({ brandId, brandName, onClose, onChanged }: {
     setTasks(ts);
 
     // Assignable people, per role — only the caller's RLS-allowed insert targets:
-    //  • Bob        → the brand's APC + Team Lead + every Bob (incl. self)
-    //  • Team Lead  → the brand's APC (an APC they own)
-    //  • APC / Ads  → upward: their Team Lead + every Bob
-    const brandApc = (isBob || isTeamLead)
+    //  • Bob              → the brand's APC + Team Lead + every Bob (incl. self)
+    //  • Team Lead        → the brand's APC (an APC they own)
+    //  • APC / Ads        → upward: their Team Lead + every Bob
+    //  • Internal handler → the brand's APC (handler_can_assign)
+    const brandApc = (isBob || isTeamLead || isHandler)
       ? (await supabase.from('apc_brands').select('apc_id').eq('brand_id', brandId).maybeSingle()).data?.apc_id ?? null
       : null;
     const brandTl = isBob
@@ -852,7 +873,7 @@ function TasksModal({ brandId, brandName, onClose, onChanged }: {
     const list: PersonLite[] = [];
     const push = (id: string | null) => { if (id && byId.has(id)) list.push(byId.get(id)!); };
     if (isBob) { push(brandApc); push(brandTl); bobRows.forEach(b => list.push(b)); }
-    else if (isTeamLead) { push(brandApc); }
+    else if (isTeamLead || isHandler) { push(brandApc); }
     else if (isApcLike) { push(brandTl); bobRows.forEach(b => list.push(b)); }
     const seen = new Set<string>();
     const uniq = list.filter(p => (seen.has(p.id) ? false : (seen.add(p.id), true)));
