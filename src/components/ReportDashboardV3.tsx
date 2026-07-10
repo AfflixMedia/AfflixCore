@@ -10,9 +10,10 @@ import {
 import { sanitizeRich } from '../lib/sanitize';
 import DashSidebar, { DashNavItem } from './report/DashSidebar';
 import SectionComments, { Comment, CommentSection } from './SectionComments';
-// Prop-shape interfaces are shared with the v2 dashboard so the view / share
-// pages can hand the same objects to whichever renderer they pick. (type-only —
-// no runtime dependency on the v2 dashboard module.)
+// Reuse the v2 custom-section renderer (identical CustomSection model) + the
+// shared prop-shape interfaces so the view / share pages hand the same objects
+// to whichever renderer they pick.
+import { CustomSectionView } from './ReportDashboardV2';
 import type { TrendPoint, CommentsConfig, ApprovalDecisionView, ApprovalActionConfig } from './ReportDashboardV2';
 
 // Sections the client sees on the shared report (staff see everything). The
@@ -91,12 +92,31 @@ export default function ReportDashboardV3({
   const sectionFeedbackCount = (section: CommentSection) =>
     (commentsConfig?.comments ?? []).filter(x => x.section === section).length;
 
+  const customSectionFor = (section: CommentSection) => {
+    if (!section.startsWith('cs:')) return null;
+    const csid = section.slice(3);
+    return (c.custom_sections ?? []).find(s => s.id === csid) ?? null;
+  };
   const labelFor = (section: CommentSection): string => {
+    const cs = customSectionFor(section);
+    if (cs) return cs.name || 'Custom Section';
     if (section === 'approval') return 'Approval Needed / Action Items';
     if (section === 'insights') return 'Insights';
     const def = SECTION_BY_ID_V3[section];
     return def ? `${def.num}. ${def.title}` : section;
   };
+
+  // Custom sections are anchored after a standard section id (or 'start' /
+  // 'insights'); staff see them, the client share view hides them.
+  const renderCustomAt = (anchor: string) =>
+    isClient ? null : (c.custom_sections ?? []).filter(s => s.insert_after === anchor).map(s => (
+      <CustomSectionView
+        key={s.id}
+        section={s}
+        prevSection={(p?.custom_sections ?? []).find(ps => ps.id === s.id) ?? null}
+        feedbackSlot={<FeedbackIcon section={`cs:${s.id}` as CommentSection} />}
+      />
+    ));
 
   const FeedbackIcon = ({ section }: { section: CommentSection }) => {
     if (!commentsConfig) return null;
@@ -275,8 +295,13 @@ export default function ReportDashboardV3({
 
         <HeroBlock />
 
+        {renderCustomAt('start')}
+
         {sectionsToRender.map(def => (
-          <div key={def.id}>{renderSection(def)}</div>
+          <div key={def.id}>
+            {renderSection(def)}
+            {renderCustomAt(def.id)}
+          </div>
         ))}
 
         {/* Insights */}
@@ -292,6 +317,7 @@ export default function ReportDashboardV3({
             </Card.Body>
           </Card>
         )}
+        {renderCustomAt('insights')}
 
         {/* Approval Needed */}
         {c.approval?.enabled && (() => {

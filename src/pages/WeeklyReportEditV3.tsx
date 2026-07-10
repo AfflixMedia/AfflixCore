@@ -1,16 +1,31 @@
-import { useEffect, useRef, useState, FormEvent, Fragment } from 'react';
+import { useEffect, useMemo, useState, FormEvent, Fragment } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Card, Form, Button, Spinner, Alert, Badge, Offcanvas } from 'react-bootstrap';
+import { Card, Form, Button, Spinner, Alert, Badge, Modal, Offcanvas, Dropdown } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import { formatRange } from '../lib/dates';
 import {
   WeeklyReportContentV3, emptyContentV3, normalizeContentV3, numOrNull,
-  WEEKLY_SECTIONS_V3, SECTION_BY_ID_V3, SectionDefV3, emptyRow,
+  WEEKLY_SECTIONS_V3, SECTION_LABELS_V3, SectionDefV3, emptyRow,
+  CustomSection, CustomField, CustomFieldType, StandardSectionIdV3,
 } from '../lib/reportSchemaV3';
 import { ScalarSectionBodyV3, TableSectionBodyV3 } from '../components/report/SectionBodyV3';
 import SectionComments, { Comment, CommentSection } from '../components/SectionComments';
 import { useAuth } from '../auth/AuthContext';
 import RichTextEditor from '../components/RichTextEditor';
+import { CustomSectionInline, CustomSectionDefModal, customSectionsAt, newSection, AddSectionMenu } from '../components/CustomSectionEditor';
+
+// Standard-section render order (for placing a custom section above/below one).
+const WEEKLY_STD_ORDER_V3: StandardSectionIdV3[] = ['start', ...WEEKLY_SECTIONS_V3.map(s => s.id), 'insights'];
+
+// Anchor id -> label for the custom-section Position picker (v3 sections).
+const V3_POSITIONS: Record<string, string> = {
+  start: 'At the very top',
+  ...Object.fromEntries(WEEKLY_SECTIONS_V3.map(s => [s.id, `After ${s.num}. ${s.title}`])),
+  insights: 'After Insights (end)',
+};
+type ClickedSection =
+  | { type: 'standard'; id: StandardSectionIdV3 }
+  | { type: 'custom'; section: CustomSection };
 
 interface ReportRow {
   id: string; brand_id: string; week_start: string; week_end: string;
@@ -30,17 +45,43 @@ export default function WeeklyReportEditV3() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  const [showComments, setShowComments] = useState(false);
+  const [priorReports, setPriorReports] = useState<ReportRow[]>([]);
+  const [pcPrograms, setPcPrograms] = useState<{ id: string; name: string | null; ended_at: string | null }[]>([]);
+  const [selectedPriorId, setSelectedPriorId] = useState<string>('');
+  const [priorComments, setPriorComments] = useState<Comment[]>([]);
+  const [loadingComments, setLoadingComments] = useState(false);
+
+  const [csModalOpen, setCsModalOpen] = useState(false);
+  const [csDraft, setCsDraft] = useState<CustomSection>(newSection());
+  const [csIsEdit, setCsIsEdit] = useState(false);
+  const [csTargetIndex, setCsTargetIndex] = useState<number | null>(null);
+
   const [feedbackSection, setFeedbackSection] = useState<CommentSection | null>(null);
 
-  // Auto-fetch UI state (one per AUTO section).
+  // Auto-fetch UI state (one per AUTO section) — all manual, button-driven.
   const [fetchingSampling, setFetchingSampling] = useState(false);
   const [samplingMsg, setSamplingMsg] = useState<Msg>(null);
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [productsMsg, setProductsMsg] = useState<Msg>(null);
   const [fetchingGmv, setFetchingGmv] = useState(false);
   const [gmvMsg, setGmvMsg] = useState<Msg>(null);
-  // Guards the one-time auto-fill of §1 Sampling on first open.
-  const autoFilledSampling = useRef(false);
+
+  interface PresetRow {
+    id: string; name: string; payload: any;
+    kind: 'custom' | 'standard'; section_id: string | null;
+    created_by: string | null; created_at: string;
+  }
+  const [presets, setPresets] = useState<PresetRow[]>([]);
+  const [presetSavingId, setPresetSavingId] = useState<string | null>(null);
+  const [presetMsg, setPresetMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!presetMsg) return;
+    const t = setTimeout(() => setPresetMsg(null), 3500);
+    return () => clearTimeout(t);
+  }, [presetMsg]);
 
   useEffect(() => {
     (async () => {
@@ -51,12 +92,130 @@ export default function WeeklyReportEditV3() {
       setC(normalizeContentV3(r.content));
       const { data: bd } = await supabase.from('brands').select('id,name,client,client_status').eq('id', r.brand_id).single();
       setBrand(bd as Brand);
+      const { data: pcp } = await supabase.from('paid_creator_programs')
+        .select('id,name,ended_at').eq('brand_id', r.brand_id)
+        .order('launch_date', { ascending: false });
+      setPcPrograms((pcp as any[]) ?? []);
+      const { data: priors } = await supabase.from('weekly_reports')
+        .select('*').eq('brand_id', r.brand_id).lt('week_start', r.week_start)
+        .order('week_start', { ascending: false }).limit(12);
+      setPriorReports((priors as ReportRow[]) ?? []);
+      if (priors && priors.length > 0) setSelectedPriorId((priors[0] as any).id);
       const { data: cm } = await supabase.from('report_comments')
         .select('*').eq('report_id', r.id).order('created_at', { ascending: true });
       setComments((cm as Comment[]) ?? []);
+      const { data: pr } = await supabase.from('section_presets')
+        .select('id,name,payload,kind,section_id,created_by,created_at').order('created_at', { ascending: false });
+      setPresets(((pr as any[]) ?? []).map(p => ({
+        ...p, kind: p.kind ?? 'custom', section_id: p.section_id ?? null,
+      })) as PresetRow[]);
       setLoading(false);
     })();
   }, [id]);
+
+  // ----- preset helpers (custom + standard) ---------------------------------
+  const addCustomFromPreset = (preset: PresetRow) => {
+    const p = preset.payload ?? {};
+    const cs: CustomSection = {
+      id: crypto.randomUUID(),
+      name: String(p.name ?? preset.name ?? ''),
+      description: String(p.description ?? ''),
+      is_repeater: !!p.is_repeater,
+      body: '',
+      fields: Array.isArray(p.fields) ? p.fields.map((f: any) => ({
+        id: crypto.randomUUID(), label: String(f.label ?? ''),
+        type: f.type ?? 'text', options: Array.isArray(f.options) ? f.options : undefined,
+      })) : [],
+      rows: [],
+      insert_after: p.insert_after ?? 'insights',
+    };
+    setC(prev => ({ ...prev, custom_sections: [...prev.custom_sections, cs] }));
+    setPresetMsg(`Added "${cs.name}" from preset.`);
+  };
+
+  const addPresetSectionBelow = (clicked: CustomSection, preset: PresetRow) => {
+    const p = preset.payload ?? {};
+    const cs: CustomSection = {
+      ...newSection(clicked.insert_after),
+      name: String(p.name ?? preset.name ?? ''),
+      description: String(p.description ?? ''),
+      is_repeater: !!p.is_repeater,
+      fields: Array.isArray(p.fields) ? p.fields.map((f: any): CustomField => ({
+        id: crypto.randomUUID(), label: String(f.label ?? ''),
+        type: (['text', 'number', 'textarea', 'richtext', 'date', 'url', 'select'].includes(f.type) ? f.type : 'text') as CustomFieldType,
+        options: Array.isArray(f.options) ? f.options : undefined,
+      })) : [],
+      rows: [],
+    };
+    setC(prev => {
+      const arr = [...prev.custom_sections];
+      const idx = arr.findIndex(x => x.id === clicked.id);
+      arr.splice(idx === -1 ? arr.length : idx + 1, 0, cs);
+      return { ...prev, custom_sections: arr };
+    });
+    setPresetMsg(`Added "${cs.name || preset.name}" from preset below the section.`);
+  };
+
+  const saveSectionAsPreset = async (s: CustomSection) => {
+    const name = window.prompt('Save this section as a preset. Name:', s.name || 'Untitled section');
+    if (!name) return;
+    setPresetSavingId(s.id);
+    const payload = {
+      name: s.name, description: s.description, is_repeater: s.is_repeater,
+      insert_after: s.insert_after, fields: s.fields.map(f => ({ label: f.label, type: f.type, options: f.options })),
+    };
+    const { data, error } = await supabase.from('section_presets')
+      .insert({ name: name.trim(), payload, created_by: profile?.id ?? null }).select().single();
+    setPresetSavingId(null);
+    if (error) { alert(error.message); return; }
+    setPresets(prev => [data as PresetRow, ...prev]);
+    setPresetMsg(`Saved preset "${(data as PresetRow).name}".`);
+  };
+
+  const removePreset = async (p: PresetRow) => {
+    if (!confirm(`Delete preset "${p.name}" from the shared library?`)) return;
+    const prev = presets;
+    setPresets(presets.filter(x => x.id !== p.id));
+    const { error } = await supabase.from('section_presets').delete().eq('id', p.id);
+    if (error) { alert(error.message); setPresets(prev); }
+  };
+
+  const customPresets: PresetRow[] = useMemo(() => presets.filter(p => p.kind === 'custom'), [presets]);
+  // Standard presets share one library across formats; v3 sections have their
+  // own field shapes, so namespace v3 standard presets ("v3:<id>") to keep them
+  // from clashing with a same-named v2/classic section.
+  const stdKey = (sectionId: string) => `v3:${sectionId}`;
+  const standardPresetsFor = (sectionId: string): PresetRow[] =>
+    presets.filter(p => p.kind === 'standard' && p.section_id === stdKey(sectionId));
+
+  const applyStandardPreset = (sectionId: string, data: any) => {
+    setC(prev => ({ ...prev, [sectionId]: data }));
+    setPresetMsg(`Loaded preset into ${SECTION_LABELS_V3[sectionId] ?? sectionId}.`);
+  };
+
+  const saveStandardPreset = async (sectionId: string) => {
+    const sectionLabel = SECTION_LABELS_V3[sectionId] ?? sectionId;
+    const name = window.prompt(`Save "${sectionLabel}" as a preset. Name:`, `${brand?.name ?? ''} — ${sectionLabel}`.trim());
+    if (!name) return;
+    const data = (c as any)[sectionId];
+    if (data == null) return;
+    const { data: row, error } = await supabase.from('section_presets')
+      .insert({ name: name.trim(), kind: 'standard', section_id: stdKey(sectionId), payload: { data }, created_by: profile?.id ?? null })
+      .select().single();
+    if (error) { alert(error.message); return; }
+    setPresets(prev => [row as PresetRow, ...prev]);
+    setPresetMsg(`Saved preset "${(row as PresetRow).name}".`);
+  };
+
+  const addComment = async (section: CommentSection, body: string, _authorName: string, parentId?: string) => {
+    if (!report) return;
+    const { data, error } = await supabase.functions.invoke('post-staff-comment', {
+      body: { report_id: report.id, section, body, parent_id: parentId ?? null },
+    });
+    if (error) throw error;
+    if ((data as any)?.error) throw new Error((data as any).error);
+    setComments(prev => [...prev, (data as any).comment as Comment]);
+  };
 
   // ----- generic section setters --------------------------------------------
   const setSec = (sectionId: string, key: string, v: any) =>
@@ -91,7 +250,7 @@ export default function WeeklyReportEditV3() {
     if (error) { setSamplingMsg({ kind: 'danger', text: error.message }); return; }
     const rows = (data as any[]) ?? [];
     if (rows.length === 0) {
-      setSamplingMsg({ kind: 'warning', text: `No Sample-Seeding entries for ${label} on this brand. Fill them on the brand's Sample Seeding tab, or enter the numbers manually.` });
+      setSamplingMsg({ kind: 'warning', text: `No Sample-Seeding data for ${label} on this brand. Fill it on the brand's Sample Seeding tab, or enter the numbers manually here.` });
       return;
     }
     const approved = rows.reduce((s, d) =>
@@ -101,21 +260,6 @@ export default function WeeklyReportEditV3() {
     setC(prev => ({ ...prev, sampling: { ...prev.sampling, samples_approved: approved, new_videos_posted: videos } }));
     setSamplingMsg({ kind: 'success', text: `Pulled ${approved} approved sample${approved === 1 ? '' : 's'} and ${videos} new video${videos === 1 ? '' : 's'} for ${label}. Don't forget to save.` });
   };
-
-  // Auto-fill §1 Sampling on first open. The brand's Sample-Seeding data
-  // (samples approved + new videos posted this week) is always available to
-  // whoever manages the brand, so pull it without waiting for a click — but
-  // only while both fields are still empty, so manual edits are never clobbered.
-  useEffect(() => {
-    if (!report || autoFilledSampling.current) return;
-    const s = c.sampling ?? {};
-    if (s.samples_approved == null && s.new_videos_posted == null) {
-      autoFilledSampling.current = true;
-      fetchSamplingFromBrand();
-    }
-    // Runs once when the report finishes loading; fetch reads live state itself.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [report]);
 
   // ----- §3 Product Analytics — load the brand's product catalogue into rows --
   const loadProductsIntoAnalytics = async () => {
@@ -128,13 +272,13 @@ export default function WeeklyReportEditV3() {
     if (error) { setProductsMsg({ kind: 'danger', text: error.message }); return; }
     const prods = (data as any[]) ?? [];
     if (prods.length === 0) {
-      setProductsMsg({ kind: 'warning', text: 'No products found for this brand. Add them on the brand’s Products tab, or add rows manually.' });
+      setProductsMsg({ kind: 'warning', text: 'No products found for this brand. Add them on the brand’s Products tab, or add rows manually here.' });
       return;
     }
     setC(prev => {
       // Preserve any metrics already typed, matched by product name.
       const existing = new Map((prev.product_analytics as any[]).map(r => [String(r.product ?? ''), r]));
-      const base = emptyRow(SECTION_BY_ID_V3.product_analytics);
+      const base = emptyRow(WEEKLY_SECTIONS_V3.find(s => s.id === 'product_analytics')!);
       const rows = prods.map(p => ({
         ...base,
         ...(existing.get(String(p.name)) ?? {}),
@@ -147,8 +291,6 @@ export default function WeeklyReportEditV3() {
   };
 
   // ----- §12 GMV Max — pull per-product ad spend from the brand's GMV Max page.
-  //  Same week match as v2 (exact week_start, else overlap), aggregated per
-  //  product with an "Other Products" catch-all row sorted last.
   const fetchGmvMaxProduct = async () => {
     if (!report) return;
     setFetchingGmv(true); setGmvMsg(null);
@@ -168,7 +310,7 @@ export default function WeeklyReportEditV3() {
     }
     if (weeklyIds.length === 0) {
       setFetchingGmv(false);
-      setGmvMsg({ kind: 'warning', text: `No GMV Max entry exists for ${label} on this brand. Add it on the brand's GMV Max tab, or enter rows manually.` });
+      setGmvMsg({ kind: 'warning', text: `No GMV Max data for ${label} on this brand. Add it on the brand's GMV Max tab, or enter rows manually here.` });
       return;
     }
     const [{ data: kids }, { data: prods }] = await Promise.all([
@@ -178,7 +320,7 @@ export default function WeeklyReportEditV3() {
     setFetchingGmv(false);
     const childRows = (kids as any[]) ?? [];
     if (childRows.length === 0) {
-      setGmvMsg({ kind: 'warning', text: `No product-level GMV Max data for ${label} on this brand. Open the brand's GMV Max tab and fill the product breakdown, or enter rows manually.` });
+      setGmvMsg({ kind: 'warning', text: `No product-level GMV Max data for ${label} on this brand. Open the brand's GMV Max tab and fill the product breakdown, or enter rows manually here.` });
       return;
     }
     const prodById = new Map(((prods as any[]) ?? []).map(p => [p.id, p]));
@@ -208,17 +350,6 @@ export default function WeeklyReportEditV3() {
     setGmvMsg({ kind: 'success', text: `Pulled ${rows.length} product row${rows.length === 1 ? '' : 's'} from GMV Max for ${label}. Don't forget to save.` });
   };
 
-  // ----- comments -----------------------------------------------------------
-  const addComment = async (section: CommentSection, body: string, _authorName: string, parentId?: string) => {
-    if (!report) return;
-    const { data, error } = await supabase.functions.invoke('post-staff-comment', {
-      body: { report_id: report.id, section, body, parent_id: parentId ?? null },
-    });
-    if (error) throw error;
-    if ((data as any)?.error) throw new Error((data as any).error);
-    setComments(prev => [...prev, (data as any).comment as Comment]);
-  };
-
   const submit = async (e: FormEvent, status: 'draft' | 'submitted') => {
     e.preventDefault();
     if (brand?.client_status === 'closed') {
@@ -234,15 +365,39 @@ export default function WeeklyReportEditV3() {
     nav(`/reporting/weekly/${id}`);
   };
 
+  const openCommentsModal = async () => {
+    setShowComments(true);
+    if (!selectedPriorId) return;
+    await loadPriorComments(selectedPriorId);
+  };
+  const loadPriorComments = async (priorId: string) => {
+    setLoadingComments(true);
+    const { data } = await supabase.from('report_comments')
+      .select('*').eq('report_id', priorId).order('created_at', { ascending: true });
+    setPriorComments((data as Comment[]) ?? []);
+    setLoadingComments(false);
+  };
+  const pullInComment = async (cm: Comment) => {
+    if (!report || !profile) return;
+    const priorLabel = priorReports.find(p => p.id === cm.report_id);
+    const origDate = new Date(cm.created_at).toLocaleDateString();
+    const quoted = cm.body.split('\n').map(l => `> ${l}`).join('\n');
+    const body = `📌 Referenced from ${priorLabel ? `Week #${priorLabel.week_number}` : 'prior report'} — ${cm.author_name} (${origDate}):\n${quoted}`;
+    try {
+      await addComment(cm.section as CommentSection, body, profile.full_name || profile.email || 'User');
+      setShowComments(false);
+    } catch (e: any) { alert(e?.message ?? 'Failed to pull comment'); }
+  };
+
   if (loading) return <div className="text-center py-5"><Spinner animation="border" /></div>;
   if (err && !report) return <Alert variant="danger">{err}</Alert>;
   if (!report || !brand) return null;
 
   const brandInactive = brand.client_status === 'closed';
-  const feedbackCount = (section: CommentSection) => comments.filter(x => x.section === section).length;
+  const sectionFeedbackCount = (section: CommentSection) => comments.filter(x => x.section === section).length;
 
   const FeedbackButton = ({ section }: { section: CommentSection }) => {
-    const n = feedbackCount(section);
+    const n = sectionFeedbackCount(section);
     if (n === 0) return null;
     return (
       <Button size="sm" variant="outline-primary" className="ms-2 d-inline-flex align-items-center gap-1"
@@ -253,6 +408,150 @@ export default function WeeklyReportEditV3() {
     );
   };
 
+  const StdPresetMenu = ({ sectionId }: { sectionId: string }) => {
+    const list = standardPresetsFor(sectionId);
+    return (
+      <Dropdown align="end" onClick={(e) => e.stopPropagation()}>
+        <Dropdown.Toggle size="sm" variant="outline-info" title="Save / load section preset">
+          <i className="bi bi-bookmark" />
+          {list.length > 0 && <Badge bg="info" pill className="ms-1">{list.length}</Badge>}
+        </Dropdown.Toggle>
+        <Dropdown.Menu style={{ minWidth: 260, maxHeight: 320, overflowY: 'auto' }}>
+          <Dropdown.Item as="button" onClick={() => saveStandardPreset(sectionId)}>
+            <i className="bi bi-bookmark-plus me-2" /> Save current as preset
+          </Dropdown.Item>
+          {list.length > 0 && <Dropdown.Divider />}
+          {list.map(p => (
+            <div key={p.id} className="d-flex align-items-center px-2 py-1" style={{ gap: 4 }}>
+              <Dropdown.Item as="button" className="flex-grow-1 px-2 py-1"
+                onClick={() => applyStandardPreset(sectionId, p.payload?.data)}>
+                <div className="fw-semibold small">{p.name}</div>
+                <small className="text-muted">{new Date(p.created_at).toLocaleDateString()}</small>
+              </Dropdown.Item>
+              {(p.created_by === profile?.id || profile?.role === 'bob') && (
+                <Button size="sm" variant="link" className="text-danger p-0 px-2"
+                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); removePreset(p); }} title="Delete preset">
+                  <i className="bi bi-trash" />
+                </Button>
+              )}
+            </div>
+          ))}
+        </Dropdown.Menu>
+      </Dropdown>
+    );
+  };
+
+  const HeaderWithFeedback = ({ title, section, extra, sectionId }: {
+    title: string; section: CommentSection; extra?: React.ReactNode; sectionId?: string;
+  }) => (
+    <div className="d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <span className="fw-semibold">{title}</span>
+      <div className="d-flex align-items-center gap-2">
+        {extra}
+        {sectionId && <StdPresetMenu sectionId={sectionId} />}
+        <AddSectionMenu onPick={(pl) => openAddSectionRelative({ type: 'standard', id: section as StandardSectionIdV3 }, pl)} />
+        <FeedbackButton section={section} />
+      </div>
+    </div>
+  );
+
+  // ----- custom section management ------------------------------------------
+  const openAddCustom = () => { setCsDraft(newSection('insights')); setCsIsEdit(false); setCsTargetIndex(null); setCsModalOpen(true); };
+  const openEditCustom = (s: CustomSection) => { setCsDraft({ ...s, fields: s.fields.map(f => ({ ...f })) }); setCsIsEdit(true); setCsModalOpen(true); };
+
+  const openAddSectionRelative = (clicked: ClickedSection, placement: 'above' | 'below') => {
+    const cs = c.custom_sections;
+    let anchor: string;
+    let index: number;
+    if (clicked.type === 'custom') {
+      anchor = clicked.section.insert_after;
+      const idx = cs.findIndex(s => s.id === clicked.section.id);
+      index = placement === 'below' ? idx + 1 : Math.max(0, idx);
+    } else if (placement === 'below') {
+      anchor = clicked.id;
+      const firstIdx = cs.findIndex(s => s.insert_after === anchor);
+      index = firstIdx === -1 ? cs.length : firstIdx;
+    } else {
+      const stdIdx = WEEKLY_STD_ORDER_V3.indexOf(clicked.id);
+      anchor = stdIdx > 0 ? WEEKLY_STD_ORDER_V3[stdIdx - 1] : 'start';
+      let lastIdx = -1;
+      cs.forEach((s, i) => { if (s.insert_after === anchor) lastIdx = i; });
+      index = lastIdx === -1 ? cs.length : lastIdx + 1;
+    }
+    setCsDraft(newSection(anchor));
+    setCsIsEdit(false);
+    setCsTargetIndex(index);
+    setCsModalOpen(true);
+  };
+
+  const saveCustomDef = (s: CustomSection) => {
+    if (csIsEdit) {
+      setC(prev => ({ ...prev, custom_sections: prev.custom_sections.map(x => x.id === s.id ? s : x) }));
+    } else {
+      setC(prev => {
+        const arr = [...prev.custom_sections];
+        if (csTargetIndex != null) arr.splice(Math.min(csTargetIndex, arr.length), 0, s);
+        else arr.push(s);
+        return { ...prev, custom_sections: arr };
+      });
+    }
+    setCsModalOpen(false);
+    setCsTargetIndex(null);
+  };
+  const removeCustom = (idToRemove: string) => {
+    if (!confirm('Delete this custom section and all its data?')) return;
+    setC(prev => ({ ...prev, custom_sections: prev.custom_sections.filter(s => s.id !== idToRemove) }));
+  };
+  const updateCustomData = (idToUpdate: string, patch: Partial<CustomSection>) => {
+    setC(prev => ({ ...prev, custom_sections: prev.custom_sections.map(s => s.id === idToUpdate ? { ...s, ...patch } : s) }));
+  };
+
+  const renderCustomAt = (anchor: StandardSectionIdV3) =>
+    customSectionsAt(c.custom_sections, anchor).map(s => (
+      <CustomSectionInline
+        key={s.id}
+        section={s}
+        paidCollabPrograms={pcPrograms}
+        onChange={(patch) => updateCustomData(s.id, patch)}
+        onEditDef={() => openEditCustom(s)}
+        onRemove={() => removeCustom(s.id)}
+        onAddSection={(placement) => openAddSectionRelative({ type: 'custom', section: s }, placement)}
+        headerExtra={
+          <>
+            <Dropdown>
+              <Dropdown.Toggle size="sm" variant="outline-info" title="Add a saved preset as a new section">
+                <i className="bi bi-bookmark" />
+              </Dropdown.Toggle>
+              <Dropdown.Menu align="end" style={{ minWidth: 240 }}>
+                <Dropdown.Header>Add preset as a new section below</Dropdown.Header>
+                {customPresets.length === 0 ? (
+                  <Dropdown.ItemText className="text-muted small">No saved presets yet.</Dropdown.ItemText>
+                ) : customPresets.map(p => (
+                  <Dropdown.Item key={p.id} as="button" onClick={() => addPresetSectionBelow(s, p)}>
+                    <i className="bi bi-box-arrow-in-down me-2" />{p.name}
+                  </Dropdown.Item>
+                ))}
+              </Dropdown.Menu>
+            </Dropdown>
+            <Button size="sm" variant="outline-info" disabled={presetSavingId === s.id}
+              onClick={() => saveSectionAsPreset(s)} title="Save this section as a reusable preset">
+              <i className="bi bi-bookmark-plus" />
+            </Button>
+            <FeedbackButton section={`cs:${s.id}` as CommentSection} />
+          </>
+        }
+      />
+    ));
+
+  const customSectionLabel = (section: CommentSection): string | undefined => {
+    if (!section.startsWith('cs:')) return undefined;
+    const csid = section.slice(3);
+    return c.custom_sections.find(s => s.id === csid)?.name;
+  };
+  const labelForFeedback = (section: CommentSection): string =>
+    customSectionLabel(section) ?? SECTION_LABELS_V3[section] ?? section;
+
+  // ----- reusable pull-button + message bar for AUTO sections ---------------
   const AutoFetchBar = ({ label, busy, onClick, msg, onClose }: {
     label: string; busy: boolean; onClick: () => void; msg: Msg; onClose: () => void;
   }) => (
@@ -325,6 +624,40 @@ export default function WeeklyReportEditV3() {
           </div>
         </div>
         <div className="d-flex gap-2 flex-wrap">
+          {priorReports.length > 0 && (
+            <Button variant="outline-info" onClick={openCommentsModal}>
+              <i className="bi bi-chat-left-text me-1" /> Load previous comments
+            </Button>
+          )}
+          <Dropdown>
+            <Dropdown.Toggle variant="outline-info" title="Insert a saved custom-section preset">
+              <i className="bi bi-bookmark me-1" /> Add from preset
+              {customPresets.length > 0 && <Badge bg="info" pill className="ms-1">{customPresets.length}</Badge>}
+            </Dropdown.Toggle>
+            <Dropdown.Menu align="end" style={{ minWidth: 280, maxHeight: 320, overflowY: 'auto' }}>
+              {customPresets.length === 0 ? (
+                <Dropdown.ItemText className="text-muted small">No saved custom-section presets yet.</Dropdown.ItemText>
+              ) : customPresets.map(p => (
+                <div key={p.id} className="d-flex align-items-center px-2 py-1" style={{ gap: 4 }}>
+                  <Dropdown.Item as="button" className="flex-grow-1 px-2 py-1" onClick={() => addCustomFromPreset(p)}>
+                    <div className="fw-semibold">{p.name}</div>
+                    <small className="text-muted">
+                      {p.payload?.is_repeater ? 'Table' : 'Long text'} · {p.payload?.fields?.length ?? 0} field{(p.payload?.fields?.length ?? 0) === 1 ? '' : 's'}
+                    </small>
+                  </Dropdown.Item>
+                  {(p.created_by === profile?.id || profile?.role === 'bob') && (
+                    <Button size="sm" variant="link" className="text-danger p-0 px-2"
+                      onClick={(e) => { e.stopPropagation(); e.preventDefault(); removePreset(p); }} title="Delete preset">
+                      <i className="bi bi-trash" />
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </Dropdown.Menu>
+          </Dropdown>
+          <Button variant="outline-success" onClick={openAddCustom}>
+            <i className="bi bi-plus-square me-1" /> Add custom section
+          </Button>
           <Button variant="outline-secondary" onClick={() => nav('/reporting/weekly')}>Cancel</Button>
           <Button variant="outline-primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
           <Button variant="primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
@@ -332,35 +665,32 @@ export default function WeeklyReportEditV3() {
       </div>
 
       {err && <Alert variant="danger">{err}</Alert>}
+      {presetMsg && <Alert variant="info" className="py-2 small" dismissible onClose={() => setPresetMsg(null)}>{presetMsg}</Alert>}
 
+      {renderCustomAt('start')}
+
+      {/* 12 standard sections, registry-driven */}
       {WEEKLY_SECTIONS_V3.map(def => (
         <Fragment key={def.id}>
           <Card className="mb-4" data-section={def.id}>
             <Card.Header>
-              <div className="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                <span className="fw-semibold">{def.num}. {def.title}</span>
-                <FeedbackButton section={def.id as CommentSection} />
-              </div>
+              <HeaderWithFeedback title={`${def.num}. ${def.title}`} section={def.id as CommentSection} sectionId={def.id} />
             </Card.Header>
             <Card.Body>
               {def.blurb && <p className="text-muted small mb-3">{def.blurb}</p>}
               {renderSectionBody(def)}
             </Card.Body>
           </Card>
+          {renderCustomAt(def.id)}
         </Fragment>
       ))}
 
-      {/* Insights — single rich-text block */}
+      {/* Insights — single advanced rich-text block (dividers built in) */}
       <Card className="mb-4" data-section="insights">
-        <Card.Header>
-          <div className="d-flex justify-content-between align-items-center flex-wrap gap-2">
-            <span className="fw-semibold">Insights</span>
-            <FeedbackButton section={'insights' as CommentSection} />
-          </div>
-        </Card.Header>
+        <Card.Header><HeaderWithFeedback title="Insights" section="insights" sectionId="insights" /></Card.Header>
         <Card.Body>
           <Form.Text className="text-muted d-block mb-2">
-            Write your insights for this week. Use the <strong>Divider</strong> button to separate topics.
+            Write your insights for this week. Use the <strong>Divider</strong> button to separate topics — pick its thickness, colour and style.
           </Form.Text>
           <RichTextEditor
             value={c.insights.summary}
@@ -370,6 +700,7 @@ export default function WeeklyReportEditV3() {
           />
         </Card.Body>
       </Card>
+      {renderCustomAt('insights')}
 
       {/* Approval Needed (optional) */}
       <Card className="mb-4">
@@ -391,18 +722,43 @@ export default function WeeklyReportEditV3() {
               placeholder="Describe what needs the client's approval this week…"
               minHeight={180}
             />
+            <div className="mt-3 row g-2 align-items-end">
+              <Form.Group className="col-md-5">
+                <Form.Label className="small fw-semibold">Auto-popup expires at <span className="text-muted">(optional)</span></Form.Label>
+                <Form.Control type="datetime-local"
+                  value={c.approval?.expires_at ? c.approval.expires_at.slice(0, 16) : ''}
+                  onChange={e => setC(prev => ({
+                    ...prev,
+                    approval: { ...prev.approval, expires_at: e.target.value ? new Date(e.target.value).toISOString() : null },
+                  }))} />
+              </Form.Group>
+              <div className="col-md-7">
+                <Form.Text className="text-muted">
+                  After this date the popup stops auto-opening — but the client can still view the Approval Needed / Action Items card, submit a decision, and reply in the thread. Leave empty for no expiry.
+                </Form.Text>
+              </div>
+            </div>
           </Card.Body>
         )}
       </Card>
 
+      <CustomSectionDefModal
+        show={csModalOpen} onHide={() => setCsModalOpen(false)} initial={csDraft}
+        onSave={saveCustomDef} isEdit={csIsEdit} positions={V3_POSITIONS}
+        hidePosition={!csIsEdit && csTargetIndex != null} key={csDraft.id}
+      />
+
       <Offcanvas show={!!feedbackSection} onHide={() => setFeedbackSection(null)} placement="end" style={{ width: 480 }}>
         <Offcanvas.Header closeButton>
-          <Offcanvas.Title><i className="bi bi-chat-left-text me-2" />Client feedback</Offcanvas.Title>
+          <Offcanvas.Title>
+            <i className="bi bi-chat-left-text me-2" />Client feedback
+            {feedbackSection && <small className="text-muted ms-2 fw-normal">— {labelForFeedback(feedbackSection)}</small>}
+          </Offcanvas.Title>
         </Offcanvas.Header>
         <Offcanvas.Body>
           {feedbackSection && (
             <SectionComments
-              section={feedbackSection} sectionLabel={feedbackSection}
+              section={feedbackSection} sectionLabel={labelForFeedback(feedbackSection)}
               comments={comments} mode="authed"
               currentAuthorName={profile?.full_name || profile?.email || 'User'}
               onAdd={(b, n, parentId) => addComment(feedbackSection, b, n, parentId)}
@@ -416,6 +772,58 @@ export default function WeeklyReportEditV3() {
         <Button variant="outline-primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
         <Button variant="primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
       </div>
+
+      <Modal show={showComments} onHide={() => setShowComments(false)} centered size="lg" scrollable>
+        <Modal.Header closeButton><Modal.Title>Previous comments — reference</Modal.Title></Modal.Header>
+        <Modal.Body>
+          {priorReports.length === 0 ? (
+            <p className="text-muted mb-0">No previous reports for this brand.</p>
+          ) : (
+            <>
+              <Form.Group className="mb-3">
+                <Form.Label className="small">Choose a report</Form.Label>
+                <Form.Select value={selectedPriorId} onChange={e => { setSelectedPriorId(e.target.value); loadPriorComments(e.target.value); }}>
+                  {priorReports.map(p => (
+                    <option key={p.id} value={p.id}>Week #{p.week_number} — {formatRange(p.week_start, p.week_end)}</option>
+                  ))}
+                </Form.Select>
+              </Form.Group>
+              {loadingComments ? (
+                <div className="text-center py-4"><Spinner animation="border" size="sm" /></div>
+              ) : priorComments.length === 0 ? (
+                <p className="text-muted text-center py-3 mb-0">No comments on this report.</p>
+              ) : (
+                Object.keys(SECTION_LABELS_V3).map(section => {
+                  const sc = priorComments.filter(x => x.section === section);
+                  if (sc.length === 0) return null;
+                  return (
+                    <div key={section} className="mb-3">
+                      <h6 className="text-muted">{SECTION_LABELS_V3[section]}</h6>
+                      {sc.map(cm => (
+                        <div key={cm.id} className="p-2 mb-2 rounded small" style={{ background: '#f8fafc', border: '1px solid #e5e7eb' }}>
+                          <div className="d-flex align-items-center gap-2 mb-1">
+                            <strong>{cm.author_name}</strong>
+                            <Badge bg={cm.author_type === 'client' ? 'info' : cm.author_type === 'bob' ? 'warning' : 'success'} text={cm.author_type === 'bob' ? 'dark' : undefined}>
+                              {cm.author_type === 'client' ? 'Client' : cm.author_type === 'bob' ? 'Bob' : 'APC'}
+                            </Badge>
+                            <span className="text-muted">{new Date(cm.created_at).toLocaleDateString()}</span>
+                            <Button size="sm" variant="outline-primary" className="ms-auto py-0 px-2" style={{ fontSize: '.75rem' }}
+                              onClick={() => pullInComment(cm)} title="Copy this comment into the current report for reference">
+                              <i className="bi bi-pin-angle me-1" /> Pull into this report
+                            </Button>
+                          </div>
+                          <div style={{ whiteSpace: 'pre-wrap' }}>{cm.body}</div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })
+              )}
+            </>
+          )}
+        </Modal.Body>
+        <Modal.Footer><Button variant="secondary" onClick={() => setShowComments(false)}>Close</Button></Modal.Footer>
+      </Modal>
     </div>
   );
 }
