@@ -25,7 +25,7 @@ const storeMode = 'supabase';
    Fully isolated from the creatorsxbrands app.
 ════════════════════════════════════════════════════════════ */
 
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const AVATAR_GRADIENTS = [
   'linear-gradient(135deg,#6366F1,#8B5CF6)',
   'linear-gradient(135deg,#EC4899,#F43F5E)',
@@ -150,7 +150,7 @@ function focusProductList(bm) {
   try {
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) return parsed.map(p => (typeof p === 'string' ? { name: '', url: p } : { name: p.name || '', url: p.url || '' })).filter(p => p.url || p.name);
-  } catch {}
+  } catch { }
   // legacy: newline-separated URLs (before product names were added)
   return raw.split(/\n+/).map(s => s.trim()).filter(Boolean).map(url => ({ name: '', url }));
 }
@@ -168,10 +168,10 @@ function tiktokAccounts(raw) {
 }
 const isValidUrl = s => !!s && (s.startsWith('http://') || s.startsWith('https://'));
 const isValidAdCode = s => !s || (s.startsWith('#') && s.endsWith('='));
-function scrollTop() { try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch {} }
+function scrollTop() { try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch { } }
 function copyText(t) {
-  try { if (navigator.clipboard?.writeText) { navigator.clipboard.writeText(t); return; } } catch {}
-  try { const ta = document.createElement('textarea'); ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); } catch {}
+  try { if (navigator.clipboard?.writeText) { navigator.clipboard.writeText(t); return; } } catch { }
+  try { const ta = document.createElement('textarea'); ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); } catch { }
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -186,7 +186,7 @@ export default function HandlerCollabApp({ initialBrandId = null, initialMonth =
     const root = document.documentElement;
     root.style.colorScheme = 'light';
     root.removeAttribute('data-theme');
-    try { document.body.style.background = '#FAFAFA'; } catch {}
+    try { document.body.style.background = '#FAFAFA'; } catch { }
   }, []);
 
   return <Dashboard initialBrandId={initialBrandId} initialMonth={initialMonth} />;
@@ -293,7 +293,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
     });
     if (!updates.length) return;
     setCreators(prev => prev.map(c => { const u = updates.find(x => x.id === c.id); return u ? { ...c, ...u.patch } : c; }));
-    for (const u of updates) { try { await store.updateCreator(u.id, u.patch); } catch {} }
+    for (const u of updates) { try { await store.updateCreator(u.id, u.patch); } catch { } }
   }, []);
 
   const reload = useCallback(async () => {
@@ -328,7 +328,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
   // notifications (in-app + browser via NotificationsContext). Runs on load + every
   // minute; reloads so badges/counts refresh when something fired.
   useEffect(() => {
-    const tick = () => { store.fireDueNoteReminders().then(c => { if (c > 0) reload(); }).catch(() => {}); };
+    const tick = () => { store.fireDueNoteReminders().then(c => { if (c > 0) reload(); }).catch(() => { }); };
     tick();
     const iv = setInterval(tick, 60000);
     return () => clearInterval(iv);
@@ -397,7 +397,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'handler_collab_brand_months' }, ping)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'handler_notes' }, ping)
       .subscribe();
-    return () => { clearTimeout(t); try { supabase.removeChannel(ch); } catch {} };
+    return () => { clearTimeout(t); try { supabase.removeChannel(ch); } catch { } };
   }, [reload]);
 
   /* brand rows for selected month */
@@ -542,7 +542,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
     for (const s of sibs) {
       const patch = {};
       Object.entries(shared).forEach(([k, v]) => { if (v && s[k] !== v) patch[k] = v; });
-      if (Object.keys(patch).length) { try { await store.updateCreator(s.id, patch); } catch {} }
+      if (Object.keys(patch).length) { try { await store.updateCreator(s.id, patch); } catch { } }
     }
   }
   async function saveCreator(mode, data) {
@@ -696,7 +696,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
   }, [reload]);
   const deleteOpenNote = useCallback(async (n) => {
     if (!window.confirm('Delete this note?')) return;
-    try { await store.deleteNote(n.id); } catch {}
+    try { await store.deleteNote(n.id); } catch { }
     setOpenNote(null); reload();
   }, [reload]);
   // notes (per brand, per month) — optimistic + persist
@@ -787,33 +787,33 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
           ) : (
             drillId && drillBrand
               ? <Drilldown
-                  brand={drillBrand} row={drillRow} month={month} creators={drillCreators}
-                  onBack={() => { setDrillId(null); scrollTop(); }}
-                  onAddCreator={() => setCreatorEditor({ mode: 'add', brandId: drillId })}
-                  onEditCreator={(c) => setCreatorEditor({ mode: 'edit', brandId: drillId, creator: c })}
-                  onDeleteCreator={removeCreator}
-                  onEditBudget={() => setBrandEditor({ mode: 'edit', brand: { id: drillId, name: drillBrand.name } })}
-                  onNotes={() => setNotesBrand({ id: drillId, name: drillBrand.name })}
-                  notesText={(bmByKey[`${drillId}|${month}`] || {}).notes || ''}
-                  patchCreatorLocal={patchCreatorLocal}
-                  onSetStatus={setCreatorStatus}
-                  onToggleVisible={setCreatorPendingVisible}
-                  onSetContractLink={setCreatorContractLink}
-                  commentCount={comments.filter(c => c.brand_id === drillId).length}
-                  onComments={() => openComments(drillId, 'brand', '')}
-                  creatorNoteCount={creatorNoteCount} onCreatorNotes={openCreatorNotes}
-                />
+                brand={drillBrand} row={drillRow} month={month} creators={drillCreators}
+                onBack={() => { setDrillId(null); scrollTop(); }}
+                onAddCreator={() => setCreatorEditor({ mode: 'add', brandId: drillId })}
+                onEditCreator={(c) => setCreatorEditor({ mode: 'edit', brandId: drillId, creator: c })}
+                onDeleteCreator={removeCreator}
+                onEditBudget={() => setBrandEditor({ mode: 'edit', brand: { id: drillId, name: drillBrand.name } })}
+                onNotes={() => setNotesBrand({ id: drillId, name: drillBrand.name })}
+                notesText={(bmByKey[`${drillId}|${month}`] || {}).notes || ''}
+                patchCreatorLocal={patchCreatorLocal}
+                onSetStatus={setCreatorStatus}
+                onToggleVisible={setCreatorPendingVisible}
+                onSetContractLink={setCreatorContractLink}
+                commentCount={comments.filter(c => c.brand_id === drillId).length}
+                onComments={() => openComments(drillId, 'brand', '')}
+                creatorNoteCount={creatorNoteCount} onCreatorNotes={openCreatorNotes}
+              />
               : <BrandLevel
-                  rows={brandRows} totals={totals} month={month}
-                  search={search} setSearch={setSearch}
-                  onOpen={(id) => { setDrillId(id); scrollTop(); }}
-                  onEditBudget={(r) => setBrandEditor({ mode: 'edit', brand: brands.find(b => b.id === r.id) || { id: r.id, name: r.brand } })}
-                  onAddBrand={() => setBrandEditor({ mode: 'add', brand: { id: null, name: '' } })}
-                  onNotes={(r) => setNotesBrand({ id: r.id, name: r.brand })}
-                  noteCounts={noteCountByBrand}
-                  onBrandNotes={(r) => setKeepBrand({ id: r.id, name: r.brand })}
-                  onReorder={reorderBrands}
-                />
+                rows={brandRows} totals={totals} month={month}
+                search={search} setSearch={setSearch}
+                onOpen={(id) => { setDrillId(id); scrollTop(); }}
+                onEditBudget={(r) => setBrandEditor({ mode: 'edit', brand: brands.find(b => b.id === r.id) || { id: r.id, name: r.brand } })}
+                onAddBrand={() => setBrandEditor({ mode: 'add', brand: { id: null, name: '' } })}
+                onNotes={(r) => setNotesBrand({ id: r.id, name: r.brand })}
+                noteCounts={noteCountByBrand}
+                onBrandNotes={(r) => setKeepBrand({ id: r.id, name: r.brand })}
+                onReorder={reorderBrands}
+              />
           )
         )}
       </div>
@@ -918,9 +918,9 @@ function DiscussionsView({ comments, brandById, creators, onOpen }) {
 
   const targetLabel = (t) => t.tt === 'brand' ? 'Whole brand' : t.tt === 'insights' ? 'Insights'
     : t.tt === 'kpi' ? `KPI · ${CD_KPIS.find(k => k.id === t.tk)?.label ?? t.tk}`
-    : t.tt === 'program' ? `Program · ${monthLabel(t.tk)}`
-    : t.tt === 'week' ? `Week · ${rangeShort(t.tk, addDaysISO(t.tk, 6))}`
-    : `Creator · ${creators.find(c => c.id === t.tk)?.name ?? t.tk}`;
+      : t.tt === 'program' ? `Program · ${monthLabel(t.tk)}`
+        : t.tt === 'week' ? `Week · ${rangeShort(t.tk, addDaysISO(t.tk, 6))}`
+          : `Creator · ${creators.find(c => c.id === t.tk)?.name ?? t.tk}`;
 
   if (threads.length === 0) {
     return <div className="pc-card"><div className="pc-empty pc-empty-lg"><div className="pc-empty-icon">💬</div><h3>No discussions yet</h3><p>Comments from clients and your replies show up here, grouped by level. You'll get a notification when a client comments.</p></div></div>;
@@ -993,8 +993,8 @@ function CommentsDrawer({ brand, comments, creators, brandMonths, currentName, i
   const needsKey = tt === 'kpi' || tt === 'program' || tt === 'week' || tt === 'creator';
   const keyOptions = tt === 'kpi' ? CD_KPIS.map(k => ({ value: k.id, label: k.label }))
     : tt === 'program' ? months.map(m => ({ value: m, label: monthLabel(m) }))
-    : tt === 'week' ? weeks.map(w => ({ value: w, label: rangeShort(w, addDaysISO(w, 6)) }))
-    : tt === 'creator' ? brandCreators.map(c => ({ value: c.id, label: c.name })) : [];
+      : tt === 'week' ? weeks.map(w => ({ value: w, label: rangeShort(w, addDaysISO(w, 6)) }))
+        : tt === 'creator' ? brandCreators.map(c => ({ value: c.id, label: c.name })) : [];
 
   function pickType(nt) {
     setTt(nt);
@@ -1006,10 +1006,10 @@ function CommentsDrawer({ brand, comments, creators, brandMonths, currentName, i
 
   const title = tt === 'brand' ? `Whole brand · ${brand.name}`
     : tt === 'insights' ? 'Insights'
-    : tt === 'kpi' ? `KPI · ${CD_KPIS.find(k => k.id === tk)?.label ?? ''}`
-    : tt === 'program' ? `Program · ${tk ? monthLabel(tk) : ''}`
-    : tt === 'week' ? `Week · ${tk ? rangeShort(tk, addDaysISO(tk, 6)) : ''}`
-    : `Creator · ${brandCreators.find(c => c.id === tk)?.name ?? ''}`;
+      : tt === 'kpi' ? `KPI · ${CD_KPIS.find(k => k.id === tk)?.label ?? ''}`
+        : tt === 'program' ? `Program · ${tk ? monthLabel(tk) : ''}`
+          : tt === 'week' ? `Week · ${tk ? rangeShort(tk, addDaysISO(tk, 6)) : ''}`
+            : `Creator · ${brandCreators.find(c => c.id === tk)?.name ?? ''}`;
 
   // Existing threads (grouped) for quick navigation.
   const threads = useMemo(() => {
@@ -1019,9 +1019,9 @@ function CommentsDrawer({ brand, comments, creators, brandMonths, currentName, i
   }, [bComments]);
   const threadLabel = (t, key) => t === 'brand' ? 'Brand' : t === 'insights' ? 'Insights'
     : t === 'kpi' ? `KPI · ${CD_KPIS.find(x => x.id === key)?.label ?? key}`
-    : t === 'program' ? `Program · ${monthLabel(key)}`
-    : t === 'week' ? `Week · ${rangeShort(key, addDaysISO(key, 6))}`
-    : `Creator · ${brandCreators.find(c => c.id === key)?.name ?? key}`;
+      : t === 'program' ? `Program · ${monthLabel(key)}`
+        : t === 'week' ? `Week · ${rangeShort(key, addDaysISO(key, 6))}`
+          : `Creator · ${brandCreators.find(c => c.id === key)?.name ?? key}`;
 
   return (
     <div className="pc-drawer-overlay" onClick={onClose}>
@@ -1350,7 +1350,7 @@ async function contractTemplatePayload() {
           fr.onerror = () => res(null);
           fr.readAsDataURL(blob);
         });
-      } catch {}
+      } catch { }
     }
     return { repName: s.rep_name || '', signatureDataUrl };
   } catch { return {}; }
@@ -1494,7 +1494,7 @@ function CreatorRow({ c, idx, open, onToggle, onEdit, onDelete, patchCreatorLoca
   const rowRef = useRef(null);
   useEffect(() => {
     if (open && rowRef.current?.scrollIntoView) {
-      try { rowRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch {}
+      try { rowRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch { }
     }
   }, [open]);
   return (
@@ -1755,9 +1755,9 @@ function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, onToggleVisible, select
 ════════════════════════════════════════════════════════════ */
 const RD_STATUS = {
   videos_in_progress: { label: 'In progress', cls: 'prog', color: '#1259C3' },
-  follow_up:          { label: 'Follow-up',   cls: 'fup',  color: '#C62828' },
-  pending:            { label: 'Pending pay',  cls: 'pend', color: '#E8862E' },
-  paid:               { label: 'Paid',         cls: 'paid', color: '#198754' },
+  follow_up: { label: 'Follow-up', cls: 'fup', color: '#C62828' },
+  pending: { label: 'Pending pay', cls: 'pend', color: '#E8862E' },
+  paid: { label: 'Paid', cls: 'paid', color: '#198754' },
 };
 const rdDelivered = (c) => Array.isArray(c.video_codes) ? c.video_codes.filter(v => v?.video && String(v.video).trim()).length : 0;
 const rdAgreed = (c) => Number(c.videos_count) || 0;
@@ -1838,7 +1838,7 @@ function ReportingView({ brands, brandById, creators, month, comments = [], onOp
     scoped.map(c => ({ name: c.name || '—', gmv: periodGmv(c) }))
       .filter(x => x.gmv > 0).sort((a, b) => b.gmv - a.gmv).slice(0, 6)
       .map(x => ({ name: x.name.length > 16 ? x.name.slice(0, 16) + '…' : x.name, gmv: x.gmv })),
-  [scoped, month, isWeekly, activeWeek]);
+    [scoped, month, isWeekly, activeWeek]);
 
   const payMix = useMemo(() => {
     const m = { videos_in_progress: 0, follow_up: 0, pending: 0, paid: 0 };
@@ -1849,7 +1849,7 @@ function ReportingView({ brands, brandById, creators, month, comments = [], onOp
   const creatorRows = useMemo(() =>
     scoped.map(c => ({ c, del: rdDelivered(c), ag: rdAgreed(c), gmv: periodGmv(c) }))
       .sort((a, b) => b.gmv - a.gmv || b.del - a.del).slice(0, 12),
-  [scoped, month, isWeekly, activeWeek]);
+    [scoped, month, isWeekly, activeWeek]);
 
   const approvals = useMemo(() => {
     const pays = scoped.filter(c => c.payment_status === 'pending').map(c => ({ c, amount: Number(c.amount) || 0 }));
@@ -1945,11 +1945,11 @@ function ReportingView({ brands, brandById, creators, month, comments = [], onOp
 
       {/* KPI tiles */}
       <div className="pc-rd-kpis">
-        <RKpi icon="bi-people-fill"      color="#6610F2" label="Active creators"   value={fmtNum(kpis.active)}     sub={`${scoped.length} total`} />
-        <RKpi icon="bi-collection-play-fill" color="#198754" label="Videos posted" value={fmtNum(kpis.posted)}     sub="delivered" />
-        <RKpi icon="bi-hourglass-split"  color="#0DCAF0" label="In pipeline"      value={fmtNum(kpis.pipeline)}  sub="to deliver" />
-        <RKpi icon="bi-cash-stack"       color="#E8862E" label="Pending payments" value={fmt$(kpis.pendingAmt)}  sub={`${kpis.pendingCount} creator${kpis.pendingCount === 1 ? '' : 's'}`} />
-        <RKpi icon="bi-graph-up-arrow"   color="#1259C3" label="GMV generated"    value={fmt$(kpis.gmv)}        sub={kpis.ad > 0 ? `${kpis.roas.toFixed(2)}x ROAS` : (isWeekly ? (activeWeek ? rangeShort(activeWeek, addDaysISO(activeWeek, 6)) : 'all weeks') : monthLabel(month))} />
+        <RKpi icon="bi-people-fill" color="#6610F2" label="Active creators" value={fmtNum(kpis.active)} sub={`${scoped.length} total`} />
+        <RKpi icon="bi-collection-play-fill" color="#198754" label="Videos posted" value={fmtNum(kpis.posted)} sub="delivered" />
+        <RKpi icon="bi-hourglass-split" color="#0DCAF0" label="In pipeline" value={fmtNum(kpis.pipeline)} sub="to deliver" />
+        <RKpi icon="bi-cash-stack" color="#E8862E" label="Pending payments" value={fmt$(kpis.pendingAmt)} sub={`${kpis.pendingCount} creator${kpis.pendingCount === 1 ? '' : 's'}`} />
+        <RKpi icon="bi-graph-up-arrow" color="#1259C3" label="GMV generated" value={fmt$(kpis.gmv)} sub={kpis.ad > 0 ? `${kpis.roas.toFixed(2)}x ROAS` : (isWeekly ? (activeWeek ? rangeShort(activeWeek, addDaysISO(activeWeek, 6)) : 'all weeks') : monthLabel(month))} />
       </div>
 
       {/* charts */}
@@ -2935,87 +2935,87 @@ function CreatorEditor({ editor, month, directory = [], categories = [], brandPr
         <h3>{isAdd ? 'Onboard creator' : 'Edit creator'}</h3>
         <div className="pc-modal-sub">{monthLabel(monthKey(f.onboarded_on) || month)}</div>
         <div className="pc-modal-body">
-        <div className="pc-field" style={{ position: 'relative' }}>
-          <label>Name</label>
-          <input className="pc-input" placeholder="Creator name" value={f.name} autoFocus
-            onChange={e => { set('name', e.target.value); setShowSug(true); }}
-            onFocus={() => setShowSug(true)}
-            onBlur={() => setTimeout(() => setShowSug(false), 150)} />
-          {isAdd && showSug && matches.length > 0 && (
-            <div className="pc-suggest">
-              <div className="pc-suggest-head">Already worked with — tap to auto-fill</div>
-              {matches.map((d, i) => (
-                <button type="button" key={i} className="pc-suggest-item" onClick={() => pick(d)}>
-                  <span className="pc-suggest-name">{d.name}</span>
-                  <span className="pc-suggest-meta">{tiktokAccounts(d.tiktok_handle).map(a => a.handle).join(' · ') || (d.paypal || d.zelle || '—')}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="pc-field">
-          <label>TikTok account(s)</label>
-          {tiktoks.map((t, i) => (
-            <div className="pc-multirow" key={i}>
-              <input className="pc-input" placeholder="@handle or URL" value={t}
-                onChange={e => setTiktoks(prev => prev.map((x, j) => (j === i ? e.target.value : x)))} />
-              {tiktoks.length > 1 && <button type="button" className="pc-multix" title="Remove"
-                onClick={() => setTiktoks(prev => prev.filter((_, j) => j !== i))}>×</button>}
-            </div>
-          ))}
-          <button type="button" className="pc-btn pc-btn-ghost pc-btn-sm" style={{ marginTop: 2 }}
-            onClick={() => setTiktoks(prev => [...prev, ''])}>+ Add another account</button>
-        </div>
-        <div className="pc-field2">
-          <div className="pc-field"><label>Number</label><input className="pc-input" placeholder="phone" value={f.phone} onChange={e => set('phone', e.target.value)} /></div>
-          <div className="pc-field"><label>Email</label><input className="pc-input" placeholder="email" value={f.email} onChange={e => set('email', e.target.value)} /></div>
-        </div>
-        <div className="pc-field"><label>Category</label>
-          <input className="pc-input" list="pc-catlist" placeholder="e.g. Beauty · Tech · Fitness" value={f.category} onChange={e => set('category', e.target.value)} />
-          <datalist id="pc-catlist">{categories.map(cat => <option key={cat} value={cat} />)}</datalist>
-        </div>
-        <div className="pc-field">
-          <label>Promoting product{prods.length === 1 ? '' : '(s)'}</label>
-          <div className="pc-prodbox">
-            {prods.length > 0 && (
-              <div className="pc-prodchips">
-                {prods.map((p, i) => (
-                  <span className="pc-prodchip sel" key={i} title={p.url || p.name}>
-                    <span className="pc-prodchip-dot" />
-                    <span className="pc-prodchip-name">{p.name || p.url}</span>
-                    <button type="button" className="pc-prodchip-x" onClick={() => removeProd(i)} title="Remove">×</button>
-                  </span>
+          <div className="pc-field" style={{ position: 'relative' }}>
+            <label>Name</label>
+            <input className="pc-input" placeholder="Creator name" value={f.name} autoFocus
+              onChange={e => { set('name', e.target.value); setShowSug(true); }}
+              onFocus={() => setShowSug(true)}
+              onBlur={() => setTimeout(() => setShowSug(false), 150)} />
+            {isAdd && showSug && matches.length > 0 && (
+              <div className="pc-suggest">
+                <div className="pc-suggest-head">Already worked with — tap to auto-fill</div>
+                {matches.map((d, i) => (
+                  <button type="button" key={i} className="pc-suggest-item" onClick={() => pick(d)}>
+                    <span className="pc-suggest-name">{d.name}</span>
+                    <span className="pc-suggest-meta">{tiktokAccounts(d.tiktok_handle).map(a => a.handle).join(' · ') || (d.paypal || d.zelle || '—')}</span>
+                  </button>
                 ))}
               </div>
             )}
-            {pickableProducts.length > 0 && (
-              <div className="pc-prodpick">
-                <span className="pc-prodpick-l">From this brand</span>
+          </div>
+          <div className="pc-field">
+            <label>TikTok account(s)</label>
+            {tiktoks.map((t, i) => (
+              <div className="pc-multirow" key={i}>
+                <input className="pc-input" placeholder="@handle or URL" value={t}
+                  onChange={e => setTiktoks(prev => prev.map((x, j) => (j === i ? e.target.value : x)))} />
+                {tiktoks.length > 1 && <button type="button" className="pc-multix" title="Remove"
+                  onClick={() => setTiktoks(prev => prev.filter((_, j) => j !== i))}>×</button>}
+              </div>
+            ))}
+            <button type="button" className="pc-btn pc-btn-ghost pc-btn-sm" style={{ marginTop: 2 }}
+              onClick={() => setTiktoks(prev => [...prev, ''])}>+ Add another account</button>
+          </div>
+          <div className="pc-field2">
+            <div className="pc-field"><label>Number</label><input className="pc-input" placeholder="phone" value={f.phone} onChange={e => set('phone', e.target.value)} /></div>
+            <div className="pc-field"><label>Email</label><input className="pc-input" placeholder="email" value={f.email} onChange={e => set('email', e.target.value)} /></div>
+          </div>
+          <div className="pc-field"><label>Category</label>
+            <input className="pc-input" list="pc-catlist" placeholder="e.g. Beauty · Tech · Fitness" value={f.category} onChange={e => set('category', e.target.value)} />
+            <datalist id="pc-catlist">{categories.map(cat => <option key={cat} value={cat} />)}</datalist>
+          </div>
+          <div className="pc-field">
+            <label>Promoting product{prods.length === 1 ? '' : '(s)'}</label>
+            <div className="pc-prodbox">
+              {prods.length > 0 && (
                 <div className="pc-prodchips">
-                  {pickableProducts.map((p, i) => (
-                    <button type="button" className="pc-prodchip add" key={i} onClick={() => toggleProd(p)} title={p.url || p.name}>+ {p.name || p.url}</button>
+                  {prods.map((p, i) => (
+                    <span className="pc-prodchip sel" key={i} title={p.url || p.name}>
+                      <span className="pc-prodchip-dot" />
+                      <span className="pc-prodchip-name">{p.name || p.url}</span>
+                      <button type="button" className="pc-prodchip-x" onClick={() => removeProd(i)} title="Remove">×</button>
+                    </span>
                   ))}
                 </div>
+              )}
+              {pickableProducts.length > 0 && (
+                <div className="pc-prodpick">
+                  <span className="pc-prodpick-l">From this brand</span>
+                  <div className="pc-prodchips">
+                    {pickableProducts.map((p, i) => (
+                      <button type="button" className="pc-prodchip add" key={i} onClick={() => toggleProd(p)} title={p.url || p.name}>+ {p.name || p.url}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="pc-multirow">
+                <input className="pc-input" placeholder="Product name" value={prodInput}
+                  onChange={e => setProdInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCustomProd(); } }} />
+                <button type="button" className="pc-prodadd" onClick={addCustomProd} title="Add product" disabled={!prodInput.trim()}>+</button>
               </div>
-            )}
-            <div className="pc-multirow">
-              <input className="pc-input" placeholder="Product name" value={prodInput}
-                onChange={e => setProdInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCustomProd(); } }} />
-              <button type="button" className="pc-prodadd" onClick={addCustomProd} title="Add product" disabled={!prodInput.trim()}>+</button>
             </div>
           </div>
-        </div>
-        <div className="pc-field2">
-          <div className="pc-field"><label>Amount ($)</label><input className="pc-input" type="number" inputMode="numeric" placeholder="200" value={f.amount} onChange={e => set('amount', e.target.value)} /></div>
-          <div className="pc-field"><label>Videos</label><input className="pc-input" type="number" inputMode="numeric" placeholder="5" value={f.videos_count} onChange={e => set('videos_count', e.target.value)} /></div>
-        </div>
-        <div className="pc-field"><label>Onboarded on</label><input className="pc-input" type="date" value={f.onboarded_on} onChange={e => set('onboarded_on', e.target.value)} /></div>
-        <div className="pc-field2">
-          <div className="pc-field"><label>PayPal</label><input className="pc-input" placeholder="email" value={f.paypal} onChange={e => set('paypal', e.target.value)} /></div>
-          <div className="pc-field"><label>Zelle</label><input className="pc-input" placeholder="email / phone" value={f.zelle} onChange={e => set('zelle', e.target.value)} /></div>
-        </div>
-        <div className="pc-field"><label>Signed contract link</label><input className="pc-input" placeholder="Drive link to the signed contract" value={f.contract_url} onChange={e => set('contract_url', e.target.value)} /></div>
+          <div className="pc-field2">
+            <div className="pc-field"><label>Amount ($)</label><input className="pc-input" type="number" inputMode="numeric" placeholder="200" value={f.amount} onChange={e => set('amount', e.target.value)} /></div>
+            <div className="pc-field"><label>Videos</label><input className="pc-input" type="number" inputMode="numeric" placeholder="5" value={f.videos_count} onChange={e => set('videos_count', e.target.value)} /></div>
+          </div>
+          <div className="pc-field"><label>Onboarded on</label><input className="pc-input" type="date" value={f.onboarded_on} onChange={e => set('onboarded_on', e.target.value)} /></div>
+          <div className="pc-field2">
+            <div className="pc-field"><label>PayPal</label><input className="pc-input" placeholder="email" value={f.paypal} onChange={e => set('paypal', e.target.value)} /></div>
+            <div className="pc-field"><label>Zelle</label><input className="pc-input" placeholder="email / phone" value={f.zelle} onChange={e => set('zelle', e.target.value)} /></div>
+          </div>
+          <div className="pc-field"><label>Signed contract link</label><input className="pc-input" placeholder="Drive link to the signed contract" value={f.contract_url} onChange={e => set('contract_url', e.target.value)} /></div>
         </div>
         <div className="pc-modal-actions">
           <button className="pc-btn pc-btn-ghost" onClick={onClose}>Cancel</button>
@@ -3080,7 +3080,7 @@ function ContractTemplateModal({ onClose }) {
   function padDown(e) {
     e.preventDefault();
     const c = padRef.current;
-    try { c.setPointerCapture(e.pointerId); } catch {}
+    try { c.setPointerCapture(e.pointerId); } catch { }
     const ctx = c.getContext('2d');
     ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#1B2430';
     const p = padPos(e);
@@ -3159,10 +3159,20 @@ function ContractTemplateModal({ onClose }) {
                 onPointerDown={padDown} onPointerMove={padMove} onPointerUp={padUp} onPointerLeave={padUp} />
               <div className="pc-sig-actions">
                 <span className="pc-sig-hint">Draw above with mouse / finger, or</span>
-                <label className="pc-btn pc-btn-ghost pc-btn-sm" style={{ cursor: 'pointer' }}>
+                <label
+                  className="pc-btn pc-btn-ghost pc-btn-sm"
+                  style={{
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    outline: '1px solid #b2b2b2'
+                  }}
+                >
                   Upload SVG
                   <input type="file" accept=".svg,image/svg+xml" style={{ display: 'none' }} onChange={onUploadSvg} />
                 </label>
+
                 {padDirty && <button type="button" className="pc-btn pc-btn-ghost pc-btn-sm" onClick={clearPad}>Clear drawing</button>}
               </div>
             </div>
