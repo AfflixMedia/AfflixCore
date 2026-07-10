@@ -15,6 +15,9 @@ export type ContractInput = {
   paymentMethod: string;     // "Zelle" / "PayPal" / "Zelle or PayPal"
   effectiveDate?: string | null; // ISO YYYY-MM-DD (onboarding date); null = today
   productNames?: string[];   // featured product(s); [] = "<brand> products"
+  // Handler's contract-template settings (signature block only):
+  repName?: string;              // Brand Representative name
+  signatureDataUrl?: string | null; // PNG data URL, drawn/embedded on the Signature line
 };
 
 type Seg = { t: string; b?: boolean };
@@ -176,12 +179,36 @@ export async function downloadCreatorContract(input: ContractInput) {
   heading('8. Entire Agreement');
   para([{ t: 'This document represents the complete agreement between both parties and supersedes all prior discussions or communications relating to this collaboration.' }], { after: 16 });
 
+  // "Signature:" line with the handler's saved signature image drawn over the
+  // blank line (reference doc has a handwritten scrawl there). Falls back to
+  // the plain underscore line when no image is available/parsable.
+  function signatureLine(img?: string | null) {
+    if (!img) { para([{ t: 'Signature:', b: true }, { t: '____________________' }], { after: 6 }); return; }
+    let w = 120, h = 32;
+    try {
+      const props = doc.getImageProperties(img);
+      if (props?.width && props?.height) w = Math.min(160, (props.width / props.height) * h);
+    } catch { signatureLine(null); return; }
+    y += 12; // headroom so the image doesn't overlap the line above
+    ensure(h + 18);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(35, 35, 35);
+    doc.text('Signature:', M, y);
+    const lx = M + doc.getTextWidth('Signature:') + 10;
+    try { doc.addImage(img, 'PNG', lx, y - h + 8, w, h); } catch {}
+    doc.setDrawColor(120, 120, 120); doc.setLineWidth(0.7);
+    doc.line(lx, y + 3, lx + Math.max(120, w + 20), y + 3);
+    y += 11 * 1.5 + 6;
+  }
+
   /* ── signatures ── */
-  ensure(150);
+  ensure(170);
   rule();
   para([{ t: 'Brand Representative', b: true }], { size: 12, after: 8 });
   para([{ t: 'Brand:', b: true }, { t: brand }], { after: 6 });
-  para([{ t: 'Signature:', b: true }, { t: '____________________' }], { after: 6 });
+  if (input.repName) para([{ t: 'Representative:', b: true }, { t: input.repName }], { after: 6 });
+  signatureLine(input.signatureDataUrl);
   para([{ t: 'Date:', b: true }, { t: dateTxt }], { after: 14 });
 
   ensure(170);

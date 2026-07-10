@@ -6,6 +6,7 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell, LabelList,
 } from 'recharts';
 import { supabase } from '../../lib/supabase';
+import { uploadSignature } from '../../lib/imageUpload';
 import * as store from './store';
 import { useAuth } from '../../auth/AuthContext';
 import { PayChip, PayoutDetail } from '../paid-collab/handlerCollabReadonly';
@@ -725,6 +726,8 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
     try { await store.updateCreator(id, { contract_url }); }
     catch (e) { alert(`Couldn't save contract link: ${e.message}`); reload(); }
   }, [patchCreatorLocal, reload]);
+  // Contract template modal (representative name + signature for the PDFs)
+  const [contractTplOpen, setContractTplOpen] = useState(false);
 
   return (
     <div className="pc-app">
@@ -735,6 +738,10 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
             <span className="pc-brand-tagline">Paid Collaborations</span>
           </div>
           <div className="pc-monthnav">
+            <button className="pc-mn-arrow pc-tpl-btn" title="Contract template — your representative name & signature on contract PDFs"
+              aria-label="Contract template settings" onClick={() => setContractTplOpen(true)}>
+              <i className="bi bi-vector-pen" />
+            </button>
             <button className="pc-mn-arrow" aria-label="Previous month" onClick={() => { setMonth(addMonth(month, -1)); setDrillId(null); }}>‹</button>
             <label className="pc-monthpicker" title="Pick a month">
               <span className="pc-monthpicker-ico">📅</span>
@@ -860,6 +867,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
           onClose={() => setOpenNote(null)} onPersist={persistOpenNote}
           onDelete={() => deleteOpenNote(openNote)} />
       )}
+      {contractTplOpen && <ContractTemplateModal onClose={() => setContractTplOpen(false)} />}
       {confirmDel && <ConfirmModal message={confirmDel.message} onYes={confirmDel.onYes} onCancel={() => setConfirmDel(null)} />}
       {undo && <UndoToast label={undo.label} onUndo={doUndo} />}
       {commentDrawer && brandById[commentDrawer.brandId] && (
@@ -1325,6 +1333,29 @@ function ContractActions({ c, onContract, onContractLink }) {
   );
 }
 
+// Handler's contract-template settings (rep name + signature) for the PDF.
+// Fetched fresh per download — always current, no plumbing through row props.
+// Failures degrade to an unsigned contract rather than blocking the download.
+async function contractTemplatePayload() {
+  try {
+    const s = await store.getContractSettings();
+    if (!s) return {};
+    let signatureDataUrl = null;
+    if (s.signature_url) {
+      try {
+        const blob = await (await fetch(s.signature_url)).blob();
+        signatureDataUrl = await new Promise((res) => {
+          const fr = new FileReader();
+          fr.onload = () => res(fr.result);
+          fr.onerror = () => res(null);
+          fr.readAsDataURL(blob);
+        });
+      } catch {}
+    }
+    return { repName: s.rep_name || '', signatureDataUrl };
+  } catch { return {}; }
+}
+
 // Contract column — fill the standard agreement template from the deal row.
 // Featured products: the creator's own list, else the month's focus products
 // (passed by the Drilldown; the Creators tab has no brand-month in scope).
@@ -1333,6 +1364,7 @@ async function downloadContractFor(c, brandName, focusNames = []) {
   const accounts = tiktokAccounts(c.tiktok_handle);
   const { downloadCreatorContract } = await import('./contractPdf');
   await downloadCreatorContract({
+    ...(await contractTemplatePayload()),
     brandName: brandName || 'Brand',
     creatorName: c.name || '',
     username: accounts[0] ? accounts[0].handle.replace(/^@/, '') : (c.name || ''),
@@ -2988,6 +3020,167 @@ function CreatorEditor({ editor, month, directory = [], categories = [], brandPr
         <div className="pc-modal-actions">
           <button className="pc-btn pc-btn-ghost" onClick={onClose}>Cancel</button>
           <button className="pc-btn pc-btn-primary" onClick={save} disabled={!f.name.trim()}>{isAdd ? 'Add' : 'Save'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════
+   Contract template — per-handler signature block settings.
+   Only the Brand Representative name + signature are configurable;
+   the agreement wording stays code-generated (see contractPdf.ts).
+════════════════════════════════════════════════════════════ */
+// Rasterize an uploaded SVG signature to PNG (jsPDF can't embed SVG directly).
+function svgToPngDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const w = 600;
+        const ratio = img.width > 0 && img.height > 0 ? img.height / img.width : 0.3;
+        const h = Math.max(60, Math.round(w * ratio));
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/png'));
+      } catch (e) { reject(e); } finally { URL.revokeObjectURL(url); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('unreadable SVG')); };
+    img.src = url;
+  });
+}
+
+function ContractTemplateModal({ onClose }) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const [repName, setRepName] = useState('');
+  const [savedSigUrl, setSavedSigUrl] = useState('');   // already stored in the DB
+  const [pendingSig, setPendingSig] = useState(null);   // uploaded SVG → PNG data URL, not yet saved
+  const [removeSig, setRemoveSig] = useState(false);
+  const [padDirty, setPadDirty] = useState(false);      // something drawn on the pad
+  const padRef = useRef(null);
+  const drawing = useRef(false);
+
+  useEffect(() => {
+    let alive = true;
+    store.getContractSettings()
+      .then(s => { if (!alive) return; setRepName(s?.rep_name || ''); setSavedSigUrl(s?.signature_url || ''); })
+      .catch(e => { if (alive) setErr(e.message || 'Could not load settings'); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, []);
+
+  function padPos(e) {
+    const c = padRef.current, r = c.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * (c.width / r.width), y: (e.clientY - r.top) * (c.height / r.height) };
+  }
+  function padDown(e) {
+    e.preventDefault();
+    const c = padRef.current;
+    try { c.setPointerCapture(e.pointerId); } catch {}
+    const ctx = c.getContext('2d');
+    ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#1B2430';
+    const p = padPos(e);
+    ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + 0.1, p.y); ctx.stroke();
+    drawing.current = true;
+    setPadDirty(true); setPendingSig(null); setRemoveSig(false);
+  }
+  function padMove(e) {
+    if (!drawing.current) return;
+    const ctx = padRef.current.getContext('2d');
+    const p = padPos(e);
+    ctx.lineTo(p.x, p.y); ctx.stroke();
+  }
+  function padUp() { drawing.current = false; }
+  function clearPad() {
+    const c = padRef.current;
+    if (c) c.getContext('2d').clearRect(0, 0, c.width, c.height);
+    setPadDirty(false);
+  }
+
+  async function onUploadSvg(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const dataUrl = await svgToPngDataUrl(file);
+      setPendingSig(dataUrl); setRemoveSig(false); clearPad();
+    } catch (ex) { setErr(`Could not read that SVG: ${ex.message || ''}`); }
+  }
+
+  // Priority: uploaded SVG > pad drawing > existing (unless removed).
+  const previewSig = pendingSig || (!padDirty && !removeSig && savedSigUrl) || null;
+
+  async function save() {
+    setSaving(true); setErr('');
+    try {
+      let signature_url = removeSig ? '' : savedSigUrl;
+      let dataUrl = pendingSig;
+      if (!dataUrl && padDirty && padRef.current) dataUrl = padRef.current.toDataURL('image/png');
+      if (dataUrl) {
+        const blob = await (await fetch(dataUrl)).blob();
+        const { data: u } = await supabase.auth.getUser();
+        if (!u?.user?.id) throw new Error('Not signed in');
+        signature_url = await uploadSignature(u.user.id, blob);
+      }
+      await store.saveContractSettings({ rep_name: repName.trim(), signature_url });
+      onClose();
+    } catch (ex) {
+      setErr(ex.message || 'Save failed');
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="pc-overlay" onClick={onClose}>
+      <div className="pc-modal pc-modal-scroll" onClick={e => e.stopPropagation()}>
+        <h3>Contract template</h3>
+        <div className="pc-modal-sub">Signature block on every contract PDF you download</div>
+        {loading ? <div className="pc-spinner" /> : (
+          <div className="pc-modal-body">
+            <div className="pc-field">
+              <label>Representative name</label>
+              <input className="pc-input" placeholder="Who signs on behalf of the brand" value={repName} onChange={e => setRepName(e.target.value)} />
+            </div>
+            <div className="pc-field">
+              <label>Signature</label>
+              {previewSig && (
+                <div className="pc-sig-preview">
+                  <img src={previewSig} alt="Saved signature" />
+                  <span className="pc-sig-preview-l">{pendingSig ? 'New signature (not saved yet)' : 'Current signature'}</span>
+                  <button type="button" className="pc-multix" title="Remove signature"
+                    onClick={() => { setPendingSig(null); setRemoveSig(true); }}>×</button>
+                </div>
+              )}
+              <canvas ref={padRef} className="pc-sigpad" width={560} height={170}
+                onPointerDown={padDown} onPointerMove={padMove} onPointerUp={padUp} onPointerLeave={padUp} />
+              <div className="pc-sig-actions">
+                <span className="pc-sig-hint">Draw above with mouse / finger, or</span>
+                <label className="pc-btn pc-btn-ghost pc-btn-sm" style={{ cursor: 'pointer' }}>
+                  Upload SVG
+                  <input type="file" accept=".svg,image/svg+xml" style={{ display: 'none' }} onChange={onUploadSvg} />
+                </label>
+                {padDirty && <button type="button" className="pc-btn pc-btn-ghost pc-btn-sm" onClick={clearPad}>Clear drawing</button>}
+              </div>
+            </div>
+            <div className="pc-tplprev">
+              <div className="pc-tplprev-h">Preview — Brand Representative block</div>
+              <div><b>Brand:</b> <span className="pc-handle">(brand on the deal)</span></div>
+              {repName.trim() && <div><b>Representative:</b> {repName.trim()}</div>}
+              <div className="pc-tplprev-sig"><b>Signature:</b> {padDirty
+                ? <span className="pc-handle">your drawing above</span>
+                : previewSig ? <img src={previewSig} alt="" /> : <span className="pc-handle">____________</span>}</div>
+              <div><b>Date:</b> <span className="pc-handle">auto (onboarding date)</span></div>
+            </div>
+            {err && <div className="pc-formerr">{err}</div>}
+          </div>
+        )}
+        <div className="pc-modal-actions">
+          <button className="pc-btn pc-btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="pc-btn pc-btn-primary" onClick={save} disabled={loading || saving}>{saving ? 'Saving…' : 'Save'}</button>
         </div>
       </div>
     </div>

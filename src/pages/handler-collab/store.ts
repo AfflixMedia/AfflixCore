@@ -246,6 +246,35 @@ export async function deleteCreator(id: string) {
   if (error) throw error;
 }
 
+/* ── contract template (signature block) settings — one row per handler ── */
+export interface ContractSettings {
+  rep_name: string;
+  signature_url: string;
+}
+
+export async function getContractSettings(): Promise<ContractSettings | null> {
+  const { data: u } = await supabase.auth.getUser();
+  const uid = u?.user?.id;
+  if (!uid) return null;
+  const { data, error } = await supabase
+    .from('handler_contract_settings')
+    .select('rep_name, signature_url')
+    .eq('owner_id', uid)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as ContractSettings) || null;
+}
+
+export async function saveContractSettings(patch: ContractSettings) {
+  const { data: u } = await supabase.auth.getUser();
+  const uid = u?.user?.id;
+  if (!uid) throw new Error('Not signed in');
+  const { error } = await supabase
+    .from('handler_contract_settings')
+    .upsert({ owner_id: uid, ...patch, updated_at: new Date().toISOString() });
+  if (error) throw error;
+}
+
 // ── persisted brand ordering (drag-and-drop in the workspace) ──
 // Returns the caller's saved brand-id order (RLS scopes to their own rows).
 export async function loadBrandOrder(): Promise<string[]> {
