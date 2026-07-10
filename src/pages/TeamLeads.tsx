@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { Button, Card, Modal, Form, Spinner, Alert, Row, Col } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
+import { fnError } from '../lib/functionError';
 import Avatar from '../components/Avatar';
 
 interface TeamLead {
@@ -9,6 +10,7 @@ interface TeamLead {
   full_name: string | null;
   role: string;
   created_at: string;
+  avatar_url?: string | null;
   brand_ids?: string[];
   brand_names?: string[];
   apc_count?: number;
@@ -50,7 +52,7 @@ export default function TeamLeads() {
   const load = async () => {
     setLoading(true); setErr(null);
     const [{ data: leadRows, error: e1 }, { data: brandRows, error: e2 }, { data: assigns, error: e3 }, { data: apcRows, error: e4 }] = await Promise.all([
-      supabase.from('profiles').select('id,email,full_name,role,created_at').eq('role', 'team_lead').order('created_at', { ascending: false }),
+      supabase.from('profiles').select('id,email,full_name,role,created_at,avatar_url').eq('role', 'team_lead').order('created_at', { ascending: false }),
       supabase.from('brands').select('id,name').order('name'),
       supabase.from('team_lead_brands').select('team_lead_id,brand_id'),
       supabase.from('profiles').select('id,email,full_name,team_lead_id').eq('role', 'apc').order('full_name'),
@@ -95,12 +97,22 @@ export default function TeamLeads() {
   const totalAssignments = leads.reduce((s, l) => s + (l.brand_ids?.length ?? 0), 0);
 
   // One brand → one Team Lead: map each assigned brand to its owning lead so the
-  // picker can disable brands already held by a different lead.
+  // picker can flag brands already held by a different lead.
   const brandOwner = useMemo(() => {
     const m = new Map<string, { id: string; name: string }>();
     leads.forEach(l => (l.brand_ids ?? []).forEach(bid => m.set(bid, { id: l.id, name: l.full_name || l.email })));
     return m;
   }, [leads]);
+
+  // Brands the current selection will pull off another team lead (so we can warn Bob
+  // and free them on save — one brand → one Team Lead, reassigned in place).
+  const movingBrands = useMemo(
+    () => form.brand_ids
+      .map(id => ({ id, name: brands.find(b => b.id === id)?.name ?? '?', owner: brandOwner.get(id) }))
+      .filter((x): x is { id: string; name: string; owner: { id: string; name: string } } =>
+        !!x.owner && x.owner.id !== editLead?.id),
+    [form.brand_ids, brands, brandOwner, editLead],
+  );
 
   // APCs that will be moved off another lead's team if this is saved.
   const movingApcs = useMemo(
@@ -143,6 +155,17 @@ export default function TeamLeads() {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setSaving(true); setErr(null);
+    // Brands pulled off another team lead by this save: free their old grant (and detach
+    // them from any APC no longer in the brand's team) before re-granting, so one
+    // brand → one Team Lead stays intact and reassignment happens in place.
+    const movedBrandIds = movingBrands.map(b => b.id);
+    const freeMovedBrands = async () => {
+      if (movedBrandIds.length === 0) return;
+      const { error: tErr } = await supabase.from('team_lead_brands').delete().in('brand_id', movedBrandIds);
+      if (tErr) throw tErr;
+      const { error: aErr } = await supabase.from('apc_brands').delete().in('brand_id', movedBrandIds);
+      if (aErr) throw aErr;
+    };
     try {
       let leadId: string;
       if (editLead) {
@@ -151,6 +174,7 @@ export default function TeamLeads() {
         if (pErr) throw pErr;
         const { error: dErr } = await supabase.from('team_lead_brands').delete().eq('team_lead_id', editLead.id);
         if (dErr) throw dErr;
+        await freeMovedBrands();
         if (form.brand_ids.length > 0) {
           const rows = form.brand_ids.map(bid => ({ team_lead_id: editLead.id, brand_id: bid }));
           const { error: iErr } = await supabase.from('team_lead_brands').insert(rows);
@@ -158,6 +182,7 @@ export default function TeamLeads() {
         }
         leadId = editLead.id;
       } else {
+        await freeMovedBrands();
         const { data: { session } } = await supabase.auth.getSession();
         const { data, error } = await supabase.functions.invoke('create-team-lead', {
           body: {
@@ -168,7 +193,7 @@ export default function TeamLeads() {
           },
           headers: { Authorization: `Bearer ${session?.access_token}` },
         });
-        if (error) throw error;
+        if (error) throw await fnError(error);
         if ((data as any)?.error) throw new Error((data as any).error);
         leadId = (data as any).id as string;
       }
@@ -248,7 +273,7 @@ export default function TeamLeads() {
             const display = l.full_name || l.email;
             return (
               <div className="ac-list-row" key={l.id}>
-                <Avatar name={display} size="lg" />
+                <Avatar name={display} src={l.avatar_url} size="lg" />
                 <div className="ac-row-main">
                   <div className="ac-row-name">{l.full_name || <span className="text-muted">No name</span>}</div>
                   <div className="ac-row-sub d-flex align-items-center flex-wrap gap-2">
@@ -306,6 +331,15 @@ export default function TeamLeads() {
                 Team Lead will be notified.
               </Alert>
             )}
+            {movingBrands.length > 0 && (
+              <Alert variant="warning" className="py-2">
+                <i className="bi bi-shop me-1" />
+                <strong>{movingBrands.length} brand{movingBrands.length === 1 ? '' : 's'} will be reassigned</strong> here
+                from {Array.from(new Set(movingBrands.map(b => b.owner.name))).join(', ')}:{' '}
+                {movingBrands.map(b => b.name).join(', ')}. The previous Team Lead loses access, and any APC under them
+                holding {movingBrands.length === 1 ? 'it' : 'them'} is detached.
+              </Alert>
+            )}
             <Form.Group className="mb-3">
               <Form.Label>Full name</Form.Label>
               <Form.Control value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} />
@@ -339,18 +373,22 @@ export default function TeamLeads() {
                       {brands.map(b => {
                         const owner = brandOwner.get(b.id);
                         const takenByOther = owner && owner.id !== editLead?.id;
+                        const checked = form.brand_ids.includes(b.id);
                         return (
                           <Form.Check
                             key={b.id}
                             type="checkbox"
                             id={`tlb-${b.id}`}
-                            disabled={!!takenByOther}
-                            checked={form.brand_ids.includes(b.id)}
+                            checked={checked}
                             onChange={() => toggleBrand(b.id)}
                             label={
                               <span>
                                 {b.name}
-                                {takenByOther && <span className="text-muted small ms-1">· on {owner!.name}</span>}
+                                {takenByOther && (
+                                  <span className={`small ms-1 ${checked ? 'text-warning' : 'text-muted'}`}>
+                                    · {checked ? 'moving from' : 'on'} {owner!.name}
+                                  </span>
+                                )}
                               </span>
                             }
                           />
@@ -410,7 +448,7 @@ export default function TeamLeads() {
             const { data, error } = await supabase.functions.invoke('reset-team-lead-password', {
               body: { user_id: pwLead.id, password: newPw },
             });
-            if (error) throw error;
+            if (error) throw await fnError(error);
             if ((data as any)?.error) throw new Error((data as any).error);
             setPwOk(true);
           } catch (e: any) {
@@ -461,7 +499,7 @@ export default function TeamLeads() {
               const { data, error } = await supabase.functions.invoke('delete-team-lead', {
                 body: { user_id: delLead.id },
               });
-              if (error) throw error;
+              if (error) throw await fnError(error);
               if ((data as any)?.error) throw new Error((data as any).error);
               setDelLead(null);
               await load();

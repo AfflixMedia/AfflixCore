@@ -3,6 +3,8 @@ import { NavLink } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { useNotifications } from '../notifications/NotificationsContext';
 import { Badge } from 'react-bootstrap';
+import Avatar from '../components/Avatar';
+import { color } from 'html2canvas/dist/types/css/types/color';
 
 export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) {
   const [reportingOpen, setReportingOpen] = useState(true);
@@ -13,15 +15,18 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
   const reportingUnread = notifications.filter(n => !n.read_at && n.link?.startsWith('/reporting/')).length;
   const isApc = profile?.role === 'apc';
   const isTeamLead = profile?.role === 'team_lead';
+  // Ads Manager: APC-like view-only nav (Brands / Resources / Reporting) — no Tasks/Chats.
+  const isAdsManager = profile?.role === 'ads_manager';
   const isPaidCollabClient = profile?.role === 'paid_collab_client';
   const isPaidCollabHandler = profile?.role === 'paid_collab_handler';
-  // Internal staff (admin / team lead / apc) get the team Chats feature.
-  // Paid Collab handlers are intentionally excluded from chat.
-  const isInternal = isBob || isTeamLead || isApc;
+  // Paid Collab Handlers Bob marked INTERNAL get Chats + Tasks; external don't.
+  const isInternalHandler = isPaidCollabHandler && !!profile?.is_internal_handler;
+  // Internal staff (admin / team lead / apc / ads manager / internal handler) get team Chats.
+  const isInternal = isBob || isTeamLead || isApc || isAdsManager || isInternalHandler;
   const chatUnread = notifications.filter(n => !n.read_at && n.type === 'chat').length;
   const taskUnread = notifications.filter(n => !n.read_at && n.type === 'task').length;
-  // Tasks are used by Team Leads (assign), APCs (do), and Bob (oversight).
-  const showTasks = isBob || isTeamLead || isApc;
+  // Tasks: Team Leads + internal handlers (assign), APCs + Ads Managers (do), Bob (oversight).
+  const showTasks = isBob || isTeamLead || isApc || isAdsManager || isInternalHandler;
 
   return (
     <aside className="ac-sidebar">
@@ -50,7 +55,7 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
               <i className="bi bi-collection-play" /> <span className="ac-nav-label">Videos</span>
             </NavLink>
           </>
-        ) : isApc ? (
+        ) : isApc || isAdsManager ? (
           <>
             <NavLink to="/brands" title="Brands">
               <i className="bi bi-shop" /> <span className="ac-nav-label">Brands</span>
@@ -58,6 +63,15 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
             <NavLink to="/resources" title="Resources">
               <i className="bi bi-folder2" /> <span className="ac-nav-label">Resources</span>
             </NavLink>
+            {isAdsManager ? (
+              <NavLink to="/notes" title="Notes">
+                <i className="bi bi-journal-text" /> <span className="ac-nav-label">Notes</span>
+              </NavLink>
+            ) : (
+              <NavLink to="/my-notes" title="Notes">
+                <i className="bi bi-journal-text" /> <span className="ac-nav-label">Notes</span>
+              </NavLink>
+            )}
           </>
         ) : isTeamLead ? (
           <>
@@ -69,6 +83,9 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
             </NavLink>
             <NavLink to="/resources" title="Resources">
               <i className="bi bi-folder2" /> <span className="ac-nav-label">Resources</span>
+            </NavLink>
+            <NavLink to="/my-notes" title="Notes">
+              <i className="bi bi-journal-text" /> <span className="ac-nav-label">Notes</span>
             </NavLink>
           </>
         ) : (
@@ -84,17 +101,10 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
                 <NavLink to="/clients" title="Clients">
                   <i className="bi bi-building" /> <span className="ac-nav-label">Clients</span>
                 </NavLink>
-                <NavLink to="/team-leads" title="Team Leads">
-                  <i className="bi bi-diagram-3" /> <span className="ac-nav-label">Team Leads</span>
-                </NavLink>
-                <NavLink to="/apcs" title="APCs">
-                  <i className="bi bi-people" /> <span className="ac-nav-label">APCs</span>
-                </NavLink>
-                <NavLink to="/paid-collab-clients" title="Paid Collab Clients">
-                  <i className="bi bi-people-fill" /> <span className="ac-nav-label">Paid Collab Clients</span>
-                </NavLink>
-                <NavLink to="/paid-collab-handlers" title="Paid Collab Handlers">
-                  <i className="bi bi-person-gear" /> <span className="ac-nav-label">Paid Collab Handlers</span>
+                {/* Teams — one hub for Team Leads / APCs / Ads Managers /
+                    Paid Collab Clients / Paid Collab Handlers / Bobs. */}
+                <NavLink to="/teams" title="Teams">
+                  <i className="bi bi-diagram-3" /> <span className="ac-nav-label">Teams</span>
                 </NavLink>
                 <NavLink to="/client-access" title="Client Access">
                   <i className="bi bi-link-45deg" /> <span className="ac-nav-label">Client Access</span>
@@ -119,6 +129,9 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
                 )}
                 <NavLink to="/resources" title="Resources">
                   <i className="bi bi-folder2" /> <span className="ac-nav-label">Resources</span>
+                </NavLink>
+                <NavLink to="/my-notes" title="Notes">
+                  <i className="bi bi-journal-text" /> <span className="ac-nav-label">Notes</span>
                 </NavLink>
                 <NavLink to="/templates" title="Reporting Canvas">
                   <i className="bi bi-easel2" /> <span className="ac-nav-label">Reporting Canvas</span>
@@ -168,8 +181,20 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
         </NavLink>
       </nav>
       <div className="footer">
-        <div className="ac-nav-label">{profile?.full_name ?? profile?.email}</div>
-        <small className="text-muted ac-nav-label">Role: {profile?.role ?? '—'}</small>
+        <NavLink to="/profile" title="My Profile" className="ac-profile-link d-flex align-items-center gap-2">
+          <Avatar
+            name={profile?.full_name || profile?.email || 'User'}
+            src={profile?.avatar_url}
+            size="sm"
+          />
+          <div className="min-w-0 ac-nav-label">
+            <div className="text-truncate" >
+              {profile?.full_name ?? profile?.email}
+            </div>
+            <small className="text-muted">Role: {profile?.is_superbob ? 'super boss' : profile?.role ??'—'}</small>
+          </div>
+          <i className="bi bi-chevron-right ms-auto ac-nav-label" />
+        </NavLink>
       </div>
     </aside>
   );

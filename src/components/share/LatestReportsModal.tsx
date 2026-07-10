@@ -5,6 +5,8 @@ interface BrandLite { id: string; name: string }
 interface WeeklyReportLite { id: string; brand_id: string; week_start: string; week_end: string; week_number?: number; status?: string }
 interface MonthlyReportLite { id: string; brand_id: string; month: string; status?: string }
 
+interface PcPendingLite { brandId: string; brandName: string; count: number }
+
 interface Props {
   show: boolean;
   brands: BrandLite[];
@@ -12,6 +14,9 @@ interface Props {
   monthlyReports: MonthlyReportLite[];
   onPickWeekly: (r: WeeklyReportLite) => void;
   onPickMonthly: (r: MonthlyReportLite) => void;
+  // Paid Collab payments still pending, grouped by brand (optional).
+  pcPending?: PcPendingLite[];
+  onPickPaidCollab?: (brandId: string) => void;
   onClose: () => void;
 }
 
@@ -48,9 +53,10 @@ function relative(date: Date): string {
 
 export default function LatestReportsModal({
   show, brands, weeklyReports, monthlyReports,
-  onPickWeekly, onPickMonthly, onClose,
+  onPickWeekly, onPickMonthly, pcPending = [], onPickPaidCollab, onClose,
 }: Props) {
   const brandName = (id: string) => brands.find(b => b.id === id)?.name ?? 'Brand';
+  const totalPending = pcPending.reduce((s, p) => s + p.count, 0);
 
   const latest3: LatestRow[] = useMemo(() => {
     const rows: LatestRow[] = [
@@ -71,16 +77,53 @@ export default function LatestReportsModal({
     <Modal show={show} onHide={onClose} centered backdrop="static" dialogClassName="ac-popup-modal">
       <Modal.Header className="ac-popup-header" closeButton>
         <Modal.Title>
-          <i className="bi bi-collection me-2" />
-          Welcome — here are your latest reports
+          <i className={`bi ${latest3.length === 0 && totalPending > 0 ? 'bi-exclamation-triangle' : 'bi-collection'} me-2`} />
+          {latest3.length === 0 && totalPending > 0 ? 'Welcome — payment action needed' : 'Welcome — here are your latest reports'}
         </Modal.Title>
       </Modal.Header>
       <Modal.Body className="ac-popup-body">
+        {totalPending > 0 && (
+          <div className="mb-3">
+            <div
+              className="d-flex align-items-center gap-2 px-3 py-2 mb-2"
+              style={{ background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 10, color: '#B91C1C', fontWeight: 700 }}
+            >
+              <i className="bi bi-exclamation-triangle-fill" />
+              <span>{totalPending} creator payment{totalPending === 1 ? '' : 's'} pending — action needed</span>
+            </div>
+            <div className="d-flex flex-column gap-2">
+              {pcPending.map(p => (
+                <button
+                  key={p.brandId}
+                  type="button"
+                  onClick={() => onPickPaidCollab?.(p.brandId)}
+                  className="ac-latest-report-card"
+                >
+                  <div className="ac-latest-report-icon" style={{ background: 'rgba(220,38,38,.10)', color: '#DC2626' }}>
+                    <i className="bi bi-cash-coin" />
+                  </div>
+                  <div className="flex-grow-1 min-w-0 text-start">
+                    <div className="d-flex align-items-center gap-2 flex-wrap">
+                      <Badge bg="danger" pill>{p.count} pending</Badge>
+                      <span className="fw-bold text-truncate">{p.brandName}</span>
+                    </div>
+                    <div className="text-muted small mt-1 text-truncate">
+                      <i className="bi bi-people me-1" />Paid Collab · review pending payouts
+                    </div>
+                  </div>
+                  <i className="bi bi-arrow-right-circle-fill text-danger fs-4" />
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {latest3.length === 0 ? (
+          totalPending > 0 ? null : (
           <div className="text-center text-muted py-4">
             <i className="bi bi-inbox fs-2 d-block mb-2 opacity-50" />
             No reports available yet.
           </div>
+          )
         ) : (
           <>
             <p className="text-muted mb-3">

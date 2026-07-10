@@ -22,6 +22,7 @@ const AVATAR_GRADIENTS = [
 ];
 export const STATUS = {
   videos_in_progress: { label: 'Videos in Progress', cls: 'progress' },
+  follow_up: { label: 'Follow-up Required', cls: 'followup' },
   pending: { label: 'Payment Pending', cls: 'pending' },
   paid: { label: 'Payment Sent', cls: 'sent' },
 } as Record<string, { label: string; cls: string }>;
@@ -344,7 +345,7 @@ export function CreatorListHeadRO() {
   );
 }
 
-const STATUS_GROUP_ORDER = ['pending', 'videos_in_progress', 'paid'];
+const STATUS_GROUP_ORDER = ['pending', 'follow_up', 'videos_in_progress', 'paid'];
 const statusGroupKey = (c: HandlerCreator) => { const s = clientStatus(c); return STATUS[s] ? s : 'videos_in_progress'; };
 
 // Read-only creator list grouped by payment status (Payment Pending → Videos in
@@ -388,6 +389,7 @@ export interface PerfBrand { id: string; name: string; client: string | null }
 
 const PR_STATUS: Record<string, { label: string; cls: string; color: string }> = {
   videos_in_progress: { label: 'In progress', cls: 'prog', color: '#1259C3' },
+  follow_up:          { label: 'Follow-up',   cls: 'fup',  color: '#C62828' },
   pending:            { label: 'Pending',     cls: 'pend', color: '#E8862E' },
   paid:               { label: 'Paid',        cls: 'paid', color: '#198754' },
 };
@@ -451,7 +453,7 @@ export function PerformanceReport({ brand, creators, onDiscuss }: {
   }, [creators, isWeekly, weekKeys]);
 
   const payMix = useMemo(() => {
-    const m: any = { videos_in_progress: 0, pending: 0, paid: 0 };
+    const m: any = { videos_in_progress: 0, follow_up: 0, pending: 0, paid: 0 };
     creators.forEach(c => { const s = clientStatus(c); m[s] = (m[s] || 0) + 1; });
     return Object.keys(PR_STATUS).map(k => ({ name: PR_STATUS[k].label, value: m[k] || 0, color: PR_STATUS[k].color })).filter(x => x.value > 0);
   }, [creators]);

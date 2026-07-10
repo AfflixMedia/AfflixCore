@@ -8,7 +8,10 @@ import { supabase } from '../../lib/supabase';
    bob/apc/client/handler read via user_has_brand_access).
 ════════════════════════════════════════════════════════════ */
 
-export type PaymentStatus = 'videos_in_progress' | 'pending' | 'paid';
+// follow_up = zero posted videos, or "in progress" with no new video for 1 week
+// (auto-managed by the handler_collab_creators_auto_status trigger + the
+// handler_collab_apply_follow_ups() sweep — see migration 20260806090000).
+export type PaymentStatus = 'videos_in_progress' | 'follow_up' | 'pending' | 'paid';
 
 export interface VideoCode {
   video: string;
@@ -65,6 +68,8 @@ export interface HandlerCreator {
   client_paid_confirmed_name?: string | null;
   onboarded_on: string | null;
   completed_on: string | null;
+  // Last time the posted-video count increased (drives the 1-week follow-up rule).
+  video_count_updated_at?: string | null;
   video_codes: VideoCode[];
   products: Product[];
   monthly: Record<string, MonthlyEntry>;
@@ -85,7 +90,16 @@ export async function getClients() {
   }));
 }
 
+// Server-side status sweep: stalled "Videos in Progress" creators (no new video
+// for 1 week) → follow_up; all-videos-posted rows → pending. Best-effort — a
+// failure (e.g. migration not applied yet) must never block the workspace.
+export async function applyFollowUps(): Promise<void> {
+  try { await supabase.rpc('handler_collab_apply_follow_ups'); } catch { /* ignore */ }
+}
+
 export async function loadAll() {
+  // Apply the follow-up status rules before reading, so the lists show them fresh.
+  await applyFollowUps();
   // Brands come from public.brands, RLS-scoped to those assigned to the handler
   // (via paid_collab_handler_brands) — no paid_creator scope requirement.
   const { data: bRows, error: bErr } = await supabase
@@ -348,4 +362,79 @@ export async function setCreatorMonthly(creatorId: string, monthly: Record<strin
     p_creator: creatorId, p_monthly: monthly,
   });
   if (error) throw error;
+}
+
+/* ── Notes board (Google Keep-style) ──
+   Global notes for the handler workspace (handler_notes). Owner-scoped via RLS;
+   a note can optionally link to a brand (brand-wise) and/or a month (program-wise),
+   carry free-form labels, and a reminder that fires an in-app/push notification. */
+export interface HandlerNote {
+  id: string;
+  owner_id: string;
+  brand_id: string | null;
+  month: string | null;
+  title: string;
+  body: string;
+  color: string;
+  labels: string[];
+  pinned: boolean;
+  archived: boolean;
+  reminder_at: string | null;
+  reminder_done: boolean;
+  reminder_sent_at: string | null;
+  // Super Boss only: Ads Managers can read (not edit) this note.
+  shared_with_ads: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type NotePatch = Partial<Omit<HandlerNote, 'id' | 'owner_id' | 'created_at' | 'updated_at'>>;
+
+// ownerId: restrict to one owner's notes — needed for Bob, whose read-all RLS
+// would otherwise pull every user's notes onto his personal board.
+export async function loadNotes(ownerId?: string): Promise<HandlerNote[]> {
+  let q = supabase
+    .from('handler_notes')
+    .select('*')
+    .order('pinned', { ascending: false })
+    .order('updated_at', { ascending: false });
+  if (ownerId) q = q.eq('owner_id', ownerId);
+  const { data, error } = await q;
+  if (error) throw error;
+  return (data || []) as HandlerNote[];
+}
+
+export async function createNote(patch: NotePatch): Promise<HandlerNote> {
+  const { data, error } = await supabase
+    .from('handler_notes')
+    .insert(patch)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as HandlerNote;
+}
+
+export async function updateNote(id: string, patch: NotePatch): Promise<HandlerNote> {
+  const { data, error } = await supabase
+    .from('handler_notes')
+    .update(patch)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as HandlerNote;
+}
+
+export async function deleteNote(id: string): Promise<void> {
+  const { error } = await supabase.from('handler_notes').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// Convert any reminders that are now due into notifications (in-app + realtime).
+// Called from the front-end on load / interval so reminders surface even when
+// pg_cron isn't enabled. Returns the number fired.
+export async function fireDueNoteReminders(): Promise<number> {
+  const { data, error } = await supabase.rpc('fire_due_note_reminders');
+  if (error) throw error;
+  return (data as number) || 0;
 }

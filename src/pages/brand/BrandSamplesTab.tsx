@@ -8,15 +8,16 @@ import { supabase } from '../../lib/supabase';
 import { toISO } from '../../lib/dates';
 import NumberInput from '../../components/NumberInput';
 
-interface SampleProduct {
+export interface SampleProduct {
   id: string;
   brand_id: string;
   external_product_id: string | null;
   name: string;
-  monthly_goal: number | null;
+  monthly_goal: number | null; // legacy single global goal — superseded by monthly_goals
+  monthly_goals: Record<string, number> | null; // 'YYYY-MM' -> goal for that month
   sort_order: number;
 }
-interface DailyEntry {
+export interface DailyEntry {
   id?: string;
   brand_id: string;
   entry_date: string;
@@ -34,15 +35,15 @@ interface WeeklyGmv {
   affiliate_gmv: number | null;
 }
 
-function currentMonth() {
+export function currentMonth() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
-function monthLabel(yyyymm: string) {
+export function monthLabel(yyyymm: string) {
   const [y, m] = yyyymm.split('-').map(Number);
   return new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
 }
-function daysInMonth(yyyymm: string): string[] {
+export function daysInMonth(yyyymm: string): string[] {
   const [y, m] = yyyymm.split('-').map(Number);
   const last = new Date(y, m, 0).getDate();
   const out: string[] = [];
@@ -66,12 +67,29 @@ function prevMonthOf(yyyymm: string): string {
   const d = new Date(y, m - 2, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
-function isWeekend(iso: string): boolean {
+export function recentMonths(count: number): string[] {
+  const now = new Date();
+  const out: string[] = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+  return out;
+}
+export function isWeekend(iso: string): boolean {
   const wd = new Date(iso + 'T00:00:00').getDay();
   return wd === 0 || wd === 6;
 }
-const sumValues = (m: Record<string, number>) =>
+export const sumValues = (m: Record<string, number>) =>
   Object.values(m).reduce((s, v) => s + (v ?? 0), 0);
+
+// Product goal for a specific month only — never falls back to the legacy
+// global monthly_goal (that fallback is what made one month's goal show in
+// every other month; the migration backfilled it into monthly_goals).
+export function productGoalFor(p: SampleProduct, month: string): number | null {
+  const v = p.monthly_goals?.[month];
+  return typeof v === 'number' && v > 0 ? v : null;
+}
 
 const SECTION_HEADING_STYLE: React.CSSProperties = { textTransform: 'none', letterSpacing: 0 };
 
@@ -174,9 +192,9 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
     products.map(p => ({
       name: p.name.length > 18 ? p.name.slice(0, 18) + '…' : p.name,
       Approved: perProductTotals[p.id] ?? 0,
-      Goal: p.monthly_goal ?? 0,
+      Goal: productGoalFor(p, month) ?? 0,
     })),
-  [products, perProductTotals]);
+  [products, perProductTotals, month]);
 
   const dropReasons = useMemo(() =>
     days
@@ -246,21 +264,31 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
 
   // Products manager
   const [productModal, setProductModal] = useState(false);
+  // monthly_goal on the draft doubles as "goal for the currently selected
+  // month" while the modal is open; it's written to monthly_goals[month].
   const emptyProduct = (): SampleProduct => ({
-    id: '', brand_id: brandId, external_product_id: '', name: '', monthly_goal: null, sort_order: 0,
+    id: '', brand_id: brandId, external_product_id: '', name: '', monthly_goal: null, monthly_goals: {}, sort_order: 0,
   });
   const [productDraft, setProductDraft] = useState<SampleProduct>(emptyProduct());
   const [productEditing, setProductEditing] = useState<SampleProduct | null>(null);
 
   const openAddProduct = () => { setProductEditing(null); setProductDraft(emptyProduct()); setProductModal(true); };
-  const openEditProduct = (p: SampleProduct) => { setProductEditing(p); setProductDraft({ ...p }); setProductModal(true); };
+  const openEditProduct = (p: SampleProduct) => {
+    setProductEditing(p);
+    setProductDraft({ ...p, monthly_goal: productGoalFor(p, month) });
+    setProductModal(true);
+  };
   const submitProduct = async (e: FormEvent) => {
     e.preventDefault();
+    // Merge this month's goal into the per-month map; other months untouched.
+    const goals: Record<string, number> = { ...(productEditing?.monthly_goals ?? {}) };
+    if (productDraft.monthly_goal != null && productDraft.monthly_goal > 0) goals[month] = productDraft.monthly_goal;
+    else delete goals[month];
     const payload: any = {
       brand_id: brandId,
       external_product_id: productDraft.external_product_id?.trim() || null,
       name: productDraft.name.trim(),
-      monthly_goal: productDraft.monthly_goal ?? null,
+      monthly_goals: goals,
     };
     const res = productEditing
       ? await supabase.from('brand_samples_products').update(payload).eq('id', productEditing.id)
@@ -425,8 +453,19 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
         <Card.Body>
           <Row className="g-3 align-items-end">
             <Col md={3}>
-              <Form.Label className="small fw-semibold">Month</Form.Label>
-              <Form.Control type="month" value={month} onChange={e => setMonth(e.target.value)} />
+              <Form.Label className="small fw-semibold d-block">Month</Form.Label>
+              <div className="btn-group w-100" role="group" aria-label="Choose month">
+                {recentMonths(3).map(m => (
+                  <Button
+                    key={m}
+                    variant={m === month ? 'primary' : 'outline-secondary'}
+                    onClick={() => setMonth(m)}
+                  >
+                    {new Date(Number(m.split('-')[0]), Number(m.split('-')[1]) - 1, 1)
+                      .toLocaleString('en-US', { month: 'short', year: '2-digit' })}
+                  </Button>
+                ))}
+              </div>
             </Col>
             <Col md={3}>
               <Form.Label className="small fw-semibold">Total monthly goal</Form.Label>
@@ -511,7 +550,7 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
                 <tbody>
                   {products.map((p, i) => {
                     const approved = perProductTotals[p.id] ?? 0;
-                    const goal = p.monthly_goal ?? 0;
+                    const goal = productGoalFor(p, month) ?? 0;
                     const pct = goal > 0 ? Math.min(100, Math.round((approved / goal) * 100)) : null;
                     return (
                       <tr key={p.id}>
@@ -874,10 +913,13 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
                   style={{ fontFamily: 'monospace' }} />
               </Col>
               <Col md={12}>
-                <Form.Label className="small fw-semibold">Monthly goal <span className="text-muted">(blank = no goal)</span></Form.Label>
+                <Form.Label className="small fw-semibold">Goal for {monthLabel(month)} <span className="text-muted">(blank = no goal)</span></Form.Label>
                 <NumberInput value={productDraft.monthly_goal ?? 0}
                   placeholder="e.g. 75"
                   onChange={n => setProductDraft({ ...productDraft, monthly_goal: n || null })} />
+                <Form.Text className="text-muted">
+                  Each month has its own goal — switch the month above to set goals for other months.
+                </Form.Text>
               </Col>
             </Row>
           </Modal.Body>
@@ -1088,7 +1130,7 @@ e.g.
 // Goal progress tile — large, gradient bar, percentage centered
 // =====================================================================
 
-function GoalProgressTile({ approved, goal, pct }: { approved: number; goal: number; pct: number }) {
+export function GoalProgressTile({ approved, goal, pct }: { approved: number; goal: number; pct: number }) {
   const color = pct >= 100 ? '#198754' : pct >= 75 ? '#e8862e' : pct >= 40 ? '#fd7e14' : '#dc3545';
   return (
     <div className="p-3 rounded h-100 position-relative" style={{
@@ -1131,7 +1173,7 @@ function GoalProgressTile({ approved, goal, pct }: { approved: number; goal: num
 // Generic colored KPI tile (icon + label + value)
 // =====================================================================
 
-function KpiTile({ icon, color, label, value }: { icon: string; color: string; label: string; value: string }) {
+export function KpiTile({ icon, color, label, value }: { icon: string; color: string; label: string; value: string }) {
   return (
     <div className="p-3 rounded h-100 d-flex align-items-center gap-3" style={{
       background: `linear-gradient(135deg, ${color}1a 0%, ${color}0d 100%)`,
@@ -1155,7 +1197,7 @@ function KpiTile({ icon, color, label, value }: { icon: string; color: string; l
 // Beautiful per-product progress bar (used in the products table)
 // =====================================================================
 
-function ProductProgressBar({ pct, approved, goal }: { pct: number; approved: number; goal: number }) {
+export function ProductProgressBar({ pct, approved, goal }: { pct: number; approved: number; goal: number }) {
   const color = pct >= 100 ? '#198754' : pct >= 75 ? '#e8862e' : pct >= 40 ? '#fd7e14' : '#dc3545';
   return (
     <div className="d-flex align-items-center gap-2">

@@ -4,6 +4,7 @@ import { Spinner, Alert, Badge, Button } from 'react-bootstrap';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { supabase } from '../lib/supabase';
+import { fnError } from '../lib/functionError';
 import { useAuth } from '../auth/AuthContext';
 import { useNotifications } from '../notifications/NotificationsContext';
 import { addDays, formatRange, formatHuman, formatWeekShort } from '../lib/dates';
@@ -205,7 +206,7 @@ export default function WeeklyReportView() {
     const { data, error } = await supabase.functions.invoke('post-staff-comment', {
       body: { report_id: report.id, section, body, parent_id: parentId ?? null },
     });
-    if (error) throw error;
+    if (error) throw await fnError(error);
     if ((data as any)?.error) throw new Error((data as any).error);
     setComments(prev => [...prev, (data as any).comment as Comment]);
   };
@@ -227,7 +228,7 @@ export default function WeeklyReportView() {
           <Button variant="outline-secondary" onClick={exportPdf} disabled={exporting} title="Download a PDF copy of the dashboard">
             <i className="bi bi-printer me-1" /> {exporting ? 'Building PDF…' : 'Export PDF'}
           </Button>
-          {brandActive && (
+          {brandActive && profile?.role !== 'ads_manager' && (
             <Button variant="primary" onClick={() => nav(`/reporting/weekly/${id}/edit`)}>
               <i className="bi bi-pencil me-1" /> Edit data
             </Button>

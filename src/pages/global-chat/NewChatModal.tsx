@@ -24,7 +24,7 @@ export default function NewChatModal({ show, contacts, loading, onPick, onNewGro
       contactName(a).localeCompare(contactName(b)));
     if (!needle) return sorted;
     return sorted.filter(c =>
-      `${contactName(c)} ${c.email} ${roleLabel(c.role)}`.toLowerCase().includes(needle));
+      `${contactName(c)} ${c.email} ${roleLabel(c.role, c.is_superbob)}`.toLowerCase().includes(needle));
   }, [contacts, q]);
 
   return (
@@ -66,11 +66,11 @@ export default function NewChatModal({ show, contacts, loading, onPick, onNewGro
                 className="ac-contact-row"
                 onClick={() => onPick(c)}
               >
-                <Avatar name={contactName(c)} />
+                <Avatar name={contactName(c)} src={c.avatar_url} />
                 <div className="flex-grow-1 min-w-0 text-start">
                   <div className="d-flex align-items-center gap-2">
                     <span className="fw-semibold text-truncate">{contactName(c)}</span>
-                    <Badge bg={roleBadge(c.role)} className="ac-role-badge">{roleLabel(c.role)}</Badge>
+                    <Badge bg={roleBadge(c.role)} className="ac-role-badge">{roleLabel(c.role, c.is_superbob)}</Badge>
                   </div>
                   <div className="text-muted small text-truncate">{c.email}</div>
                 </div>

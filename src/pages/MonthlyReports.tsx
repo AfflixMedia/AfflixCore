@@ -19,6 +19,19 @@ function fmtMonth(yyyymm: string) {
   const [y, m] = yyyymm.split('-').map(Number);
   return new Date(y, m - 1, 1).toLocaleString(undefined, { month: 'long', year: 'numeric' });
 }
+function recentMonths(count: number): string[] {
+  const now = new Date();
+  const out: string[] = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+  return out;
+}
+function shortMonthLabel(yyyymm: string) {
+  const [y, m] = yyyymm.split('-').map(Number);
+  return new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'short', year: '2-digit' });
+}
 
 // Deterministic colored avatar palette.
 const AVATAR_COLORS = [
@@ -69,6 +82,8 @@ export default function MonthlyReports() {
   const { notifications } = useNotifications();
   const nav = useNavigate();
   const isBob = profile?.role === 'bob';
+  // Ads Manager: browse + open reports read-only, never create/edit them.
+  const isAdsManager = profile?.role === 'ads_manager';
 
   const unreadByReport = useMemo(() => {
     const m = new Map<string, number>();
@@ -235,26 +250,20 @@ export default function MonthlyReports() {
       {/* Header */}
       <div className="wr-header">
         <div className="wr-header-left">
-          <Button variant="link" className="wr-icon-btn" onClick={() => setFMonth(m => shiftMonth(m, -1))} title="Previous month">
-            <i className="bi bi-chevron-left" />
-          </Button>
-          <div className="wr-month-picker">
-            <i className="bi bi-calendar3 me-2" />
-            <span>{fmtMonth(fMonth)}</span>
-            <input
-              type="month"
-              value={fMonth}
-              onChange={e => e.target.value && setFMonth(e.target.value)}
-              className="wr-month-input"
-              aria-label="Pick month"
-            />
+          <div className="wr-month-seg" role="group" aria-label="Recent months">
+            <i className="bi bi-calendar3 wr-month-seg-ico" />
+            {recentMonths(3).map(m => (
+              <button
+                key={m}
+                type="button"
+                className={`wr-month-seg-btn${m === fMonth ? ' is-active' : ''}`}
+                onClick={() => setFMonth(m)}
+                aria-pressed={m === fMonth}
+              >
+                {shortMonthLabel(m)}
+              </button>
+            ))}
           </div>
-          <Button variant="link" className="wr-icon-btn" onClick={() => setFMonth(m => shiftMonth(m, 1))} title="Next month">
-            <i className="bi bi-chevron-right" />
-          </Button>
-          <Button size="sm" variant="outline-secondary" className="wr-today-btn" onClick={() => setFMonth(thisMonth())}>
-            Today
-          </Button>
         </div>
 
         <div className="wr-header-search">
@@ -272,9 +281,11 @@ export default function MonthlyReports() {
         </div>
 
         <div className="wr-header-right">
-          <Button variant="primary" size="sm" onClick={() => setPickerOpen(true)}>
-            <i className="bi bi-plus-lg me-1" /> New Report
-          </Button>
+          {!isAdsManager && (
+            <Button variant="primary" size="sm" onClick={() => setPickerOpen(true)}>
+              <i className="bi bi-plus-lg me-1" /> New Report
+            </Button>
+          )}
           <Dropdown align="end">
             <Dropdown.Toggle variant="outline-secondary" size="sm" id="mr-filters">
               <i className="bi bi-funnel me-1" /> Filters

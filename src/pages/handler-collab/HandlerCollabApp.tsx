@@ -10,6 +10,7 @@ import * as store from './store';
 import { useAuth } from '../../auth/AuthContext';
 import { PayChip, PayoutDetail } from '../paid-collab/handlerCollabReadonly';
 import PaidCollabComments from '../../components/paidcollab/PaidCollabComments';
+import NotesBoard, { BrandNotesDrawer, AllNotesDrawer, NoteEditor } from './NotesBoard';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -125,10 +126,14 @@ function fmtDate(dateStr) {
   if (isNaN(d.getTime())) return dateStr;
   return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
 }
-// Status flow: starts at "Videos in Progress" → auto "Payment Pending" once all videos
-// are added → user marks "Paid" from the inline dropdown after sending payment.
+// Status flow: starts at "Follow-up Required" (zero posted videos) → auto "Videos in
+// Progress" when the first video lands → back to "Follow-up Required" if no new video
+// for 1 week (server sweep) → auto "Payment Pending" once all videos are added →
+// user marks "Paid" from the inline dropdown after sending payment. The zero-video /
+// first-video / stall rules live in the DB (trigger + handler_collab_apply_follow_ups).
 const STATUS_OPTIONS = [
   { value: 'videos_in_progress', label: 'Videos in Progress', cls: 'progress' },
+  { value: 'follow_up', label: 'Follow-up Required', cls: 'followup' },
   { value: 'pending', label: 'Payment Pending', cls: 'pending' },
   { value: 'paid', label: 'Payment Sent', cls: 'sent' },
 ];
@@ -137,7 +142,7 @@ function deriveStatus(c) {
   return STATUS_OPTIONS.find(s => s.value === c.payment_status) || STATUS_OPTIONS[0];
 }
 // Drilldown groups creators by payment status in this top→bottom order.
-const STATUS_GROUP_ORDER = ['pending', 'videos_in_progress', 'paid'];
+const STATUS_GROUP_ORDER = ['pending', 'follow_up', 'videos_in_progress', 'paid'];
 function focusProductList(bm) {
   const raw = bm?.focus_product_url || '';
   if (!raw) return [];
@@ -218,6 +223,9 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
   const [brandMonths, setBrandMonths] = useState([]);
   const [creators, setCreators] = useState([]);
   const [clients, setClients] = useState([]);
+  // Lightweight notes list (own Keep-style notes) — only used for the Notes tab's
+  // due-reminder badge; the full board manages its own copy in NotesBoard.
+  const [notes, setNotes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
   const { user, profile } = useAuth();
@@ -255,7 +263,11 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
   const [search, setSearch] = useState('');
   const [brandEditor, setBrandEditor] = useState(null);   // { mode:'add'|'edit', brand? }
   const [creatorEditor, setCreatorEditor] = useState(null); // { mode, brandId, creator? }
-  const [notesBrand, setNotesBrand] = useState(null);     // { id, name }
+  const [notesBrand, setNotesBrand] = useState(null);     // { id, name } — quick month note drawer
+  const [keepBrand, setKeepBrand] = useState(null);       // { id, name } — Keep-notes list drawer
+  const [allNotesOpen, setAllNotesOpen] = useState(false); // global notes drawer (floating button)
+  const [openNote, setOpenNote] = useState(null);          // a single note opened directly (deep link)
+  const [pendingNoteId, setPendingNoteId] = useState(null); // ?note=<id> waiting for notes to load
   const [confirmDel, setConfirmDel] = useState(null);     // { message, onYes }
   const [undo, setUndo] = useState(null);                 // { label, restore, commit }
   const undoRef = useRef(null);
@@ -301,6 +313,8 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
       if (an) setReportAnchors(an);
       const cm = await store.loadComments(ids).catch(() => null);
       if (cm) setComments(cm);
+      const nts = await store.loadNotes().catch(() => null);
+      if (nts) setNotes(nts);
     } catch (e) {
       setErr(e.message || 'Failed to load');
     }
@@ -308,9 +322,30 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
 
   useEffect(() => { (async () => { setLoading(true); await reload(); setLoading(false); })(); }, [reload]);
 
+  // Fire due note reminders workspace-wide (any tab): converts due reminders into
+  // notifications (in-app + browser via NotificationsContext). Runs on load + every
+  // minute; reloads so badges/counts refresh when something fired.
+  useEffect(() => {
+    const tick = () => { store.fireDueNoteReminders().then(c => { if (c > 0) reload(); }).catch(() => {}); };
+    tick();
+    const iv = setInterval(tick, 60000);
+    return () => clearInterval(iv);
+  }, [reload]);
+
   /* lookups */
   const brandById = useMemo(() => { const m = {}; brands.forEach(b => { m[b.id] = b; }); return m; }, [brands]);
   const bmByKey = useMemo(() => { const m = {}; brandMonths.forEach(x => { m[`${x.brand_id}|${x.month}`] = x; }); return m; }, [brandMonths]);
+  // Due reminders (overdue, not dismissed/archived) → Notes tab badge.
+  const dueReminderCount = useMemo(() => {
+    const now = Date.now();
+    return notes.filter(n => n.reminder_at && !n.reminder_done && !n.archived && new Date(n.reminder_at).getTime() <= now).length;
+  }, [notes]);
+  // Per-brand Keep-note counts (for the brand-row notes indicator).
+  const noteCountByBrand = useMemo(() => {
+    const m = {};
+    notes.forEach(n => { if (n.brand_id && !n.archived) m[n.brand_id] = (m[n.brand_id] || 0) + 1; });
+    return m;
+  }, [notes]);
 
   // ── keep in sync with the database (teammates / other devices) ──
   const busyRef = useRef(false);
@@ -333,6 +368,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'handler_collab_creators' }, ping)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'paid_collab_handler_brands' }, ping)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'handler_collab_brand_months' }, ping)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'handler_notes' }, ping)
       .subscribe();
     return () => { clearTimeout(t); try { supabase.removeChannel(ch); } catch {} };
   }, [reload]);
@@ -486,13 +522,22 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
     try {
       let savedId = data.id;
       if (mode === 'add') { const row = await store.addCreator(data); savedId = row?.id; }
-      else await store.updateCreator(data.id, {
-        name: data.name, tiktok_handle: data.tiktok_handle, amount: Number(data.amount) || 0,
-        videos_count: parseInt(data.videos_count, 10) || 0, zelle: data.zelle, paypal: data.paypal,
-        phone: data.phone, email: data.email, category: data.category,
-        onboarded_on: data.onboarded_on,
-        products: Array.isArray(data.products) ? data.products : [],
-      });
+      else {
+        const newCount = parseInt(data.videos_count, 10) || 0;
+        const patch = {
+          name: data.name, tiktok_handle: data.tiktok_handle, amount: Number(data.amount) || 0,
+          videos_count: newCount, zelle: data.zelle, paypal: data.paypal,
+          phone: data.phone, email: data.email, category: data.category,
+          onboarded_on: data.onboarded_on,
+          products: Array.isArray(data.products) ? data.products : [],
+        };
+        // lowering the video count drops the extra video-link / ad-code rows
+        const existing = creators.find(x => x.id === data.id);
+        if (existing && Array.isArray(existing.video_codes) && newCount < existing.video_codes.length) {
+          patch.video_codes = existing.video_codes.slice(0, newCount);
+        }
+        await store.updateCreator(data.id, patch);
+      }
       // keep the same creator's contact/identity in sync everywhere they appear
       await propagateShared(data.name, {
         tiktok_handle: data.tiktok_handle, paypal: data.paypal, zelle: data.zelle,
@@ -586,6 +631,8 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
     if (loading || deepLinked.current) return;
     deepLinked.current = true;
     const sp = new URLSearchParams(window.location.search);
+    const noteId = sp.get('note');
+    if (noteId) setPendingNoteId(noteId); // opened once the notes list is in state
     const b = sp.get('brand');
     if (!b) return;
     if (sp.get('pay') === '1') {
@@ -598,6 +645,32 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
       setCommentDrawer({ brandId: b, tt: sp.get('tt') || 'brand', tk: sp.get('tk') || '', highlight: sp.get('pcc') || null });
     }
   }, [loading]);
+
+  // Open the note from a ?note=<id> deep link (e.g. a reminder notification) once
+  // the notes list has loaded; if it's missing locally, fetch it directly.
+  useEffect(() => {
+    if (!pendingNoteId) return;
+    const local = notes.find(n => n.id === pendingNoteId);
+    if (local) { setOpenNote(local); setPendingNoteId(null); return; }
+    let cancelled = false;
+    store.loadNotes()
+      .then(list => { if (cancelled) return; const n = (list || []).find(x => x.id === pendingNoteId); if (n) setOpenNote(n); })
+      .finally(() => { if (!cancelled) setPendingNoteId(null); });
+    return () => { cancelled = true; };
+  }, [pendingNoteId, notes]);
+
+  // Persist / delete for a directly-opened note (deep link), kept in sync with the workspace.
+  const persistOpenNote = useCallback(async (payload) => {
+    const { id, ...rest } = payload;
+    if (id) { try { await store.updateNote(id, rest); } catch (e) { setErr(e.message || 'Save failed'); } reload(); return id; }
+    try { const row = await store.createNote(rest); reload(); return row.id; }
+    catch (e) { setErr(e.message || 'Save failed'); return null; }
+  }, [reload]);
+  const deleteOpenNote = useCallback(async (n) => {
+    if (!window.confirm('Delete this note?')) return;
+    try { await store.deleteNote(n.id); } catch {}
+    setOpenNote(null); reload();
+  }, [reload]);
   // notes (per brand, per month) — optimistic + persist
   const saveNotes = useCallback((brandId, notesText) => {
     setBrandMonths(prev => {
@@ -647,10 +720,11 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
         {err && <div className="pc-banner" style={{ background: 'var(--pc-error-bg)', color: 'var(--pc-error-fg)' }}><span>⚠️</span><span>{err}</span></div>}
 
         <div className="pc-tabs">
-          {[{ id: 'brands', label: 'Brands' }, { id: 'creators', label: 'Creators' }, { id: 'performance', label: 'Performance' }, { id: 'reporting', label: 'Internal Reporting' }, { id: 'discussions', label: 'Discussions' }].map(t => (
+          {[{ id: 'brands', label: 'Brands' }, { id: 'creators', label: 'Creators' }, { id: 'performance', label: 'Performance' }, { id: 'reporting', label: 'Internal Reporting' }, { id: 'discussions', label: 'Discussions' }, { id: 'notes', label: 'Notes' }].map(t => (
             <button key={t.id} className={`pc-tab ${tab === t.id ? 'active' : ''}`} onClick={() => { setTab(t.id); setDrillId(null); }}>
               {t.label}
               {t.id === 'discussions' && needsReplyCount > 0 && <span className="pc-tab-badge">{needsReplyCount}</span>}
+              {t.id === 'notes' && dueReminderCount > 0 && <span className="pc-tab-badge">{dueReminderCount}</span>}
             </button>
           ))}
         </div>
@@ -666,6 +740,8 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
             <ReportingView brands={brands} brandById={brandById} creators={creators} month={month} comments={comments} onOpenComments={openComments} />
           ) : tab === 'discussions' ? (
             <DiscussionsView comments={comments} brandById={brandById} creators={creators} onOpen={openComments} />
+          ) : tab === 'notes' ? (
+            <NotesBoard brands={brands} brandById={brandById} month={month} />
           ) : (
             drillId && drillBrand
               ? <Drilldown
@@ -690,6 +766,8 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
                   onEditBudget={(r) => setBrandEditor({ mode: 'edit', brand: brands.find(b => b.id === r.id) || { id: r.id, name: r.brand } })}
                   onAddBrand={() => setBrandEditor({ mode: 'add', brand: { id: null, name: '' } })}
                   onNotes={(r) => setNotesBrand({ id: r.id, name: r.brand })}
+                  noteCounts={noteCountByBrand}
+                  onBrandNotes={(r) => setKeepBrand({ id: r.id, name: r.brand })}
                   onReorder={reorderBrands}
                 />
           )
@@ -717,6 +795,27 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
           notes={(bmByKey[`${notesBrand.id}|${month}`] || {}).notes || ''}
           onClose={() => setNotesBrand(null)}
           onSave={(text) => saveNotes(notesBrand.id, text)} />
+      )}
+      {keepBrand && (
+        <BrandNotesDrawer brandId={keepBrand.id} brandName={keepBrand.name}
+          brands={brands} brandById={brandById} month={month}
+          notes={notes.filter(n => n.brand_id === keepBrand.id)}
+          onClose={() => setKeepBrand(null)} onChanged={reload} />
+      )}
+      {/* global notes — reachable from anywhere in the workspace */}
+      <button className="pc-notesfab" onClick={() => setAllNotesOpen(true)} title="Notes" aria-label="Open notes">
+        <i className="bi bi-journal-text" />
+        {dueReminderCount > 0 && <span className="pc-notesfab-badge">{dueReminderCount}</span>}
+      </button>
+      {allNotesOpen && (
+        <AllNotesDrawer notes={notes} brands={brands} brandById={brandById} month={month}
+          onClose={() => setAllNotesOpen(false)} onChanged={reload} />
+      )}
+      {openNote && (
+        <NoteEditor editor={{ mode: 'edit', note: openNote }} brands={brands} brandById={brandById} month={month}
+          overlayClass="pc-overlay-top"
+          onClose={() => setOpenNote(null)} onPersist={persistOpenNote}
+          onDelete={() => deleteOpenNote(openNote)} />
       )}
       {confirmDel && <ConfirmModal message={confirmDel.message} onYes={confirmDel.onYes} onCancel={() => setConfirmDel(null)} />}
       {undo && <UndoToast label={undo.label} onUndo={doUndo} />}
@@ -993,7 +1092,7 @@ function UndoToast({ label, onUndo }) {
 /* ════════════════════════════════════════════════════════════
    Brand-level table
 ════════════════════════════════════════════════════════════ */
-function BrandLevel({ rows, totals, month, search, setSearch, onOpen, onEditBudget, onAddBrand, onNotes, onReorder }) {
+function BrandLevel({ rows, totals, month, search, setSearch, onOpen, onEditBudget, onAddBrand, onNotes, noteCounts = {}, onBrandNotes, onReorder }) {
   const collected = totals.allocated > 0 ? Math.round((totals.paid / totals.allocated) * 100) : 0;
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   function handleDragEnd(e) {
@@ -1036,7 +1135,7 @@ function BrandLevel({ rows, totals, month, search, setSearch, onOpen, onEditBudg
           </div>
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
             <SortableContext items={rows.map(r => r.id)} strategy={verticalListSortingStrategy}>
-              {rows.map(r => <BrandRow key={r.id} r={r} onOpen={() => onOpen(r.id)} onEditBudget={() => onEditBudget(r)} onNotes={() => onNotes(r)} />)}
+              {rows.map(r => <BrandRow key={r.id} r={r} onOpen={() => onOpen(r.id)} onEditBudget={() => onEditBudget(r)} onNotes={() => onNotes(r)} noteCount={noteCounts[r.id] || 0} onBrandNotes={() => onBrandNotes && onBrandNotes(r)} />)}
             </SortableContext>
           </DndContext>
           <div className="pc-bt-row is-total">
@@ -1071,12 +1170,18 @@ const DragGrip = (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden><circle cx="9" cy="6" r="1.7" /><circle cx="15" cy="6" r="1.7" /><circle cx="9" cy="12" r="1.7" /><circle cx="15" cy="12" r="1.7" /><circle cx="9" cy="18" r="1.7" /><circle cx="15" cy="18" r="1.7" /></svg>
 );
 
-function BrandRow({ r, onOpen, onEditBudget, onNotes }) {
+function BrandRow({ r, onOpen, onEditBudget, onNotes, noteCount = 0, onBrandNotes }) {
   // Usage bar color: below 80% red, 80%+ green.
   const usageColor = r.usage >= 80 ? 'var(--pc-success-fg)' : 'var(--pc-error-fg)';
   function edit(e) { e.stopPropagation(); onEditBudget(); }
-  function notes(e) { e.stopPropagation(); onNotes(); }
-  const hasNotes = !!(r.bm.notes && r.bm.notes.trim());
+  function keepNotes(e) { e.stopPropagation(); onBrandNotes && onBrandNotes(); }
+  const keepBtn = (
+    <button className={`pc-keepnote-btn ${noteCount > 0 ? 'has' : ''}`} onClick={keepNotes}
+      title={noteCount > 0 ? `${noteCount} brand note${noteCount === 1 ? '' : 's'}` : 'Brand notes'} aria-label="Brand notes">
+      <i className="bi bi-journal-text" />
+      {noteCount > 0 && <span className="pc-keepnote-count">{noteCount}</span>}
+    </button>
+  );
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: r.id });
   const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 50 : undefined, position: isDragging ? 'relative' : undefined };
   const handle = (
@@ -1092,9 +1197,7 @@ function BrandRow({ r, onOpen, onEditBudget, onNotes }) {
           <div className="pc-brandname">{r.brand}</div>
           <div className="pc-brandsub">{r.creators} creator{r.creators === 1 ? '' : 's'} · {r.delivered}/{r.videos} delivered</div>
         </div>
-        <button className={`pc-note-btn ${hasNotes ? 'has' : ''}`} onClick={notes} title={hasNotes ? r.bm.notes.trim() : 'Add notes'} aria-label="Notes">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="8" y1="13" x2="16" y2="13" /><line x1="8" y1="17" x2="13" y2="17" /></svg>
-        </button>
+        {keepBtn}
       </div>
       <div className="pc-cell pc-budget-cell" data-label="Budget">
         <button className={`pc-budget-btn ${r.budget ? '' : 'empty'}`} onClick={edit} title="Edit budget">{r.budget ? fmt$(r.budget) : '+ set'}</button>
@@ -1124,9 +1227,7 @@ function BrandRow({ r, onOpen, onEditBudget, onNotes }) {
             <div className="pc-mc-name">{r.brand}</div>
             <div className="pc-mc-subline">{r.creators} creator{r.creators === 1 ? '' : 's'} · {r.delivered}/{r.videos} delivered</div>
           </div>
-          <button className={`pc-note-btn ${hasNotes ? 'has' : ''}`} onClick={notes} title={hasNotes ? r.bm.notes.trim() : 'Add notes'} aria-label="Notes">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="8" y1="13" x2="16" y2="13" /><line x1="8" y1="17" x2="13" y2="17" /></svg>
-          </button>
+          {keepBtn}
         </div>
         {r.budget ? (
           <div className="pc-mc-usage">
@@ -1155,7 +1256,7 @@ function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCr
   const bm = row?.bm || {};
   const products = focusProductList(bm);
   const notesHas = !!(notesText && notesText.trim());
-  // group creators by payment status — Payment Pending → Videos in Progress → Payment Sent,
+  // group creators by payment status — Payment Pending → Follow-up Required → Videos in Progress → Payment Sent,
   // each introduced by a labelled divider. The # index runs continuously top-to-bottom.
   const statusGroups = useMemo(() => {
     let n = 0;
@@ -1388,11 +1489,11 @@ function CreatorsView({ rows, onEdit, onSetStatus, onToggleVisible }) {
           <p>Creators you onboard inside brands show up here automatically.</p>
         </div></div>
       ) : (
-        <div className="pc-card pc-list" style={{ paddingBottom: sel.size ? 8 : 0 }}>
+        <div className="pc-card pc-list pc-cv-list" style={{ paddingBottom: sel.size ? 8 : 0 }}>
           <div className="pc-cv-head">
             <div className="pc-cv-check"><input type="checkbox" className="pc-check" checked={allSelected} onChange={toggleAll} title="Select all" /></div>
-            <div className="pc-num">#</div><div>Name</div><div>Contact</div><div>TikTok</div><div>Category</div>
-            <div>Brand</div><div>Onboarded</div><div className="pc-num">Deal</div><div className="pc-num">Rate/Vid</div><div>Status</div>
+            <div className="pc-num pc-idxcell">#</div><div>Name</div><div>Category</div>
+            <div>Brand</div><div className="pc-num">Deal</div><div className="pc-num">Rate/Vid</div><div>Status</div>
           </div>
           {groups.map(g => (
             <React.Fragment key={g.key}>
@@ -1418,23 +1519,32 @@ function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, onToggleVisible, select
   const accounts = tiktokAccounts(c.tiktok_handle);
   const amount = Number(c.amount) || 0;
   const videos = parseInt(c.videos_count, 10) || 0;
+  const delivered = Array.isArray(c.video_codes) ? c.video_codes.filter(v => v?.video && String(v.video).trim()).length : 0;
   const avg = videos > 0 ? amount / videos : 0;
   const contact = c.phone || c.email || '';
   return (
     <div className={`pc-cv-row ${selected ? 'sel' : ''}`} onClick={onEdit} role="button" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter') onEdit(); }}>
       <div className="pc-cell pc-cv-check" data-label="" onClick={e => e.stopPropagation()}><input type="checkbox" className="pc-check" checked={selected} onChange={onToggleSelect} /></div>
       <div className="pc-cell pc-num pc-idxcell" data-label="#"><span className="pc-idx">#{idx}</span></div>
-      <div className="pc-cell" data-label="Name"><span className="pc-cname">{c.name}</span></div>
-      <div className="pc-cell" data-label="Contact"><span className="pc-handle" title={[c.phone, c.email].filter(Boolean).join('  ·  ')}>{contact || '—'}</span></div>
-      <div className="pc-cell" data-label="TikTok">
-        {accounts.length > 0
-          ? <span className="pc-tiktok"><a className="pc-handle" href={accounts[0].url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>{accounts[0].handle}</a>{accounts.length > 1 && <span className="pc-more" title={accounts.slice(1).map(a => a.handle).join(', ')}>+{accounts.length - 1}</span>}</span>
-          : <span className="pc-handle">—</span>}
+      <div className="pc-cell pc-cv-namecell" data-label="Name">
+        <span className="pc-cname">{c.name}</span>
+        {accounts.length > 0 && (
+          <span className="pc-tiktok pc-cv-sub">
+            <a className="pc-handle" href={accounts[0].url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>{accounts[0].handle}</a>
+            {accounts.length > 1 && <span className="pc-more" title={accounts.slice(1).map(a => a.handle).join(', ')}>+{accounts.length - 1}</span>}
+          </span>
+        )}
+        {contact && <span className="pc-cv-sub" title={[c.phone, c.email].filter(Boolean).join('  ·  ')}>{contact}</span>}
       </div>
       <div className="pc-cell" data-label="Category">{c.category ? <span className="pc-cat" title={c.category}>{c.category}</span> : <span className="pc-handle">—</span>}</div>
-      <div className="pc-cell" data-label="Brand"><span className="pc-brandtag">{c._brandName}</span></div>
-      <div className="pc-cell" data-label="Onboarded"><span className="pc-handle">{c.onboarded_on ? fmtDate(c.onboarded_on) : '—'}</span></div>
-      <div className="pc-cell pc-num" data-label="Deal"><span className="pc-dealwrap"><span className="pc-money">{fmt$(amount)}</span>{videos > 0 && <span className="pc-deal-vid"> · {videos}v</span>}</span></div>
+      <div className="pc-cell pc-cv-brandcell" data-label="Brand">
+        <span className="pc-brandtag">{c._brandName}</span>
+        {c.onboarded_on && <span className="pc-cv-sub">Onboarded {fmtDate(c.onboarded_on)}</span>}
+      </div>
+      <div className="pc-cell pc-num pc-cv-dealcell" data-label="Deal">
+        <span className="pc-money">{fmt$(amount)}</span>
+        {videos > 0 && <span className="pc-cv-sub">{delivered}/{videos} video{videos === 1 ? '' : 's'}</span>}
+      </div>
       <div className="pc-cell pc-num" data-label="Rate/Vid"><span className="pc-money">{avg ? fmt$(avg) : '—'}</span></div>
       <div className="pc-cell" data-label="Status">
         <StatusDropdown value={c.payment_status} onChange={v => onSetStatus(c.id, v)} />
@@ -1484,6 +1594,7 @@ function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, onToggleVisible, select
 ════════════════════════════════════════════════════════════ */
 const RD_STATUS = {
   videos_in_progress: { label: 'In progress', cls: 'prog', color: '#1259C3' },
+  follow_up:          { label: 'Follow-up',   cls: 'fup',  color: '#C62828' },
   pending:            { label: 'Pending pay',  cls: 'pend', color: '#E8862E' },
   paid:               { label: 'Paid',         cls: 'paid', color: '#198754' },
 };
@@ -1569,7 +1680,7 @@ function ReportingView({ brands, brandById, creators, month, comments = [], onOp
   [scoped, month, isWeekly, activeWeek]);
 
   const payMix = useMemo(() => {
-    const m = { videos_in_progress: 0, pending: 0, paid: 0 };
+    const m = { videos_in_progress: 0, follow_up: 0, pending: 0, paid: 0 };
     scoped.forEach(c => { m[c.payment_status] = (m[c.payment_status] || 0) + 1; });
     return Object.keys(RD_STATUS).map(k => ({ name: RD_STATUS[k].label, value: m[k] || 0, color: RD_STATUS[k].color })).filter(s => s.value > 0);
   }, [scoped]);
@@ -2399,10 +2510,10 @@ function CreatorExpand({ c, onEdit, onDelete, patchCreatorLocal }) {
     saving.current = true;
     setSaveState('saving');
     const patch = { video_codes: next };
-    // once every video row has a URL: stamp completed-on date + advance Videos in Progress → Payment Pending
+    // once every video row has a URL: stamp completed-on date + advance Videos in Progress / Follow-up → Payment Pending
     const allFilled = next.length > 0 && next.every(r => (r.video || '').trim());
     if (allFilled) {
-      if (c.payment_status === 'videos_in_progress') patch.payment_status = 'pending';
+      if (c.payment_status === 'videos_in_progress' || c.payment_status === 'follow_up') patch.payment_status = 'pending';
       if (!c.completed_on) patch.completed_on = todayISO();
     }
     patchCreatorLocal(c.id, patch);

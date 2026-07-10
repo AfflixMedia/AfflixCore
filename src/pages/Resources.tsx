@@ -28,6 +28,9 @@ export default function Resources() {
   const { user, profile } = useAuth();
   const isBob = profile?.role === 'bob';
   const isApc = profile?.role === 'apc';
+  // Ads Manager: APC-like brand scoping, but strictly READ-ONLY (comments still allowed).
+  const isAdsManager = profile?.role === 'ads_manager';
+  const isApcLike = isApc || isAdsManager;
   const { notifications, markRead } = useNotifications();
   const [params, setParams] = useSearchParams();
 
@@ -36,7 +39,7 @@ export default function Resources() {
   const [err, setErr] = useState<string | null>(null);
 
   // APCs default to their first brand; Bob defaults to General.
-  const [activeScope, setActiveScope] = useState<ScopeKey>(isApc ? 'b:placeholder' : 'general');
+  const [activeScope, setActiveScope] = useState<ScopeKey>(isApcLike ? 'b:placeholder' : 'general');
 
   // Add/Edit resource modal — owned by this page.
   const [show, setShow] = useState(false);
@@ -64,7 +67,7 @@ export default function Resources() {
       setComments((c.data as ResourceComment[]) ?? []);
       if (b.error) setErr(b.error.message);
       // Resolve default scope for APCs once we know their brands.
-      if (isApc && blist.length > 0 && activeScope === 'b:placeholder') {
+      if (isApcLike && blist.length > 0 && activeScope === 'b:placeholder') {
         setActiveScope(`b:${blist[0].id}`);
       }
       setBrandsLoading(false);
@@ -184,7 +187,7 @@ export default function Resources() {
   // APCs only see brand scopes they're assigned to (RLS filters `brands` already).
   // For Bob, surface General + every brand.
   const scopeChips: { key: ScopeKey; label: string; sub?: string; color: string }[] = [];
-  if (!isApc) {
+  if (!isApcLike) {
     scopeChips.push({ key: 'general', label: 'General', sub: 'Workspace-wide', color: '#64748b' });
   }
   brands.forEach(b => {
@@ -245,7 +248,7 @@ export default function Resources() {
       {/* Explorer */}
       <FolderExplorer
         scope={scope}
-        canEdit={true}
+        canEdit={!isAdsManager}
         reloadKey={reloadKey}
         onAddResource={openAdd}
         onEditResource={openEdit}

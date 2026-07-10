@@ -14,6 +14,7 @@ import ForwardModal from './ForwardModal';
 import GroupModal, { GroupMember } from './GroupModal';
 import BookmarksModal from './BookmarksModal';
 import DeleteMessageModal from './DeleteMessageModal';
+import ContactModal from './ContactModal';
 import {
   listContacts, listConversations, listParticipants, fetchOverview,
   fetchMessages, getOrCreateDm, sendMessage, markConversationRead, markDelivered,
@@ -39,6 +40,8 @@ export default function GlobalChat() {
   const activeId = params.get('c');
 
   const [contacts, setContacts] = useState<ChatContact[]>([]);
+  // brand_id → owning Team Lead id (drives the Brands "by Team Lead" sub-filter).
+  const [brandLeads, setBrandLeads] = useState<Map<string, string>>(new Map());
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [overview, setOverview] = useState<Map<string, ConversationOverview>>(new Map());
@@ -63,6 +66,8 @@ export default function GlobalChat() {
   const [bookmarksLoading, setBookmarksLoading] = useState(false);
   // First unread message id at open time — drives the "Unread messages" divider.
   const [unreadAnchorId, setUnreadAnchorId] = useState<string | null>(null);
+  // Contact card opened by clicking a @mention.
+  const [contactCard, setContactCard] = useState<ChatContact | null>(null);
 
   const activeIdRef = useRef<string | null>(activeId);
   useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
@@ -109,7 +114,7 @@ export default function GlobalChat() {
     const m = new Map<string, ChatContact>();
     contacts.forEach(c => m.set(c.id, c));
     if (myId && profile) {
-      m.set(myId, { id: myId, full_name: profile.full_name, email: profile.email, role: profile.role });
+      m.set(myId, { id: myId, full_name: profile.full_name, email: profile.email, role: profile.role, avatar_url: profile.avatar_url });
     }
     return m;
   }, [contacts, myId, profile]);
@@ -118,7 +123,7 @@ export default function GlobalChat() {
   // the announcement roster + member count, which are role-based not row-based.
   const allStaff = useMemo<ChatContact[]>(() => {
     const arr = [...contacts];
-    if (myId && profile) arr.push({ id: myId, full_name: profile.full_name, email: profile.email, role: profile.role });
+    if (myId && profile) arr.push({ id: myId, full_name: profile.full_name, email: profile.email, role: profile.role, avatar_url: profile.avatar_url });
     return arr;
   }, [contacts, myId, profile]);
 
@@ -189,6 +194,17 @@ export default function GlobalChat() {
     return list;
   }, [conversations, participants, overview, directory, myId, isBob]);
 
+  // brand_id → owning Team Lead as a resolved contact (Team Leads are staff, so
+  // they're already in the directory). Feeds the Brands sub-filter chips.
+  const brandLeadByBrand = useMemo(() => {
+    const m = new Map<string, ChatContact>();
+    brandLeads.forEach((leadId, brandId) => {
+      const c = directory.get(leadId);
+      if (c) m.set(brandId, c);
+    });
+    return m;
+  }, [brandLeads, directory]);
+
   const activeView = useMemo(
     () => views.find(v => v.conversation.id === activeId) ?? null,
     [views, activeId],
@@ -247,6 +263,13 @@ export default function GlobalChat() {
       // Tell senders their messages reached me (double tick), then reflect my
       // own newly-bumped rows (incl. a lazily-created announcement row) locally.
       markDelivered().then(() => listParticipants().then(setParticipants)).catch(() => { /* non-fatal */ });
+      // Brand → Team Lead ownership (RLS: Bob sees all, a Team Lead only their own)
+      // — powers the Brands filter's "by Team Lead" sub-strip.
+      supabase.from('team_lead_brands').select('brand_id, team_lead_id')
+        .then(({ data }) => setBrandLeads(
+          new Map(((data ?? []) as { brand_id: string; team_lead_id: string }[])
+            .map(r => [r.brand_id, r.team_lead_id]))))
+        .then(undefined, () => { /* non-fatal */ });
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -261,11 +284,15 @@ export default function GlobalChat() {
   const openConversation = useCallback(async (conversationId: string | null) => {
     if (!conversationId) {
       setMessages([]); setEvents([]); setReactions([]); setHiddenIds(new Set());
-      setUnreadAnchorId(null); setHasMoreOlder(false);
+      setUnreadAnchorId(null); setHasMoreOlder(false); setBookmarks([]);
       return;
     }
     setMessagesLoading(true);
     setReplyTo(null);
+    // Bookmarks feed the composer's "/" resource tags (brand groups: synced
+    // with the brand's Resources). Non-fatal, loads alongside the messages.
+    setBookmarks([]);
+    fetchBookmarks(conversationId).then(setBookmarks).catch(() => { /* non-fatal */ });
     try {
       // Capture the read boundary BEFORE marking read, so we can place the
       // "Unread messages" divider at the first message we hadn't seen.
@@ -574,6 +601,7 @@ export default function GlobalChat() {
           views={views}
           activeId={activeId}
           myId={myId}
+          brandLeadByBrand={brandLeadByBrand}
           onSelect={selectConversation}
           onStartChat={() => setShowNewChat(true)}
           onOpenAnnouncement={openAnnouncement}
@@ -596,7 +624,12 @@ export default function GlobalChat() {
           announcementCount={allStaff.length}
           canPost={!activeView?.archived && (!(activeView?.conversation.is_announcement) || isBob)}
           reactionsByMsg={reactionsByMsg}
+          resources={bookmarks}
           onReact={handleReact}
+          onOpenContact={(userId) => {
+            const c = directory.get(userId);
+            if (c) setContactCard(c);
+          }}
           onOpenGroup={() => setGroupModal({ mode: 'manage' })}
           onOpenSettings={() => setGroupModal({ mode: 'announcement' })}
           onOpenBookmarks={openBookmarks}
@@ -661,6 +694,7 @@ export default function GlobalChat() {
           isGroup={isGroupActive}
           isGroupAdmin={isGroupActive && activeView.iAmAdmin}
           membersCanEdit={activeView.conversation.bookmarks_members_can_edit}
+          brandGroup={!!activeView.conversation.brand_id}
           loading={bookmarksLoading}
           onAdd={(t, u) => bookmarkOp(() => addBookmark(activeId!, t, u, myId).then(() => undefined))}
           onUpdate={(id, t, u) => bookmarkOp(() => updateBookmark(id, t, u))}
@@ -669,6 +703,12 @@ export default function GlobalChat() {
           onClose={() => setShowBookmarks(false)}
         />
       )}
+      <ContactModal
+        contact={contactCard}
+        isSelf={contactCard?.id === myId}
+        onMessage={(c) => { setContactCard(null); startChatWith(c); }}
+        onClose={() => setContactCard(null)}
+      />
       <DeleteMessageModal
         message={deleteMsg}
         canDeleteForEveryone={!!deleteMsg && deleteMsg.sender_id === myId && !deleteMsg.deleted_at}

@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, FormEvent } from 'react';
-import { Card, Form, Button, Row, Col, Table, Modal, Spinner, Alert, Dropdown } from 'react-bootstrap';
+import { Fragment, useEffect, useMemo, useState, FormEvent } from 'react';
+import { Card, Form, Button, Row, Col, Table, Modal, Spinner, Alert } from 'react-bootstrap';
 import { supabase } from '../../lib/supabase';
 import { addDays, formatRange, toISO, fromISO } from '../../lib/dates';
+import { BrandProduct } from '../../lib/paidCollabSchema';
 import NumberInput from '../../components/NumberInput';
 
 /** Days between two ISO dates (b - a). */
@@ -13,6 +14,19 @@ function currentMonth() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
+
+/** The latest `count` months as `YYYY-MM`, oldest first, ending with the current month. */
+function recentMonths(count: number): string[] {
+  const now = new Date();
+  const out: string[] = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+  return out;
+}
+
+const n = (v: any) => (v == null ? 0 : Number(v) || 0);
 
 interface MonthRow {
   id?: string;
@@ -33,37 +47,30 @@ interface WeekRow {
   gmv: number;
   notes: string;
 }
-
-interface ProductWeekRow {
+/** Product-level breakdown of a weekly entry. product_id null + is_other = the "Other Products" catch-all. */
+interface ProductRow {
   id?: string;
-  brand_id: string;
-  week_start: string;
-  week_end: string;
-  product: string;
-  product_id: string;
-  spend: number;
+  weekly_id: string;
+  product_id: string | null;
+  is_other: boolean;
+  ad_spend: number;
+  roi: number;
   orders: number;
+  cpo: number;
   gmv: number;
-  notes: string;
 }
-interface BrandProduct { id: string; name: string; external_product_id: string | null; }
 
 const emptyMonth = (brandId: string, month: string): MonthRow => ({
   brand_id: brandId, month, allocated_budget: 0, spend_to_date: 0,
-});
-const emptyWeek = (brandId: string, week_start: string): WeekRow => ({
-  brand_id: brandId, week_start, week_end: addDays(week_start, 6),
-  ad_spend: 0, roi: 0, orders: 0, cpo: 0, gmv: 0, notes: '',
-});
-const emptyProductWeek = (brandId: string, week_start: string): ProductWeekRow => ({
-  brand_id: brandId, week_start, week_end: week_start ? addDays(week_start, 6) : '',
-  product: '', product_id: '', spend: 0, orders: 0, gmv: 0, notes: '',
 });
 
 export default function BrandGmvMaxTab({ brandId, canEdit }: { brandId: string; canEdit: boolean }) {
   const [month, setMonth] = useState<string>(currentMonth());
   const [monthRow, setMonthRow] = useState<MonthRow>(emptyMonth(brandId, month));
   const [weeks, setWeeks] = useState<WeekRow[]>([]);
+  const [products, setProducts] = useState<BrandProduct[]>([]);
+  // Product-level rows loaded from the DB, keyed by weekly_id.
+  const [childrenByWeek, setChildrenByWeek] = useState<Record<string, ProductRow[]>>({});
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [savingMonth, setSavingMonth] = useState(false);
@@ -74,25 +81,16 @@ export default function BrandGmvMaxTab({ brandId, canEdit }: { brandId: string; 
   // Every GMV Max week_start for this brand (used to suggest the next week).
   const [allWeekStarts, setAllWeekStarts] = useState<Set<string>>(new Set());
 
-  // Week editor modal
-  const [show, setShow] = useState(false);
-  const [editing, setEditing] = useState<WeekRow | null>(null);
-  const [draft, setDraft] = useState<WeekRow>(emptyWeek(brandId, ''));
-  const [savingWeek, setSavingWeek] = useState(false);
+  // Expandable per-week product editor.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [drafts, setDrafts] = useState<Record<string, ProductRow[]>>({});
+  const [savingProducts, setSavingProducts] = useState<Record<string, boolean>>({});
 
-  // Product-level GMV Max
-  const [productWeeks, setProductWeeks] = useState<ProductWeekRow[]>([]);
-  const [pShow, setPShow] = useState(false);
-  const [pEditing, setPEditing] = useState<ProductWeekRow | null>(null);
-  const [pDraft, setPDraft] = useState<ProductWeekRow>(emptyProductWeek(brandId, ''));
-  const [pSaving, setPSaving] = useState(false);
-  // The brand's catalogue — for the product picker (so APCs select, not type).
-  const [products, setProducts] = useState<BrandProduct[]>([]);
-  useEffect(() => {
-    supabase.from('brand_products').select('id,name,external_product_id')
-      .eq('brand_id', brandId).order('name', { ascending: true })
-      .then(({ data }) => setProducts((data as BrandProduct[]) ?? []));
-  }, [brandId]);
+  // Add-week modal (only picks the week — metrics are entered per product afterwards).
+  const [show, setShow] = useState(false);
+  const [newWeekStart, setNewWeekStart] = useState('');
+  const [newWeekNotes, setNewWeekNotes] = useState('');
+  const [savingWeek, setSavingWeek] = useState(false);
 
   const monthRange = useMemo(() => {
     const [y, m] = month.split('-').map(Number);
@@ -101,31 +99,61 @@ export default function BrandGmvMaxTab({ brandId, canEdit }: { brandId: string; 
     return { first, last };
   }, [month]);
 
+  /** Build the editable draft rows for a week: one per brand product + the "Other Products" row. */
+  const buildDraft = (weekId: string, kids: ProductRow[], prods: BrandProduct[]): ProductRow[] => {
+    const byProduct = new Map(kids.filter(c => !c.is_other && c.product_id).map(c => [c.product_id!, c]));
+    const rows: ProductRow[] = prods.map(p => {
+      const ex = byProduct.get(p.id);
+      return ex
+        ? { ...ex, ad_spend: n(ex.ad_spend), roi: n(ex.roi), orders: n(ex.orders), cpo: n(ex.cpo), gmv: n(ex.gmv) }
+        : { weekly_id: weekId, product_id: p.id, is_other: false, ad_spend: 0, roi: 0, orders: 0, cpo: 0, gmv: 0 };
+    });
+    const other = kids.find(c => c.is_other);
+    rows.push(other
+      ? { ...other, ad_spend: n(other.ad_spend), roi: n(other.roi), orders: n(other.orders), cpo: n(other.cpo), gmv: n(other.gmv) }
+      : { weekly_id: weekId, product_id: null, is_other: true, ad_spend: 0, roi: 0, orders: 0, cpo: 0, gmv: 0 });
+    return rows;
+  };
+
   const load = async () => {
     setLoading(true); setErr(null);
     // A week belongs to the month if its [start,end] range OVERLAPS the month —
     // so a week that spans a month boundary shows up in BOTH months.
-    const [m, w, anchorRes, allW, pw] = await Promise.all([
+    const [m, w, anchorRes, allW, prods] = await Promise.all([
       supabase.from('brand_gmv_max_monthly').select('*').eq('brand_id', brandId).eq('month', month).maybeSingle(),
       supabase.from('brand_gmv_max_weekly').select('*').eq('brand_id', brandId)
         .lte('week_start', monthRange.last).gte('week_end', monthRange.first)
         .order('week_start', { ascending: true }),
       supabase.from('brand_report_settings').select('weekly_anchor').eq('brand_id', brandId).maybeSingle(),
       supabase.from('brand_gmv_max_weekly').select('week_start').eq('brand_id', brandId),
-      supabase.from('brand_gmv_max_product_weekly').select('*').eq('brand_id', brandId)
-        .lte('week_start', monthRange.last).gte('week_end', monthRange.first)
-        .order('week_start', { ascending: true }).order('product', { ascending: true }),
+      supabase.from('brand_products').select('*').eq('brand_id', brandId).order('name'),
     ]);
     if (m.error && !m.error.message?.includes('does not exist')) setErr(m.error.message);
     else if (m.error) setErr('Run schema_brand_detail.sql in Supabase to enable GMV Max.');
     else setMonthRow((m.data as MonthRow) ?? emptyMonth(brandId, month));
+    const weekRows = ((w.data as WeekRow[]) ?? []);
     if (w.error && !err) setErr(w.error.message);
-    else setWeeks((w.data as WeekRow[]) ?? []);
-    setProductWeeks((pw.data as ProductWeekRow[]) ?? []);
+    else setWeeks(weekRows);
+    setProducts((prods.data as BrandProduct[]) ?? []);
     setAnchor((anchorRes.data as any)?.weekly_anchor ?? null);
     setAllWeekStarts(new Set(((allW.data as any[]) ?? []).map(r =>
       typeof r.week_start === 'string' ? r.week_start.slice(0, 10) : r.week_start)));
     setEditBudget(false);
+
+    // Product-level breakdown for the weeks in view.
+    const ids = weekRows.map(r => r.id!).filter(Boolean);
+    if (ids.length) {
+      const ch = await supabase.from('brand_gmv_max_weekly_products').select('*').in('weekly_id', ids);
+      const grouped: Record<string, ProductRow[]> = {};
+      for (const row of (ch.data as ProductRow[]) ?? []) {
+        (grouped[row.weekly_id] ??= []).push(row);
+      }
+      setChildrenByWeek(grouped);
+    } else {
+      setChildrenByWeek({});
+    }
+    setDrafts({});
+    setExpanded(new Set());
     setLoading(false);
   };
   useEffect(() => { load(); }, [brandId, month]);
@@ -133,7 +161,7 @@ export default function BrandGmvMaxTab({ brandId, canEdit }: { brandId: string; 
   const saveMonth = async () => {
     setSavingMonth(true); setErr(null);
     // spend_to_date is auto-calculated from the weekly entries.
-    const spendToDate = weeks.reduce((s, w) => s + (w.ad_spend ?? 0), 0);
+    const spendToDate = weeks.reduce((s, w) => s + n(w.ad_spend), 0);
     const payload = {
       brand_id: brandId,
       month,
@@ -158,13 +186,8 @@ export default function BrandGmvMaxTab({ brandId, canEdit }: { brandId: string; 
   };
 
   const openAddWeek = () => {
-    setEditing(null);
-    setDraft(emptyWeek(brandId, nextAnchoredWeek()));
-    setErr(null); setShow(true);
-  };
-  const openEditWeek = (w: WeekRow) => {
-    setEditing(w);
-    setDraft({ ...w });
+    setNewWeekStart(nextAnchoredWeek());
+    setNewWeekNotes('');
     setErr(null); setShow(true);
   };
   const onWeekStartChange = (s: string) => {
@@ -179,83 +202,99 @@ export default function BrandGmvMaxTab({ brandId, canEdit }: { brandId: string; 
       );
       if (!ok) return;
     }
-    setDraft({ ...draft, week_start: s, week_end: s ? addDays(s, 6) : '' });
+    setNewWeekStart(s);
   };
 
+  // Create the week, then seed a product row for every brand product + one "Other Products" row.
   const submitWeek = async (e: FormEvent) => {
     e.preventDefault();
+    if (!newWeekStart) return;
     setSavingWeek(true); setErr(null);
-    const payload: any = { ...draft };
-    delete payload.id;
-    const res = editing?.id
-      ? await supabase.from('brand_gmv_max_weekly').update(payload).eq('id', editing.id).select().single()
-      : await supabase.from('brand_gmv_max_weekly').insert(payload).select().single();
+    const parent = await supabase.from('brand_gmv_max_weekly').insert({
+      brand_id: brandId,
+      week_start: newWeekStart,
+      week_end: addDays(newWeekStart, 6),
+      ad_spend: 0, roi: 0, orders: 0, cpo: 0, gmv: 0,
+      notes: newWeekNotes,
+    }).select().single();
+    if (parent.error) { setSavingWeek(false); setErr(parent.error.message); return; }
+    const weeklyId = (parent.data as WeekRow).id!;
+    const seed = [
+      ...products.map(p => ({ weekly_id: weeklyId, product_id: p.id, is_other: false })),
+      { weekly_id: weeklyId, product_id: null, is_other: true },
+    ];
+    const kids = await supabase.from('brand_gmv_max_weekly_products').insert(seed);
     setSavingWeek(false);
-    if (res.error) { setErr(res.error.message); return; }
+    if (kids.error) { setErr(kids.error.message); return; }
     setShow(false);
     load();
   };
 
   const removeWeek = async (w: WeekRow) => {
     if (!w.id) return;
-    if (!confirm(`Delete weekly entry for ${formatRange(w.week_start, w.week_end)}?`)) return;
+    if (!confirm(`Delete weekly entry for ${formatRange(w.week_start, w.week_end)}? This removes its product breakdown too.`)) return;
     const prev = weeks;
     setWeeks(weeks.filter(x => x.id !== w.id));
     const { error } = await supabase.from('brand_gmv_max_weekly').delete().eq('id', w.id);
     if (error) { alert(error.message); setWeeks(prev); }
   };
 
-  // ----- Product-level GMV Max -----
-  // Default to the latest week that already has an overall entry, else the next
-  // anchored week — so product rows line up with the report cycle by default.
-  const defaultProductWeek = (): string =>
-    weeks.length ? weeks[weeks.length - 1].week_start : nextAnchoredWeek();
+  const toggleExpand = (w: WeekRow) => {
+    const id = w.id!;
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) { next.delete(id); return next; }
+      next.add(id);
+      setDrafts(d => (d[id] ? d : { ...d, [id]: buildDraft(id, childrenByWeek[id] ?? [], products) }));
+      return next;
+    });
+  };
 
-  const openAddProduct = () => {
-    setPEditing(null);
-    setPDraft(emptyProductWeek(brandId, defaultProductWeek()));
-    setErr(null); setPShow(true);
+  const updateDraft = (weekId: string, idx: number, patch: Partial<ProductRow>) => {
+    setDrafts(d => {
+      const arr = [...(d[weekId] ?? [])];
+      arr[idx] = { ...arr[idx], ...patch };
+      return { ...d, [weekId]: arr };
+    });
   };
-  const openEditProduct = (r: ProductWeekRow) => {
-    setPEditing(r); setPDraft({ ...r }); setErr(null); setPShow(true);
-  };
-  const onProductWeekStartChange = (s: string) => {
-    if (s && anchor && daysDiff(anchor, s) % 7 !== 0) {
-      const ok = window.confirm(
-        `Product GMV Max weeks should stay in sync with this brand's weekly report cycle ` +
-        `(weeks starting from ${anchor}). Picking an off-cycle date breaks that alignment and ` +
-        `the weekly report won't be able to pull this week's data.\n\nUse this date anyway?`,
-      );
-      if (!ok) return;
+
+  // Persist the product rows for a week, then refresh that week's parent totals + children.
+  const saveProducts = async (weekId: string) => {
+    const draft = drafts[weekId] ?? [];
+    setSavingProducts(s => ({ ...s, [weekId]: true }));
+    setErr(null);
+    const ops = draft.map(r => {
+      const payload = {
+        weekly_id: weekId,
+        product_id: r.is_other ? null : r.product_id,
+        is_other: r.is_other,
+        ad_spend: r.ad_spend, roi: r.roi, orders: r.orders, cpo: r.cpo, gmv: r.gmv,
+      };
+      return r.id
+        ? supabase.from('brand_gmv_max_weekly_products').update(payload).eq('id', r.id)
+        : supabase.from('brand_gmv_max_weekly_products').insert(payload);
+    });
+    const results = await Promise.all(ops);
+    const firstErr = results.find(res => res.error);
+    if (firstErr?.error) {
+      setSavingProducts(s => ({ ...s, [weekId]: false }));
+      setErr(firstErr.error.message);
+      return;
     }
-    setPDraft({ ...pDraft, week_start: s, week_end: s ? addDays(s, 6) : '' });
+    // Reload just this week (the DB trigger has recomputed the parent totals).
+    const [pr, ch] = await Promise.all([
+      supabase.from('brand_gmv_max_weekly').select('*').eq('id', weekId).maybeSingle(),
+      supabase.from('brand_gmv_max_weekly_products').select('*').eq('weekly_id', weekId),
+    ]);
+    setSavingProducts(s => ({ ...s, [weekId]: false }));
+    if (pr.data) setWeeks(ws => ws.map(w => (w.id === weekId ? (pr.data as WeekRow) : w)));
+    const kids = (ch.data as ProductRow[]) ?? [];
+    setChildrenByWeek(m => ({ ...m, [weekId]: kids }));
+    setDrafts(d => ({ ...d, [weekId]: buildDraft(weekId, kids, products) }));
   };
 
-  const submitProduct = async (e: FormEvent) => {
-    e.preventDefault();
-    setPSaving(true); setErr(null);
-    const payload: any = { ...pDraft };
-    delete payload.id;
-    const res = pEditing?.id
-      ? await supabase.from('brand_gmv_max_product_weekly').update(payload).eq('id', pEditing.id).select().single()
-      : await supabase.from('brand_gmv_max_product_weekly').insert(payload).select().single();
-    setPSaving(false);
-    if (res.error) { setErr(res.error.message); return; }
-    setPShow(false);
-    load();
-  };
-
-  const removeProduct = async (r: ProductWeekRow) => {
-    if (!r.id) return;
-    if (!confirm(`Delete "${r.product || 'product'}" entry for ${formatRange(r.week_start, r.week_end)}?`)) return;
-    const prev = productWeeks;
-    setProductWeeks(productWeeks.filter(x => x.id !== r.id));
-    const { error } = await supabase.from('brand_gmv_max_product_weekly').delete().eq('id', r.id);
-    if (error) { alert(error.message); setProductWeeks(prev); }
-  };
-
-  const totalSpend = weeks.reduce((s, w) => s + (w.ad_spend ?? 0), 0);
-  const totalGmv   = weeks.reduce((s, w) => s + (w.gmv ?? 0), 0);
+  const totalSpend = weeks.reduce((s, w) => s + n(w.ad_spend), 0);
+  const totalGmv   = weeks.reduce((s, w) => s + n(w.gmv), 0);
   const remaining  = (monthRow.allocated_budget ?? 0) - totalSpend;
   // Allocated budget is read-only once the month row is saved, until Update.
   const budgetLocked = !!monthRow.id && !editBudget;
@@ -264,14 +303,33 @@ export default function BrandGmvMaxTab({ brandId, canEdit }: { brandId: string; 
     ? formatRange(weeks[0].week_start, weeks[weeks.length - 1].week_end)
     : null;
 
+  const colCount = 9 + (canEdit ? 1 : 0);
+
+  const productLabel = (r: ProductRow): { name: string; pid: string } => {
+    if (r.is_other) return { name: 'Other Products', pid: '' };
+    const p = products.find(pp => pp.id === r.product_id);
+    return { name: p?.name ?? 'Unknown product', pid: p?.external_product_id ?? '' };
+  };
+
   return (
     <>
       <Card className="mb-3">
         <Card.Body>
           <Row className="g-3 align-items-start">
             <Col md={3}>
-              <Form.Label className="fw-bold">Month</Form.Label>
-              <Form.Control type="month" value={month} onChange={e => setMonth(e.target.value)} />
+              <Form.Label className="fw-bold d-block">Month</Form.Label>
+              <div className="btn-group w-100" role="group" aria-label="Choose month">
+                {recentMonths(3).map(m => (
+                  <Button
+                    key={m}
+                    variant={m === month ? 'primary' : 'outline-secondary'}
+                    onClick={() => setMonth(m)}
+                  >
+                    {new Date(Number(m.split('-')[0]), Number(m.split('-')[1]) - 1, 1)
+                      .toLocaleString('en-US', { month: 'short', year: '2-digit' })}
+                  </Button>
+                ))}
+              </div>
             </Col>
             <Col md={3}>
               <Form.Label className="fw-bold">Allocated budget ($)</Form.Label>
@@ -317,7 +375,7 @@ export default function BrandGmvMaxTab({ brandId, canEdit }: { brandId: string; 
           <div>
             <span className="fw-semibold">Weekly entries</span>
             <small className="text-muted ms-2">
-              Weeks within {month}. Spend total this view: ${totalSpend.toLocaleString()}.
+              Weeks within {month}. Expand a week to edit its per-product breakdown; totals auto-calculate.
             </small>
           </div>
           {canEdit && (
@@ -335,6 +393,7 @@ export default function BrandGmvMaxTab({ brandId, canEdit }: { brandId: string; 
               <Table size="sm" responsive className="align-middle mb-0">
                 <thead>
                   <tr>
+                    <th style={{ width: 32 }}></th>
                     <th>Week start</th>
                     <th>Period</th>
                     <th className="text-end">Ad Spend</th>
@@ -343,244 +402,136 @@ export default function BrandGmvMaxTab({ brandId, canEdit }: { brandId: string; 
                     <th className="text-end">CPO</th>
                     <th className="text-end">GMV</th>
                     <th>Notes</th>
-                    {canEdit && <th style={{ width: 100 }}></th>}
+                    {canEdit && <th style={{ width: 60 }}></th>}
                   </tr>
                 </thead>
                 <tbody>
-                  {weeks.map(w => (
-                    <tr key={w.id ?? w.week_start}>
-                      <td className="fw-semibold">{w.week_start}</td>
-                      <td><small className="text-muted">{formatRange(w.week_start, w.week_end)}</small></td>
-                      <td className="text-end">${w.ad_spend.toLocaleString()}</td>
-                      <td className="text-end">{w.roi.toFixed(2)}</td>
-                      <td className="text-end">{w.orders.toLocaleString()}</td>
-                      <td className="text-end">${w.cpo.toLocaleString()}</td>
-                      <td className="text-end">${w.gmv.toLocaleString()}</td>
-                      <td className="small text-muted">{w.notes}</td>
-                      {canEdit && (
-                        <td className="text-end">
-                          <Button size="sm" variant="outline-primary" className="me-1" onClick={() => openEditWeek(w)}>
-                            <i className="bi bi-pencil" />
-                          </Button>
-                          <Button size="sm" variant="outline-danger" onClick={() => removeWeek(w)}>
-                            <i className="bi bi-trash" />
-                          </Button>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
+                  {weeks.map(w => {
+                    const open = expanded.has(w.id!);
+                    const draft = drafts[w.id!] ?? [];
+                    return (
+                      <Fragment key={w.id ?? w.week_start}>
+                        <tr style={{ cursor: 'pointer' }} onClick={() => toggleExpand(w)}>
+                          <td className="text-center text-muted">
+                            <i className={`bi ${open ? 'bi-chevron-down' : 'bi-chevron-right'}`} />
+                          </td>
+                          <td className="fw-semibold">{w.week_start}</td>
+                          <td><small className="text-muted">{formatRange(w.week_start, w.week_end)}</small></td>
+                          <td className="text-end">${n(w.ad_spend).toLocaleString()}</td>
+                          <td className="text-end">{n(w.roi).toFixed(2)}</td>
+                          <td className="text-end">{n(w.orders).toLocaleString()}</td>
+                          <td className="text-end">${n(w.cpo).toLocaleString()}</td>
+                          <td className="text-end">${n(w.gmv).toLocaleString()}</td>
+                          <td className="small text-muted">{w.notes}</td>
+                          {canEdit && (
+                            <td className="text-end" onClick={e => e.stopPropagation()}>
+                              <Button size="sm" variant="outline-danger" onClick={() => removeWeek(w)}>
+                                <i className="bi bi-trash" />
+                              </Button>
+                            </td>
+                          )}
+                        </tr>
+                        {open && (
+                          <tr key={`${w.id}-detail`}>
+                            <td colSpan={colCount} className="p-0" style={{ background: '#f8fafc' }}>
+                              <div className="p-3">
+                                <div className="fw-semibold small text-uppercase text-muted mb-2" style={{ letterSpacing: '.4px' }}>
+                                  Product breakdown · {formatRange(w.week_start, w.week_end)}
+                                </div>
+                                <Table size="sm" responsive className="align-middle mb-2 bg-white">
+                                  <thead>
+                                    <tr>
+                                      <th>Product</th>
+                                      <th style={{ width: 160 }}>Product ID</th>
+                                      <th className="text-end" style={{ width: 130 }}>Ad Spend</th>
+                                      <th className="text-end" style={{ width: 110 }}>ROI</th>
+                                      <th className="text-end" style={{ width: 110 }}>Orders</th>
+                                      <th className="text-end" style={{ width: 110 }}>CPO</th>
+                                      <th className="text-end" style={{ width: 130 }}>GMV</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {draft.map((r, idx) => {
+                                      const { name, pid } = productLabel(r);
+                                      return (
+                                        <tr key={r.id ?? (r.is_other ? 'other' : r.product_id) ?? idx}>
+                                          <td className={`fw-semibold ${r.is_other ? 'fst-italic text-muted' : ''}`}>{name}</td>
+                                          <td className="text-muted small" style={{ fontFamily: 'monospace' }}>{pid || '—'}</td>
+                                          <td><NumberInput step="0.01" disabled={!canEdit} value={r.ad_spend} onChange={v => updateDraft(w.id!, idx, { ad_spend: v })} /></td>
+                                          <td><NumberInput step="0.01" disabled={!canEdit} value={r.roi} onChange={v => updateDraft(w.id!, idx, { roi: v })} /></td>
+                                          <td><NumberInput disabled={!canEdit} value={r.orders} onChange={v => updateDraft(w.id!, idx, { orders: v })} /></td>
+                                          <td><NumberInput step="0.01" disabled={!canEdit} value={r.cpo} onChange={v => updateDraft(w.id!, idx, { cpo: v })} /></td>
+                                          <td><NumberInput step="0.01" disabled={!canEdit} value={r.gmv} onChange={v => updateDraft(w.id!, idx, { gmv: v })} /></td>
+                                        </tr>
+                                      );
+                                    })}
+                                    <tr className="fw-semibold">
+                                      <td colSpan={2} className="text-end">Week total</td>
+                                      <td className="text-end">${draft.reduce((s, r) => s + n(r.ad_spend), 0).toLocaleString()}</td>
+                                      <td className="text-end">{(() => { const sp = draft.reduce((s, r) => s + n(r.ad_spend), 0); const g = draft.reduce((s, r) => s + n(r.gmv), 0); return sp > 0 ? (g / sp).toFixed(2) : '0.00'; })()}</td>
+                                      <td className="text-end">{draft.reduce((s, r) => s + n(r.orders), 0).toLocaleString()}</td>
+                                      <td className="text-end">{(() => { const sp = draft.reduce((s, r) => s + n(r.ad_spend), 0); const o = draft.reduce((s, r) => s + n(r.orders), 0); return o > 0 ? `$${(sp / o).toLocaleString(undefined, { maximumFractionDigits: 2 })}` : '$0'; })()}</td>
+                                      <td className="text-end">${draft.reduce((s, r) => s + n(r.gmv), 0).toLocaleString()}</td>
+                                    </tr>
+                                  </tbody>
+                                </Table>
+                                {canEdit && (
+                                  <div className="d-flex justify-content-end">
+                                    <Button size="sm" disabled={!!savingProducts[w.id!]} onClick={() => saveProducts(w.id!)}>
+                                      {savingProducts[w.id!] ? 'Saving…' : 'Save product breakdown'}
+                                    </Button>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </Table>
             )}
         </Card.Body>
       </Card>
 
-      <Card className="mt-3">
-        <Card.Header className="d-flex justify-content-between align-items-center">
-          <div>
-            <span className="fw-semibold">Product-level GMV Max</span>
-            <small className="text-muted ms-2">Per-product weekly spend — the weekly report’s §11.2 (Ad Spend by Product) pulls these.</small>
-          </div>
-          {canEdit && (
-            <Button size="sm" onClick={openAddProduct}>
-              <i className="bi bi-plus-lg me-1" /> Add product entry
-            </Button>
-          )}
-        </Card.Header>
-        <Card.Body className="p-0">
-          {loading ? <div className="text-center py-4"><Spinner animation="border" /></div>
-            : productWeeks.length === 0 ? (
-              <p className="text-muted text-center py-4 mb-0">No product entries for this month.</p>
-            ) : (
-              <Table size="sm" responsive className="align-middle mb-0">
-                <thead>
-                  <tr>
-                    <th>Week start</th>
-                    <th>Period</th>
-                    <th>Product</th>
-                    <th>Product ID</th>
-                    <th className="text-end">Spend</th>
-                    <th className="text-end">Orders</th>
-                    <th className="text-end">GMV</th>
-                    <th>Notes</th>
-                    {canEdit && <th style={{ width: 100 }}></th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {productWeeks.map(r => (
-                    <tr key={r.id ?? `${r.week_start}-${r.product_id}-${r.product}`}>
-                      <td className="fw-semibold">{r.week_start}</td>
-                      <td><small className="text-muted">{formatRange(r.week_start, r.week_end)}</small></td>
-                      <td>{r.product || <span className="text-muted">—</span>}</td>
-                      <td><small className="text-muted">{r.product_id || '—'}</small></td>
-                      <td className="text-end">${r.spend.toLocaleString()}</td>
-                      <td className="text-end">{r.orders.toLocaleString()}</td>
-                      <td className="text-end">${r.gmv.toLocaleString()}</td>
-                      <td className="small text-muted">{r.notes}</td>
-                      {canEdit && (
-                        <td className="text-end">
-                          <Button size="sm" variant="outline-primary" className="me-1" onClick={() => openEditProduct(r)}>
-                            <i className="bi bi-pencil" />
-                          </Button>
-                          <Button size="sm" variant="outline-danger" onClick={() => removeProduct(r)}>
-                            <i className="bi bi-trash" />
-                          </Button>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-            )}
-        </Card.Body>
-      </Card>
-
-      <Modal show={show} onHide={() => setShow(false)} centered size="lg">
+      <Modal show={show} onHide={() => setShow(false)} centered>
         <Form onSubmit={submitWeek}>
           <Modal.Header closeButton>
-            <Modal.Title>{editing ? 'Edit' : 'Add'} weekly GMV Max entry</Modal.Title>
+            <Modal.Title>Add weekly GMV Max entry</Modal.Title>
           </Modal.Header>
           <Modal.Body>
             {err && <Alert variant="danger">{err}</Alert>}
             <Row className="g-3">
-              <Col md={4}>
+              <Col md={12}>
                 <Form.Label className="fw-bold">Week start</Form.Label>
-                <Form.Control type="date" required disabled={!!editing}
-                  value={draft.week_start} onChange={e => onWeekStartChange(e.target.value)} />
+                <Form.Control type="date" required
+                  value={newWeekStart} onChange={e => onWeekStartChange(e.target.value)} />
                 <Form.Text className="text-muted">
-                  {draft.week_start ? `Covers ${formatRange(draft.week_start, draft.week_end)}` : '7-day window starts here.'}
+                  {newWeekStart ? `Covers ${formatRange(newWeekStart, addDays(newWeekStart, 6))}` : '7-day window starts here.'}
                 </Form.Text>
-              </Col>
-              <Col md={4}>
-                <Form.Label className="fw-bold">Ad Spend ($)</Form.Label>
-                <NumberInput step="0.01" value={draft.ad_spend} onChange={n => setDraft({ ...draft, ad_spend: n })} />
-              </Col>
-              <Col md={4}>
-                <Form.Label className="fw-bold">ROI</Form.Label>
-                <NumberInput step="0.01" value={draft.roi} onChange={n => setDraft({ ...draft, roi: n })} />
-              </Col>
-              <Col md={4}>
-                <Form.Label className="fw-bold">Orders</Form.Label>
-                <NumberInput value={draft.orders} onChange={n => setDraft({ ...draft, orders: n })} />
-              </Col>
-              <Col md={4}>
-                <Form.Label className="fw-bold">CPO ($)</Form.Label>
-                <NumberInput step="0.01" value={draft.cpo} onChange={n => setDraft({ ...draft, cpo: n })} />
-              </Col>
-              <Col md={4}>
-                <Form.Label className="fw-bold">GMV ($)</Form.Label>
-                <NumberInput step="0.01" value={draft.gmv} onChange={n => setDraft({ ...draft, gmv: n })} />
               </Col>
               <Col md={12}>
                 <Form.Label className="fw-bold">Notes</Form.Label>
                 <Form.Control as="textarea" rows={2}
-                  value={draft.notes} onChange={e => setDraft({ ...draft, notes: e.target.value })} />
+                  value={newWeekNotes} onChange={e => setNewWeekNotes(e.target.value)} />
               </Col>
             </Row>
+            <p className="text-muted small mb-0 mt-3">
+              A row for every brand product{products.length ? ` (${products.length})` : ''} plus an “Other Products”
+              row will be created. Fill in each product’s Ad Spend, ROI, Orders, CPO and GMV by expanding the week —
+              the weekly totals calculate automatically.
+            </p>
           </Modal.Body>
           <Modal.Footer>
             <Button variant="secondary" onClick={() => setShow(false)} disabled={savingWeek}>Cancel</Button>
-            <Button type="submit" disabled={savingWeek || !draft.week_start}>
-              {savingWeek ? 'Saving…' : (editing ? 'Save' : 'Add entry')}
-            </Button>
-          </Modal.Footer>
-        </Form>
-      </Modal>
-
-      <Modal show={pShow} onHide={() => setPShow(false)} centered size="lg">
-        <Form onSubmit={submitProduct}>
-          <Modal.Header closeButton>
-            <Modal.Title>{pEditing ? 'Edit' : 'Add'} product GMV Max entry</Modal.Title>
-          </Modal.Header>
-          <Modal.Body>
-            {err && <Alert variant="danger">{err}</Alert>}
-            <Row className="g-3">
-              <Col md={4}>
-                <Form.Label className="fw-bold">Week start</Form.Label>
-                <Form.Control type="date" required disabled={!!pEditing}
-                  value={pDraft.week_start} onChange={e => onProductWeekStartChange(e.target.value)} />
-                <Form.Text className="text-muted">
-                  {pDraft.week_start ? `Covers ${formatRange(pDraft.week_start, pDraft.week_end)}` : '7-day window starts here.'}
-                </Form.Text>
-              </Col>
-              <Col md={8}>
-                <Form.Label className="fw-bold">Product</Form.Label>
-                <ProductPicker products={products}
-                  value={{ product: pDraft.product, product_id: pDraft.product_id }}
-                  onPick={(name, pid) => setPDraft({ ...pDraft, product: name, product_id: pid })} />
-                <Form.Text className="text-muted">Pick from this brand’s products (add new ones on the Products tab).</Form.Text>
-              </Col>
-              <Col md={4}>
-                <Form.Label className="fw-bold">Spend ($)</Form.Label>
-                <NumberInput step="0.01" value={pDraft.spend} onChange={n => setPDraft({ ...pDraft, spend: n })} />
-              </Col>
-              <Col md={4}>
-                <Form.Label className="fw-bold">Orders</Form.Label>
-                <NumberInput value={pDraft.orders} onChange={n => setPDraft({ ...pDraft, orders: n })} />
-              </Col>
-              <Col md={4}>
-                <Form.Label className="fw-bold">GMV generated ($)</Form.Label>
-                <NumberInput step="0.01" value={pDraft.gmv} onChange={n => setPDraft({ ...pDraft, gmv: n })} />
-              </Col>
-              <Col md={12}>
-                <Form.Label className="fw-bold">Notes</Form.Label>
-                <Form.Control as="textarea" rows={2}
-                  value={pDraft.notes} onChange={e => setPDraft({ ...pDraft, notes: e.target.value })} />
-              </Col>
-            </Row>
-          </Modal.Body>
-          <Modal.Footer>
-            <Button variant="secondary" onClick={() => setPShow(false)} disabled={pSaving}>Cancel</Button>
-            <Button type="submit" disabled={pSaving || !pDraft.week_start || !pDraft.product}>
-              {pSaving ? 'Saving…' : (pEditing ? 'Save' : 'Add entry')}
+            <Button type="submit" disabled={savingWeek || !newWeekStart}>
+              {savingWeek ? 'Creating…' : 'Add week'}
             </Button>
           </Modal.Footer>
         </Form>
       </Modal>
     </>
-  );
-}
-
-/** Searchable product picker — select from the brand's catalogue (name + SKU). */
-function ProductPicker({ products, value, onPick }: {
-  products: BrandProduct[];
-  value: { product: string; product_id: string };
-  onPick: (name: string, productId: string) => void;
-}) {
-  const [q, setQ] = useState('');
-  const ql = q.trim().toLowerCase();
-  const filtered = ql
-    ? products.filter(p => `${p.name} ${p.external_product_id ?? ''}`.toLowerCase().includes(ql))
-    : products;
-  return (
-    <Dropdown autoClose="outside" onToggle={(open) => { if (open) setQ(''); }}>
-      <Dropdown.Toggle as="div" role="button" tabIndex={0}
-        className="form-control d-flex justify-content-between align-items-center"
-        style={{ cursor: 'pointer', minHeight: 38 }}>
-        <span className={value.product ? 'text-truncate' : 'text-muted'}>
-          {value.product || 'Select a product…'}
-          {value.product && value.product_id && <small className="text-muted ms-2">{value.product_id}</small>}
-        </span>
-        <i className="bi bi-chevron-down text-muted ms-2" />
-      </Dropdown.Toggle>
-      <Dropdown.Menu style={{ width: '100%', maxHeight: 320, overflowY: 'auto' }}>
-        <div className="px-2 pb-2" onClick={e => e.stopPropagation()}>
-          <Form.Control size="sm" autoFocus placeholder="Search products…"
-            value={q} onChange={e => setQ(e.target.value)} />
-        </div>
-        {products.length === 0 ? (
-          <Dropdown.ItemText className="text-muted small">No products yet — add them on the Products tab.</Dropdown.ItemText>
-        ) : filtered.length === 0 ? (
-          <Dropdown.ItemText className="text-muted small">No match.</Dropdown.ItemText>
-        ) : filtered.map(p => (
-          <Dropdown.Item key={p.id} active={value.product === p.name}
-            onClick={() => onPick(p.name, p.external_product_id ?? '')}>
-            <div className="fw-semibold">{p.name}</div>
-            {p.external_product_id && <small className="text-muted">{p.external_product_id}</small>}
-          </Dropdown.Item>
-        ))}
-      </Dropdown.Menu>
-    </Dropdown>
   );
 }
 

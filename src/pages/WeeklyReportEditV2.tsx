@@ -277,40 +277,73 @@ export default function WeeklyReportEdit() {
     setGmvFetchMsg({ kind: 'success', text: `Pulled GMV Max for ${label}. Don't forget to save.` });
   };
 
-  // §11.2 — pull per-product GMV Max rows for this report's week (exact match,
-  // else any rows overlapping the window) and replace the Ad-Spend-by-Product table.
+  // §11.2 — pull the per-product GMV Max breakdown for this report's week and
+  // replace the Ad-Spend-by-Product table. Products live as child rows of the
+  // brand's weekly GMV Max entry (brand_gmv_max_weekly_products): each brand
+  // "focus product" plus a single "Other Products" catch-all. We match the week
+  // exactly, else aggregate any GMV Max weeks overlapping the report window.
   const fetchProductGmvMaxFromBrand = async () => {
     if (!report) return;
     setFetchingProductGmv(true); setProductGmvMsg(null);
-    const { data: exact, error } = await supabase
-      .from('brand_gmv_max_product_weekly').select('*')
-      .eq('brand_id', report.brand_id).eq('week_start', report.week_start)
-      .order('product', { ascending: true });
-    if (error) { setFetchingProductGmv(false); setProductGmvMsg({ kind: 'danger', text: error.message }); return; }
-
-    let rows: any[] = exact ?? [];
     let label = formatRange(report.week_start, report.week_end);
-    if (rows.length === 0) {
+
+    // 1. Find the weekly GMV Max entr(ies) this report maps to.
+    const { data: exact, error } = await supabase
+      .from('brand_gmv_max_weekly').select('id')
+      .eq('brand_id', report.brand_id).eq('week_start', report.week_start);
+    if (error) { setFetchingProductGmv(false); setProductGmvMsg({ kind: 'danger', text: error.message }); return; }
+    let weeklyIds = ((exact as any[]) ?? []).map(r => r.id);
+    if (weeklyIds.length === 0) {
       const { data: overlap } = await supabase
-        .from('brand_gmv_max_product_weekly').select('*')
+        .from('brand_gmv_max_weekly').select('id')
         .eq('brand_id', report.brand_id)
-        .lte('week_start', report.week_end).gte('week_end', report.week_start)
-        .order('product', { ascending: true });
-      rows = (overlap as any[]) ?? [];
-      if (rows.length > 0) label += ` (${rows.length} product row${rows.length === 1 ? '' : 's'} from overlapping weeks)`;
+        .lte('week_start', report.week_end).gte('week_end', report.week_start);
+      weeklyIds = ((overlap as any[]) ?? []).map(r => r.id);
+      if (weeklyIds.length > 0) label += ` (${weeklyIds.length} GMV Max week${weeklyIds.length === 1 ? '' : 's'})`;
     }
-    setFetchingProductGmv(false);
-    if (rows.length === 0) {
-      setProductGmvMsg({ kind: 'warning', text: `No product-level GMV Max entries for ${label} on this brand. Add them on the brand's GMV Max tab, or enter rows manually.` });
+    if (weeklyIds.length === 0) {
+      setFetchingProductGmv(false);
+      setProductGmvMsg({ kind: 'warning', text: `No GMV Max entry exists for ${label} on this brand. Add it on the brand's GMV Max tab, or enter rows manually.` });
       return;
     }
-    const adRows = rows.map(r => ({
-      product: String(r.product ?? ''),
-      product_id: String(r.product_id ?? ''),
-      spend: numOrNull(r.spend),
-      total_orders: numOrNull(r.orders),
-      gmv_generated: numOrNull(r.gmv),
-    }));
+
+    // 2. Product breakdown rows for those weeks + the brand's product catalogue.
+    const [{ data: kids }, { data: prods }] = await Promise.all([
+      supabase.from('brand_gmv_max_weekly_products').select('*').in('weekly_id', weeklyIds),
+      supabase.from('brand_products').select('id,name,external_product_id').eq('brand_id', report.brand_id),
+    ]);
+    setFetchingProductGmv(false);
+    const childRows = (kids as any[]) ?? [];
+    if (childRows.length === 0) {
+      setProductGmvMsg({ kind: 'warning', text: `No product-level GMV Max data for ${label} on this brand. Open the brand's GMV Max tab and fill the product breakdown, or enter rows manually.` });
+      return;
+    }
+    const prodById = new Map(((prods as any[]) ?? []).map(p => [p.id, p]));
+
+    // 3. Aggregate by product across the matched weeks (one report row per product).
+    const agg = new Map<string, { product: string; product_id: string; spend: number; orders: number; gmv: number }>();
+    for (const r of childRows) {
+      const key = r.is_other ? '__other__' : String(r.product_id ?? '__unknown__');
+      const prod = r.is_other ? null : prodById.get(r.product_id);
+      const name = r.is_other ? 'Other Products' : (prod?.name ?? 'Unknown product');
+      const extId = r.is_other ? '' : String(prod?.external_product_id ?? '');
+      const cur = agg.get(key) ?? { product: name, product_id: extId, spend: 0, orders: 0, gmv: 0 };
+      cur.spend  += Number(r.ad_spend) || 0;
+      cur.orders += Number(r.orders) || 0;
+      cur.gmv    += Number(r.gmv) || 0;
+      agg.set(key, cur);
+    }
+    // Real products alphabetically; the "Other Products" catch-all always last.
+    const adRows = Array.from(agg.values())
+      .sort((a, b) =>
+        a.product === 'Other Products' ? 1 : b.product === 'Other Products' ? -1 : a.product.localeCompare(b.product))
+      .map(a => ({
+        product: a.product,
+        product_id: a.product_id,
+        spend: numOrNull(a.spend),
+        total_orders: numOrNull(a.orders),
+        gmv_generated: numOrNull(a.gmv),
+      }));
     setC(prev => ({ ...prev, ad_by_product: adRows }));
     setProductGmvMsg({ kind: 'success', text: `Pulled ${adRows.length} product row${adRows.length === 1 ? '' : 's'} from GMV Max for ${label}. Don't forget to save.` });
   };

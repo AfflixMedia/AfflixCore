@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState, FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, FormEvent, CSSProperties } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card, Form, Button, Row, Col, Table, Spinner, Alert, Badge, Modal, Offcanvas, Dropdown } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
+import { fnError } from '../lib/functionError';
 import { formatRange } from '../lib/dates';
 import {
   WeeklyReportContent, emptyContent, normalizeContent,
@@ -25,6 +26,8 @@ type ClickedSection =
   | { type: 'custom'; section: CustomSection };
 import NumberInput from '../components/NumberInput';
 import { parseReportPdf } from '../lib/importReport';
+import { useEditLock } from '../lib/useEditLock';
+import EditLockBanner from '../components/EditLockBanner';
 
 const SECTION_LABELS: Record<string, string> = {
   overall: 'Overall Performance',
@@ -43,10 +46,17 @@ interface ReportRow {
 }
 interface Brand { id: string; name: string; client: string; client_status: string | null; }
 
-export default function WeeklyReportEdit() {
+export default function WeeklyReportEditClassic() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
   const { profile } = useAuth();
+  // Collaborative edit lock — only one teammate edits a report at a time.
+  const lock = useEditLock({
+    kind: 'weekly',
+    id,
+    userId: profile?.id,
+    name: profile?.full_name || profile?.email || 'A teammate',
+  });
   const [report, setReport] = useState<ReportRow | null>(null);
   const [brand, setBrand] = useState<Brand | null>(null);
   const [c, setC] = useState<WeeklyReportContent>(emptyContent());
@@ -54,6 +64,12 @@ export default function WeeklyReportEdit() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Auto-save state (debounced) — persists the whole report content as it's edited.
+  const lastSavedContent = useRef<string | null>(null);
+  const [autoSave, setAutoSave] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  // True while we re-pull the latest content right after taking over editing.
+  const [reloading, setReloading] = useState(false);
 
   const [showComments, setShowComments] = useState(false);
   const [priorReports, setPriorReports] = useState<ReportRow[]>([]);
@@ -141,7 +157,9 @@ export default function WeeklyReportEdit() {
       if (error) { setErr(error.message); setLoading(false); return; }
       const r = data as ReportRow;
       setReport(r);
-      setC(normalizeContent(r.content));
+      const normalized = normalizeContent(r.content);
+      setC(normalized);
+      lastSavedContent.current = JSON.stringify(normalized);
       const { data: bd } = await supabase.from('brands').select('id,name,client,client_status').eq('id', r.brand_id).single();
       setBrand(bd as Brand);
       const { data: pcp } = await supabase.from('paid_creator_programs')
@@ -166,6 +184,63 @@ export default function WeeklyReportEdit() {
       setLoading(false);
     })();
   }, [id]);
+
+  // Debounced auto-save of the whole report content (status untouched) ~1s
+  // after the user stops editing — covers Insights, Approval and every other
+  // section (rich-text Quill editors included).
+  const contentKey = JSON.stringify(c);
+  useEffect(() => {
+    if (loading || !report || lastSavedContent.current === null) return;
+    if (brand?.client_status === 'closed') return;
+    // Another teammate holds the edit lock — never write from a read-only view.
+    if (lock.isLockedOut) return;
+    // Don't persist the stale snapshot while we're pulling the latest content.
+    if (reloading) return;
+    if (contentKey === lastSavedContent.current) return;
+    setAutoSave('saving');
+    const t = setTimeout(async () => {
+      const { error } = await supabase.from('weekly_reports')
+        .update({ content: c }).eq('id', id);
+      if (error) { setAutoSave('error'); return; }
+      lastSavedContent.current = contentKey;
+      setAutoSave('saved');
+    }, 1000);
+    return () => clearTimeout(t);
+  }, [contentKey, lock.isLockedOut]);
+
+  // Edit-lock hand-off. When control changes hands we (a) flush our newest edits
+  // the instant we LOSE control so the next editor continues from them, and
+  // (b) re-pull the latest content when we GAIN control after being locked out,
+  // briefly freezing the form so we don't clobber it by typing during the swap.
+  const wasLockedOut = useRef(false);
+  useEffect(() => {
+    if (loading || !report) return;
+    const nowLocked = lock.isLockedOut;
+    if (nowLocked === wasLockedOut.current) return; // no transition
+    const lostControl = nowLocked && !wasLockedOut.current;
+    const gainedControl = !nowLocked && wasLockedOut.current;
+    wasLockedOut.current = nowLocked;
+
+    if (lostControl) {
+      if (brand?.client_status === 'closed') return;
+      const snapshot = c;
+      void supabase.from('weekly_reports').update({ content: snapshot }).eq('id', id)
+        .then(({ error }) => { if (!error) lastSavedContent.current = JSON.stringify(snapshot); });
+    } else if (gainedControl) {
+      setReloading(true);
+      const t = setTimeout(async () => {
+        const { data, error } = await supabase.from('weekly_reports').select('content').eq('id', id).single();
+        if (!error && data) {
+          const normalized = normalizeContent(data.content);
+          setC(normalized);
+          lastSavedContent.current = JSON.stringify(normalized);
+          setAutoSave('idle');
+        }
+        setReloading(false);
+      }, 1200);
+      return () => clearTimeout(t);
+    }
+  }, [lock.isLockedOut]);
 
   const addCustomFromPreset = (preset: PresetRow) => {
     const p = preset.payload ?? {};
@@ -293,7 +368,7 @@ export default function WeeklyReportEdit() {
     const { data, error } = await supabase.functions.invoke('post-staff-comment', {
       body: { report_id: report.id, section, body, parent_id: parentId ?? null },
     });
-    if (error) throw error;
+    if (error) throw await fnError(error);
     if ((data as any)?.error) throw new Error((data as any).error);
     setComments(prev => [...prev, (data as any).comment as Comment]);
   };
@@ -364,6 +439,11 @@ export default function WeeklyReportEdit() {
       setErr(`${brand.name} is inactive — reactivate the brand before saving changes.`);
       return;
     }
+    if (lock.isLockedOut) {
+      setErr(`${lock.editorName ?? 'Another teammate'} is currently editing this report. Use "Take over editing" to make changes.`);
+      return;
+    }
+    if (reloading) return; // mid hand-off — wait for the latest content to load
     setSaving(true); setErr(null);
     // If the report is asking the client for approval, the client has to be
     // able to see it via the share link, so auto-enable per-report sharing.
@@ -410,6 +490,12 @@ export default function WeeklyReportEdit() {
   if (!report || !brand) return null;
 
   const brandInactive = brand.client_status === 'closed';
+  // Freeze the form body when another teammate holds the lock OR while we're
+  // pulling the latest content right after taking over.
+  const formFrozen = lock.isLockedOut || reloading;
+  const lockStyle: CSSProperties | undefined = formFrozen
+    ? { pointerEvents: 'none', opacity: 0.55, userSelect: 'none' }
+    : undefined;
 
   const sectionFeedbackCount = (section: CommentSection) =>
     comments.filter(c => c.section === section).length;
@@ -424,6 +510,18 @@ export default function WeeklyReportEdit() {
         <i className="bi bi-chat-left-text" />
         <Badge bg="primary" pill>{n}</Badge>
       </Button>
+    );
+  };
+
+  // Small "Saving… / Saved" badge shown on auto-saved (rich-text) sections.
+  const AutoSaveBadge = () => {
+    if (autoSave === 'idle') return null;
+    return (
+      <span className={`small ${autoSave === 'error' ? 'text-danger' : 'text-muted'}`}>
+        {autoSave === 'saving' && (<><Spinner animation="border" size="sm" className="me-1" />Saving…</>)}
+        {autoSave === 'saved' && (<><i className="bi bi-check2 me-1" />Saved</>)}
+        {autoSave === 'error' && (<><i className="bi bi-exclamation-triangle me-1" />Save failed</>)}
+      </span>
     );
   };
 
@@ -487,6 +585,7 @@ export default function WeeklyReportEdit() {
   // Open the add-section modal positioned above/below a clicked section.
   const openAddSectionRelative = (clicked: ClickedSection, placement: 'above' | 'below') => {
     const cs = c.custom_sections;
+    // insert_after was widened to `string` (v2 anchors) — keep this in step.
     let anchor: string;
     let index: number;
     if (clicked.type === 'custom') {
@@ -588,12 +687,26 @@ export default function WeeklyReportEdit() {
           </div>
         </Alert>
       )}
+      {lock.isLockedOut && lock.editorName && (
+        <EditLockBanner editorName={lock.editorName} onTakeOver={lock.takeOver} />
+      )}
+      {reloading && (
+        <Alert variant="info" className="d-flex align-items-center gap-2">
+          <Spinner animation="border" size="sm" />
+          <span>You took over — loading the latest changes…</span>
+        </Alert>
+      )}
       <div className="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
         <div>
           <h2 className="mb-1">{brand.name} <small className="text-muted fs-6">— {brand.client}</small></h2>
           <div className="text-muted">
             Week #{report.week_number} · {formatRange(report.week_start, report.week_end)}
             <Badge bg={report.status === 'draft' ? 'secondary' : 'success'} className="ms-2">{report.status}</Badge>
+            {lock.ready && lock.othersCount > 0 && lock.isOwner && (
+              <Badge bg="success" className="ms-2">
+                <i className="bi bi-pencil-fill me-1" />You have control · {lock.othersCount} watching
+              </Badge>
+            )}
           </div>
         </div>
         <div className="d-flex gap-2 flex-wrap">
@@ -607,7 +720,7 @@ export default function WeeklyReportEdit() {
               if (f) onImportFile(f);
             }}
           />
-          <Button variant="outline-warning" disabled={importing} onClick={() => importInputRef.current?.click()}
+          <Button variant="outline-warning" disabled={importing || formFrozen} onClick={() => importInputRef.current?.click()}
             title="Upload a report PDF and auto-fill the form fields">
             <i className="bi bi-file-earmark-arrow-up me-1" />
             {importing ? 'Reading PDF…' : 'Import from PDF'}
@@ -618,7 +731,7 @@ export default function WeeklyReportEdit() {
             </Button>
           )}
           <Dropdown>
-            <Dropdown.Toggle variant="outline-info" title="Insert a saved custom-section preset">
+            <Dropdown.Toggle variant="outline-info" disabled={formFrozen} title="Insert a saved custom-section preset">
               <i className="bi bi-bookmark me-1" /> Add from preset
               {customPresets.length > 0 && <Badge bg="info" pill className="ms-1">{customPresets.length}</Badge>}
             </Dropdown.Toggle>
@@ -644,12 +757,12 @@ export default function WeeklyReportEdit() {
               ))}
             </Dropdown.Menu>
           </Dropdown>
-          <Button variant="outline-success" onClick={openAddCustom}>
+          <Button variant="outline-success" disabled={formFrozen} onClick={openAddCustom}>
             <i className="bi bi-plus-square me-1" /> Add custom section
           </Button>
           <Button variant="outline-secondary" onClick={() => nav('/reporting/weekly')}>Cancel</Button>
-          <Button variant="outline-primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
-          <Button variant="primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
+          <Button variant="outline-primary" disabled={saving || brandInactive || formFrozen} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
+          <Button variant="primary" disabled={saving || brandInactive || formFrozen} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
         </div>
       </div>
 
@@ -661,6 +774,7 @@ export default function WeeklyReportEdit() {
         </Alert>
       )}
 
+      <div style={lockStyle} aria-disabled={formFrozen}>
       {renderCustomAt('start')}
 
       {/* Overall Performance */}
@@ -907,7 +1021,10 @@ export default function WeeklyReportEdit() {
 
       {/* Insights */}
       <Card className="mb-4">
-        <Card.Header><HeaderWithFeedback title="Insights" section="insights" sectionId="insights" /></Card.Header>
+        <Card.Header className="d-flex justify-content-between align-items-center">
+          <HeaderWithFeedback title="Insights" section="insights" sectionId="insights" />
+          <AutoSaveBadge />
+        </Card.Header>
         <Card.Body>
           <RichTextEditor
             value={c.insights.summary}
@@ -926,13 +1043,16 @@ export default function WeeklyReportEdit() {
             <i className="bi bi-shield-check me-2 text-warning" />
             Approval Needed / Action Items
           </span>
-          <Form.Check
-            type="switch"
-            id="approval-needed-toggle"
-            checked={!!c.approval?.enabled}
-            onChange={e => setC(prev => ({ ...prev, approval: { ...prev.approval, enabled: e.target.checked } }))}
-            label={c.approval?.enabled ? 'On — client will see approval prompt' : 'Off'}
-          />
+          <div className="d-flex align-items-center gap-3">
+            <AutoSaveBadge />
+            <Form.Check
+              type="switch"
+              id="approval-needed-toggle"
+              checked={!!c.approval?.enabled}
+              onChange={e => setC(prev => ({ ...prev, approval: { ...prev.approval, enabled: e.target.checked } }))}
+              label={c.approval?.enabled ? 'On — client will see approval prompt' : 'Off'}
+            />
+          </div>
         </Card.Header>
         {c.approval?.enabled && (
           <Card.Body>
@@ -969,6 +1089,7 @@ export default function WeeklyReportEdit() {
           </Card.Body>
         )}
       </Card>
+      </div>
 
       <CustomSectionDefModal
         show={csModalOpen}

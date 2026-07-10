@@ -1,23 +1,53 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, Button, Badge, Spinner, Nav } from 'react-bootstrap';
-import { useNotifications } from '../notifications/NotificationsContext';
+import { useNotifications, Notification } from '../notifications/NotificationsContext';
+import { useAuth } from '../auth/AuthContext';
 
-type TabKey = 'all' | 'unread' | 'chats';
+type TabKey = 'all' | 'unread' | 'chats' | 'tasks' | 'weekly' | 'monthly';
 
 // Chat notifications come from the Global Chat trigger (normal + @mentions).
 const isChatNotif = (type: string) => type === 'chat' || type === 'chat_mention';
 
+// Task notifications: assign/complete (`task`) + blocking reminders + acknowledgements.
+const isTaskNotif = (n: Notification) =>
+  n.type === 'task' || n.type === 'task_reminder' || n.type === 'task_reminder_ack'
+  || (n.link ? n.link.startsWith('/tasks') : false);
+
+// Reporting notifications (review decisions + comments) carry a `/reporting/<kind>/` link
+// and/or a `report_type` payload; classify weekly vs monthly from either.
+const reportKind = (n: Notification): 'weekly' | 'monthly' | null => {
+  if (n.link?.includes('/reporting/weekly/')) return 'weekly';
+  if (n.link?.includes('/reporting/monthly/')) return 'monthly';
+  const rt = n.payload?.report_type;
+  if (rt === 'weekly' || rt === 'monthly') return rt;
+  return null;
+};
+
 export default function NotificationsPage() {
   const { notifications, unreadCount, loading, markRead, markAllRead, remove } = useNotifications();
+  const { profile } = useAuth();
   const nav = useNavigate();
   const [tab, setTab] = useState<TabKey>('unread');
 
+  // Reporting notifications only ever reach internal staff (bob / team_lead / apc).
+  // Paid-collab handlers are internal too: they get chat (and task) notifications,
+  // so they see Chats + Tasks tabs but not the Reporting ones. Clients see only Unread + All.
+  const role = profile?.role;
+  const isInternalStaff = role === 'bob' || role === 'team_lead' || role === 'apc';
+  const showChatsTasks = isInternalStaff || role === 'paid_collab_handler';
+
   const chatCount = useMemo(() => notifications.filter(n => isChatNotif(n.type)).length, [notifications]);
+  const taskCount = useMemo(() => notifications.filter(isTaskNotif).length, [notifications]);
+  const weeklyCount = useMemo(() => notifications.filter(n => reportKind(n) === 'weekly').length, [notifications]);
+  const monthlyCount = useMemo(() => notifications.filter(n => reportKind(n) === 'monthly').length, [notifications]);
 
   const visible = useMemo(() => {
     if (tab === 'unread') return notifications.filter(n => !n.read_at);
     if (tab === 'chats') return notifications.filter(n => isChatNotif(n.type));
+    if (tab === 'tasks') return notifications.filter(isTaskNotif);
+    if (tab === 'weekly') return notifications.filter(n => reportKind(n) === 'weekly');
+    if (tab === 'monthly') return notifications.filter(n => reportKind(n) === 'monthly');
     return notifications;
   }, [tab, notifications]);
 
@@ -26,11 +56,29 @@ export default function NotificationsPage() {
     if (link) nav(link);
   };
 
-  // Theme per tab — orange (unread), blue (all), green (chats).
-  const isUnread = tab === 'unread';
-  const accent = tab === 'unread' ? '#f97316' : tab === 'chats' ? '#16a34a' : '#2563eb';
+  // Theme per tab.
+  const accents: Record<TabKey, string> = {
+    unread: '#f97316',   // orange
+    chats: '#16a34a',    // green
+    tasks: '#9333ea',    // purple
+    weekly: '#0891b2',   // cyan
+    monthly: '#db2777',  // pink
+    all: '#2563eb',      // blue
+  };
+  const accent = accents[tab];
   const accentSoft = tab === 'unread' ? 'rgba(249,115,22,.06)'
-    : tab === 'chats' ? 'rgba(22,163,74,.06)' : 'rgba(37,99,235,.04)';
+    : tab === 'chats' ? 'rgba(22,163,74,.06)'
+    : tab === 'tasks' ? 'rgba(147,51,234,.06)'
+    : tab === 'weekly' ? 'rgba(8,145,178,.06)'
+    : tab === 'monthly' ? 'rgba(219,39,119,.06)'
+    : 'rgba(37,99,235,.04)';
+
+  const emptyMsg = tab === 'unread' ? 'No unread notifications. You\'re all caught up.'
+    : tab === 'chats' ? 'No chat notifications.'
+    : tab === 'tasks' ? 'No task notifications.'
+    : tab === 'weekly' ? 'No weekly reporting notifications.'
+    : tab === 'monthly' ? 'No monthly reporting notifications.'
+    : 'No notifications yet.';
 
   return (
     <>
@@ -50,7 +98,7 @@ export default function NotificationsPage() {
         <Card.Body className="py-2">
           <Nav variant="tabs" activeKey={tab} onSelect={k => k && setTab(k as TabKey)}>
             <Nav.Item>
-              <Nav.Link eventKey="unread" style={isUnread ? { color: '#f97316', borderBottomColor: '#f97316' } : undefined}>
+              <Nav.Link eventKey="unread" style={tab === 'unread' ? { color: accents.unread, borderBottomColor: accents.unread } : undefined}>
                 <i className="bi bi-envelope me-1" />
                 Unread
                 {unreadCount > 0 && (
@@ -58,13 +106,38 @@ export default function NotificationsPage() {
                 )}
               </Nav.Link>
             </Nav.Item>
-            <Nav.Item>
-              <Nav.Link eventKey="chats" style={tab === 'chats' ? { color: '#16a34a', borderBottomColor: '#16a34a' } : undefined}>
-                <i className="bi bi-chat-dots me-1" />
-                Chats
-                <Badge bg="secondary" pill className="ms-2">{chatCount}</Badge>
-              </Nav.Link>
-            </Nav.Item>
+            {showChatsTasks && <>
+              <Nav.Item>
+                <Nav.Link eventKey="chats" style={tab === 'chats' ? { color: accents.chats, borderBottomColor: accents.chats } : undefined}>
+                  <i className="bi bi-chat-dots me-1" />
+                  Chats
+                  <Badge bg="secondary" pill className="ms-2">{chatCount}</Badge>
+                </Nav.Link>
+              </Nav.Item>
+              <Nav.Item>
+                <Nav.Link eventKey="tasks" style={tab === 'tasks' ? { color: accents.tasks, borderBottomColor: accents.tasks } : undefined}>
+                  <i className="bi bi-check2-square me-1" />
+                  Tasks
+                  <Badge bg="secondary" pill className="ms-2">{taskCount}</Badge>
+                </Nav.Link>
+              </Nav.Item>
+            </>}
+            {isInternalStaff && <>
+              <Nav.Item>
+                <Nav.Link eventKey="weekly" style={tab === 'weekly' ? { color: accents.weekly, borderBottomColor: accents.weekly } : undefined}>
+                  <i className="bi bi-calendar-week me-1" />
+                  Weekly Reporting
+                  <Badge bg="secondary" pill className="ms-2">{weeklyCount}</Badge>
+                </Nav.Link>
+              </Nav.Item>
+              <Nav.Item>
+                <Nav.Link eventKey="monthly" style={tab === 'monthly' ? { color: accents.monthly, borderBottomColor: accents.monthly } : undefined}>
+                  <i className="bi bi-calendar-month me-1" />
+                  Monthly Reporting
+                  <Badge bg="secondary" pill className="ms-2">{monthlyCount}</Badge>
+                </Nav.Link>
+              </Nav.Item>
+            </>}
             <Nav.Item>
               <Nav.Link eventKey="all">
                 <i className="bi bi-list-ul me-1" />
@@ -79,11 +152,7 @@ export default function NotificationsPage() {
       {loading
         ? <div className="text-center py-5"><Spinner animation="border" /></div>
         : visible.length === 0
-          ? <Card body className="text-center text-muted">
-              {tab === 'unread' ? 'No unread notifications. You\'re all caught up.'
-                : tab === 'chats' ? 'No chat notifications.'
-                : 'No notifications yet.'}
-            </Card>
+          ? <Card body className="text-center text-muted">{emptyMsg}</Card>
           : (
             <div className="d-flex flex-column gap-2">
               {visible.map(n => {

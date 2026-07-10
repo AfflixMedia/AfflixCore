@@ -59,7 +59,7 @@ export default function GroupModal(p: Props) {
     const roster = [...p.allStaff].sort((a, b) => contactName(a).localeCompare(contactName(b)));
     const filtered = roster.filter(c => {
       const needle = q.trim().toLowerCase();
-      return !needle || `${contactName(c)} ${c.email} ${roleLabel(c.role)}`.toLowerCase().includes(needle);
+      return !needle || `${contactName(c)} ${c.email} ${roleLabel(c.role, c.is_superbob)}`.toLowerCase().includes(needle);
     });
     return (
       <Modal show={p.show} onHide={p.onClose} centered>
@@ -80,11 +80,11 @@ export default function GroupModal(p: Props) {
           <div className="ac-contact-list">
             {filtered.map(c => (
               <div key={c.id} className="ac-contact-row" style={{ cursor: 'default' }}>
-                <Avatar name={contactName(c)} />
+                <Avatar name={contactName(c)} src={c.avatar_url} />
                 <div className="flex-grow-1 min-w-0">
                   <div className="d-flex align-items-center gap-2">
                     <span className="fw-semibold text-truncate">{contactName(c)}{c.id === p.myId && ' (you)'}</span>
-                    <Badge bg={roleBadge(c.role)} className="ac-role-badge">{roleLabel(c.role)}</Badge>
+                    <Badge bg={roleBadge(c.role)} className="ac-role-badge">{roleLabel(c.role, c.is_superbob)}</Badge>
                     {c.role === 'bob' && <Badge bg="dark" className="ac-role-badge">Can post</Badge>}
                   </div>
                   <div className="text-muted small text-truncate">{c.email}</div>
@@ -118,11 +118,11 @@ export default function GroupModal(p: Props) {
           <div className="ac-contact-list">
             {addable.map(c => (
               <button key={c.id} type="button" className="ac-contact-row" onClick={() => toggle(c.id)}>
-                <Avatar name={contactName(c)} />
+                <Avatar name={contactName(c)} src={c.avatar_url} />
                 <div className="flex-grow-1 min-w-0 text-start">
                   <div className="d-flex align-items-center gap-2">
                     <span className="fw-semibold text-truncate">{contactName(c)}</span>
-                    <Badge bg={roleBadge(c.role)} className="ac-role-badge">{roleLabel(c.role)}</Badge>
+                    <Badge bg={roleBadge(c.role)} className="ac-role-badge">{roleLabel(c.role, c.is_superbob)}</Badge>
                   </div>
                 </div>
                 <i className={`bi ${picked.includes(c.id) ? 'bi-check-square-fill text-primary' : 'bi-square'}`} />
@@ -141,15 +141,29 @@ export default function GroupModal(p: Props) {
   }
 
   // ----- Manage mode -----
+  // Brand groups are auto-managed: the name mirrors the brand and the roster
+  // follows brand access (Boss / Team Lead / APC) — no manual membership edits.
+  const isBrandGroup = !!p.conversation?.brand_id;
   return (
     <Modal show={p.show} onHide={p.onClose} centered>
-      <Modal.Header closeButton><Modal.Title><i className="bi bi-gear me-2" />Group info</Modal.Title></Modal.Header>
+      <Modal.Header closeButton>
+        <Modal.Title>
+          {isBrandGroup ? <><i className="bi bi-shop me-2 text-primary" />Brand group</> : <><i className="bi bi-gear me-2" />Group info</>}
+        </Modal.Title>
+      </Modal.Header>
       <Modal.Body>
+        {isBrandGroup && (
+          <p className="text-muted small mb-3">
+            <i className="bi bi-info-circle me-1" />
+            This group belongs to a brand. Its name and members are managed automatically —
+            whoever is assigned the brand (Boss, Team Lead, APC) is in the group.
+          </p>
+        )}
         <Form.Group className="mb-3">
           <Form.Label>Group name</Form.Label>
           <InputGroup>
-            <Form.Control value={title} disabled={!p.canManage} onChange={e => setTitle(e.target.value)} />
-            {p.canManage && (
+            <Form.Control value={title} disabled={!p.canManage || isBrandGroup} onChange={e => setTitle(e.target.value)} />
+            {p.canManage && !isBrandGroup && (
               <Button variant="outline-primary" disabled={busy || !title.trim() || title === (p.conversation?.title ?? '')}
                 onClick={() => run(() => p.onRename(title))}>
                 <i className="bi bi-check-lg" />
@@ -164,16 +178,16 @@ export default function GroupModal(p: Props) {
             const isCreatorRow = c.id === p.creatorId;
             return (
               <div key={c.id} className="ac-contact-row" style={{ cursor: 'default' }}>
-                <Avatar name={contactName(c)} />
+                <Avatar name={contactName(c)} src={c.avatar_url} />
                 <div className="flex-grow-1 min-w-0">
                   <div className="d-flex align-items-center gap-2">
                     <span className="fw-semibold text-truncate">{contactName(c)}{c.id === p.myId && ' (you)'}</span>
-                    <Badge bg={roleBadge(c.role)} className="ac-role-badge">{roleLabel(c.role)}</Badge>
+                    <Badge bg={roleBadge(c.role)} className="ac-role-badge">{roleLabel(c.role, c.is_superbob)}</Badge>
                     {isCreatorRow ? <Badge bg="dark" className="ac-role-badge">Creator</Badge>
                       : isAdmin ? <Badge bg="warning" text="dark" className="ac-role-badge">Admin</Badge> : null}
                   </div>
                 </div>
-                {p.canManage && !isCreatorRow && c.id !== p.myId && (
+                {p.canManage && !isBrandGroup && !isCreatorRow && c.id !== p.myId && (
                   <div className="d-flex gap-1" onClick={e => e.stopPropagation()}>
                     {p.isCreator && (
                       <Button size="sm" variant="link" className="p-0 text-muted" title={isAdmin ? 'Remove admin' : 'Make admin'}
@@ -192,7 +206,7 @@ export default function GroupModal(p: Props) {
           })}
         </div>
 
-        {p.canManage && (
+        {p.canManage && !isBrandGroup && (
           <>
             <Form.Label>Add member</Form.Label>
             <InputGroup size="sm" className="mb-2">
@@ -211,7 +225,7 @@ export default function GroupModal(p: Props) {
               {addable.map(c => (
                 <button key={c.id} type="button" className="ac-contact-row" disabled={busy}
                   onClick={() => run(() => p.onAdd(c.id, showHistory))}>
-                  <Avatar name={contactName(c)} />
+                  <Avatar name={contactName(c)} src={c.avatar_url} />
                   <div className="flex-grow-1 min-w-0 text-start">
                     <span className="fw-semibold text-truncate">{contactName(c)}</span>
                   </div>
@@ -222,8 +236,8 @@ export default function GroupModal(p: Props) {
           </>
         )}
 
-        {/* Leave group — available to every member. */}
-        {confirmLeave ? (
+        {/* Leave group — available to every member (not in auto-managed brand groups). */}
+        {isBrandGroup ? null : confirmLeave ? (
           <div className="ac-leave-confirm">
             <span className="small">Leave this group? You’ll stop receiving its messages.</span>
             <div className="d-flex gap-2 mt-2">

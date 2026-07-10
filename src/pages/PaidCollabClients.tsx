@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { Button, Card, Modal, Form, Spinner, Alert } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
+import { fnError } from '../lib/functionError';
 import Avatar from '../components/Avatar';
 
 interface Client {
@@ -9,6 +10,7 @@ interface Client {
   full_name: string | null;
   role: string;
   created_at: string;
+  avatar_url?: string | null;
   brand_ids?: string[];
   brand_names?: string[];
 }
@@ -40,7 +42,7 @@ export default function PaidCollabClients() {
   const load = async () => {
     setLoading(true); setErr(null);
     const [{ data: cRows, error: e1 }, { data: brandRows, error: e2 }, { data: assigns, error: e3 }] = await Promise.all([
-      supabase.from('profiles').select('id,email,full_name,role,created_at').eq('role', 'paid_collab_client').order('created_at', { ascending: false }),
+      supabase.from('profiles').select('id,email,full_name,role,created_at,avatar_url').eq('role', 'paid_collab_client').order('created_at', { ascending: false }),
       supabase.from('brands').select('id,name').contains('scope', ['paid_creator']).order('name'),
       supabase.from('paid_collab_client_brands').select('client_id,brand_id'),
     ]);
@@ -123,7 +125,7 @@ export default function PaidCollabClients() {
           },
           headers: { Authorization: `Bearer ${session?.access_token}` },
         });
-        if (error) throw error;
+        if (error) throw await fnError(error);
         if ((data as any)?.error) throw new Error((data as any).error);
       }
       setShow(false);
@@ -205,7 +207,7 @@ export default function PaidCollabClients() {
             const display = c.full_name || c.email;
             return (
               <div className="ac-list-row" key={c.id}>
-                <Avatar name={display} size="lg" />
+                <Avatar name={display} src={c.avatar_url} size="lg" />
                 <div className="ac-row-main">
                   <div className="ac-row-name">{c.full_name || <span className="text-muted">No name</span>}</div>
                   <div className="ac-row-sub d-flex align-items-center flex-wrap gap-2">
@@ -306,7 +308,7 @@ export default function PaidCollabClients() {
             const { data, error } = await supabase.functions.invoke('reset-paid-collab-client-password', {
               body: { user_id: pwClient.id, password: newPw },
             });
-            if (error) throw error;
+            if (error) throw await fnError(error);
             if ((data as any)?.error) throw new Error((data as any).error);
             setPwOk(true);
           } catch (e: any) {
@@ -354,7 +356,7 @@ export default function PaidCollabClients() {
               const { data, error } = await supabase.functions.invoke('delete-paid-collab-client', {
                 body: { user_id: delClient.id },
               });
-              if (error) throw error;
+              if (error) throw await fnError(error);
               if ((data as any)?.error) throw new Error((data as any).error);
               setDelClient(null);
               await load();

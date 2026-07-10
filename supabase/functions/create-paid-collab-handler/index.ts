@@ -34,7 +34,7 @@ serve(async (req) => {
       return json({ error: 'Forbidden — only Bob can create Paid Collab Handlers' }, 403);
     }
 
-    const { email, password, full_name, brand_ids } = await req.json();
+    const { email, password, full_name, brand_ids, is_internal } = await req.json();
     if (!email || !password || !Array.isArray(brand_ids)) {
       return json({ error: 'email, password, brand_ids required' }, 400);
     }
@@ -57,6 +57,8 @@ serve(async (req) => {
         email,
         full_name: full_name ?? '',
         role: 'paid_collab_handler',
+        // Internal handlers get team Chats + Tasks; external (default) do not.
+        is_internal_handler: is_internal === true,
       });
     if (profErr) return json({ error: profErr.message }, 400);
 

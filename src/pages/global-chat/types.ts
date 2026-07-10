@@ -5,6 +5,8 @@ export interface ChatContact {
   full_name: string | null;
   email: string;
   role: string;
+  avatar_url?: string | null;
+  is_superbob?: boolean; // role 'bob' + flag → badge shows "Super Boss"
 }
 
 export interface Conversation {
@@ -17,6 +19,7 @@ export interface Conversation {
   created_at: string;
   last_message_at: string;
   bookmarks_members_can_edit: boolean;
+  brand_id: string | null;   // set = auto-managed brand group (roster follows brand access)
 }
 
 export interface Participant {
@@ -100,13 +103,14 @@ export interface ConversationView {
   unread: number;
 }
 
-export type ChatFilter = 'all' | 'unread' | 'groups' | 'archived';
+export type ChatFilter = 'all' | 'unread' | 'groups' | 'brands' | 'archived';
 
 // Friendly role labels shown as a small badge next to a person's name.
 export const ROLE_LABEL: Record<string, string> = {
   bob: 'Boss',
   team_lead: 'Team Lead',
   apc: 'APC',
+  ads_manager: 'Ads Manager',
   paid_collab_handler: 'PCL',
 };
 
@@ -115,11 +119,12 @@ export const ROLE_BADGE: Record<string, string> = {
   bob: 'danger',
   team_lead: 'warning',
   apc: 'primary',
+  ads_manager: 'info',
   paid_collab_handler: 'success',
 };
 
-export const roleLabel = (role: string | null | undefined): string =>
-  (role && ROLE_LABEL[role]) || 'Staff';
+export const roleLabel = (role: string | null | undefined, isSuperbob = false): string =>
+  role === 'bob' && isSuperbob ? 'Super Boss' : (role && ROLE_LABEL[role]) || 'Staff';
 
 export const roleBadge = (role: string | null | undefined): string =>
   (role && ROLE_BADGE[role]) || 'secondary';

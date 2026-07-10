@@ -1,0 +1,15 @@
+-- =========================================================
+-- Afflix Core — Task read receipts ("seen" blue tick)
+--
+-- Each task row targets one assignee, so a single seen_at timestamp records
+-- when that assignee first opened/read the task. The assigner (Bob / Team Lead)
+-- sees a WhatsApp-style tick: grey = delivered/not seen, blue = seen.
+--
+-- No new RLS needed — the existing "tasks assignee update" policy already lets
+-- the assignee update their own row (that's how they mark done); seen_at rides
+-- the same policy. Setting seen_at does NOT fire tasks_notify (that trigger is
+-- `after update of status` only).
+--
+-- ADDITIVE + nullable.
+-- =========================================================
+alter table public.tasks add column if not exists seen_at timestamptz;

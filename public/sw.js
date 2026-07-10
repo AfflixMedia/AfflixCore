@@ -1,5 +1,27 @@
 // Afflix Core service worker — PWA app shell (offline + installable) + web push.
 
+// --- Dev self-destruct -------------------------------------------------------
+// On localhost this SW must not run: its cache-first asset handler serves a
+// stale @vite/client (with an old HMR token), which breaks Vite's dev
+// websocket. If an old build's SW is still registered on a dev machine, this
+// branch unregisters it, clears its caches, and reloads open tabs — a one-time
+// auto-cleanup (the browser always fetches sw.js fresh, so it picks this up).
+if (self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1') {
+  self.addEventListener('install', () => self.skipWaiting());
+  self.addEventListener('activate', (event) => {
+    event.waitUntil((async () => {
+      try {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+        await self.registration.unregister();
+        const clients = await self.clients.matchAll({ type: 'window' });
+        clients.forEach((c) => c.navigate(c.url));
+      } catch { /* non-fatal */ }
+    })());
+  });
+  // No fetch handler → nothing is intercepted or cached in dev.
+} else {
+
 const CACHE = 'afflix-core-v1';
 const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
 
@@ -83,3 +105,5 @@ self.addEventListener('notificationclick', (event) => {
     await self.clients.openWindow(targetLink);
   })());
 });
+
+} // end production-only service worker

@@ -19,7 +19,7 @@ function Row({ r, state }: { r: MemberReceipt; state: 'read' | 'delivered' | 'pe
   const when = state === 'read' ? r.readAt : state === 'delivered' ? r.deliveredAt : null;
   return (
     <div className="ac-info-row">
-      <Avatar name={contactName(r.contact)} variant="brand" size="sm" />
+      <Avatar name={contactName(r.contact)} src={r.contact.avatar_url} variant="brand" size="sm" />
       <span className="ac-info-name text-truncate">{contactName(r.contact)}</span>
       <span className="ac-info-when ms-auto">{when ? receiptTime(when) : ''}</span>
     </div>

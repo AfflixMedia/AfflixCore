@@ -26,6 +26,8 @@ export default function SharedHandlerCollabPane({ brand, months, creators, comme
 }) {
   const [section, setSection] = useState<'programs' | 'performance' | 'discussions'>('programs');
   const [openMonth, setOpenMonth] = useState<string | null>(null);
+  // Programs month filter — current month / previous month / all (mirrors the weekly tab).
+  const [monthFilter, setMonthFilter] = useState<'current' | 'prev' | 'all'>('all');
   // Right-side discussion drawer ({ tt, tk, highlight } | null).
   const [disc, setDisc] = useState<{ tt: string; tk: string; highlight?: string } | null>(null);
   const openDisc = (tt: string, tk: string, highlight?: string) => setDisc({ tt, tk, highlight });
@@ -60,6 +62,14 @@ export default function SharedHandlerCollabPane({ brand, months, creators, comme
     mc.forEach(c => { allocated += Number(c.amount) || 0; videos += Number(c.videos_count) || 0; delivered += deliveredCount(c); gmv += gmvSum(c); if (isPendingVisible(c)) pendingCount += 1; });
     return { m, creators: mc.length, budget: Number(m.budget) || 0, allocated, videos, delivered, gmv, pendingCount };
   }), [bMonths, bCreators]);
+
+  // Month-filter keys (YYYY-MM): current month + the month before it.
+  const curYM = useMemo(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }, []);
+  const prevYM = useMemo(() => { const d = new Date(); const p = new Date(d.getFullYear(), d.getMonth() - 1, 1); return `${p.getFullYear()}-${String(p.getMonth() + 1).padStart(2, '0')}`; }, []);
+  const shownRows = useMemo(
+    () => monthFilter === 'all' ? programRows : programRows.filter(r => r.m.month === (monthFilter === 'current' ? curYM : prevYM)),
+    [programRows, monthFilter, curYM, prevYM],
+  );
 
   if (bMonths.length === 0 && bCreators.length === 0) {
     return (
@@ -162,8 +172,33 @@ export default function SharedHandlerCollabPane({ brand, months, creators, comme
         programRows.length === 0 ? (
           <div className="pc-card"><div className="pc-empty"><div className="pc-empty-icon">🗂️</div><h3>No programs yet</h3></div></div>
         ) : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                <span className="pc-ava" style={{ background: getGradient(brand.name) }}>{initial(brand.name)}</span>
+                <div style={{ fontWeight: 700, fontSize: 16 }}>{brand.name}</div>
+              </div>
+              <div className="pc-rd-weeks" style={{ marginLeft: 'auto' }}>
+                {([
+                  { id: 'current', label: monthLabel(curYM) },
+                  { id: 'prev', label: monthLabel(prevYM) },
+                  { id: 'all', label: 'All' },
+                ] as const).map(opt => {
+                  const n = opt.id === 'all' ? programRows.length
+                    : programRows.filter(r => r.m.month === (opt.id === 'current' ? curYM : prevYM)).length;
+                  return (
+                    <button key={opt.id} className={`pc-rd-week ${monthFilter === opt.id ? 'active' : ''}`} onClick={() => setMonthFilter(opt.id)}>
+                      {opt.label}{n ? <span className="pc-rd-week-n" style={{ marginLeft: 5 }}>{n}</span> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            {shownRows.length === 0 ? (
+              <div className="pc-card"><div className="pc-empty"><div className="pc-empty-icon">🗓️</div><h3>No programs in {monthFilter === 'current' ? monthLabel(curYM) : monthLabel(prevYM)}</h3></div></div>
+            ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {programRows.map(r => (
+            {shownRows.map(r => (
               <div key={r.m.id} className={`pc-card pc-prog-card ${r.pendingCount > 0 ? 'pc-prog-pending' : ''}`} role="button" tabIndex={0}
                 style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}
                 onClick={() => setOpenMonth(r.m.month)}
@@ -188,6 +223,8 @@ export default function SharedHandlerCollabPane({ brand, months, creators, comme
               </div>
             ))}
           </div>
+            )}
+          </>
         )
       ) : section === 'discussions' ? (
         <ShareDiscussions brand={brand} comments={bComments} creators={bCreators} seenAt={seenAt} onOpen={openDisc} />

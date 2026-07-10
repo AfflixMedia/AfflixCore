@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState, FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, FormEvent, CSSProperties } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card, Form, Button, Row, Col, Table, Spinner, Alert, Badge, Modal, Offcanvas, Dropdown } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
+import { fnError } from '../lib/functionError';
 import {
   MonthlyReportContent, emptyMonthlyContent, normalizeMonthlyContent, applyLastMonthFromPrev,
   emptyMonthlyTopCreator, emptyMonthlyTopVideo, emptyMonthlyProduct,
@@ -27,6 +28,8 @@ import { CustomSectionInline, CustomSectionDefModal, customSectionsAt, newSectio
 import NumberInput from '../components/NumberInput';
 import ImageInput from '../components/ImageInput';
 import { parseMonthlyReportPdf } from '../lib/importMonthlyReport';
+import { useEditLock } from '../lib/useEditLock';
+import EditLockBanner from '../components/EditLockBanner';
 
 const SECTION_LABELS: Record<string, string> = {
   total_sales: 'Total Sales',
@@ -67,6 +70,13 @@ export default function MonthlyReportEdit() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
   const { profile } = useAuth();
+  // Collaborative edit lock — only one teammate edits a report at a time.
+  const lock = useEditLock({
+    kind: 'monthly',
+    id,
+    userId: profile?.id,
+    name: profile?.full_name || profile?.email || 'A teammate',
+  });
   const [report, setReport] = useState<MonthlyReportRow | null>(null);
   const [brand, setBrand] = useState<Brand | null>(null);
   const [pcPrograms, setPcPrograms] = useState<{ id: string; name: string | null; ended_at: string | null }[]>([]);
@@ -75,6 +85,12 @@ export default function MonthlyReportEdit() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Auto-save state (debounced) — persists the whole report content as it's edited.
+  const lastSavedContent = useRef<string | null>(null);
+  const [autoSave, setAutoSave] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  // True while we re-pull the latest content right after taking over editing.
+  const [reloading, setReloading] = useState(false);
 
   const [autoFilledMsg, setAutoFilledMsg] = useState<string | null>(null);
 
@@ -169,6 +185,7 @@ export default function MonthlyReportEdit() {
       setReport(r);
       const normalised = normalizeMonthlyContent(r.content);
       setC(normalised);
+      lastSavedContent.current = JSON.stringify(normalised);
       const { data: bd } = await supabase.from('brands').select('id,name,client,client_status').eq('id', r.brand_id).single();
       setBrand(bd as Brand);
       const { data: pcp } = await supabase.from('paid_creator_programs')
@@ -201,6 +218,62 @@ export default function MonthlyReportEdit() {
       setLoading(false);
     })();
   }, [id]);
+
+  // Debounced auto-save of the whole report content (status untouched) ~1s
+  // after the user stops editing — covers every rich-text (Quill) section and
+  // all other fields.
+  const contentKey = JSON.stringify(c);
+  useEffect(() => {
+    if (loading || !report || lastSavedContent.current === null) return;
+    if (brand?.client_status === 'closed') return;
+    // Another teammate holds the edit lock — never write from a read-only view.
+    if (lock.isLockedOut) return;
+    // Don't persist the stale snapshot while we're pulling the latest content.
+    if (reloading) return;
+    if (contentKey === lastSavedContent.current) return;
+    setAutoSave('saving');
+    const t = setTimeout(async () => {
+      const { error } = await supabase.from('monthly_reports')
+        .update({ content: c }).eq('id', id);
+      if (error) { setAutoSave('error'); return; }
+      lastSavedContent.current = contentKey;
+      setAutoSave('saved');
+    }, 1000);
+    return () => clearTimeout(t);
+  }, [contentKey, lock.isLockedOut]);
+
+  // Edit-lock hand-off (see WeeklyReportEdit): flush our newest edits when we
+  // LOSE control, and re-pull the latest content when we GAIN it, freezing the
+  // form briefly during the swap so we don't clobber the incoming changes.
+  const wasLockedOut = useRef(false);
+  useEffect(() => {
+    if (loading || !report) return;
+    const nowLocked = lock.isLockedOut;
+    if (nowLocked === wasLockedOut.current) return;
+    const lostControl = nowLocked && !wasLockedOut.current;
+    const gainedControl = !nowLocked && wasLockedOut.current;
+    wasLockedOut.current = nowLocked;
+
+    if (lostControl) {
+      if (brand?.client_status === 'closed') return;
+      const snapshot = c;
+      void supabase.from('monthly_reports').update({ content: snapshot }).eq('id', id)
+        .then(({ error }) => { if (!error) lastSavedContent.current = JSON.stringify(snapshot); });
+    } else if (gainedControl) {
+      setReloading(true);
+      const t = setTimeout(async () => {
+        const { data, error } = await supabase.from('monthly_reports').select('content').eq('id', id).single();
+        if (!error && data) {
+          const normalised = normalizeMonthlyContent(data.content);
+          setC(normalised);
+          lastSavedContent.current = JSON.stringify(normalised);
+          setAutoSave('idle');
+        }
+        setReloading(false);
+      }, 1200);
+      return () => clearTimeout(t);
+    }
+  }, [lock.isLockedOut]);
 
   const customPresets = useMemo(() => presets.filter(p => p.kind === 'custom'), [presets]);
   const standardPresetsFor = (sectionId: string) =>
@@ -241,7 +314,7 @@ export default function MonthlyReportEdit() {
     const { data, error } = await supabase.functions.invoke('post-staff-comment', {
       body: { report_id: report.id, report_type: 'monthly', section, body, parent_id: parentId ?? null },
     });
-    if (error) throw error;
+    if (error) throw await fnError(error);
     if ((data as any)?.error) throw new Error((data as any).error);
     setComments(prev => [...prev, (data as any).comment as Comment]);
   };
@@ -433,6 +506,11 @@ export default function MonthlyReportEdit() {
       setErr(`${brand.name} is inactive — reactivate the brand before saving changes.`);
       return;
     }
+    if (lock.isLockedOut) {
+      setErr(`${lock.editorName ?? 'Another teammate'} is currently editing this report. Use "Take over editing" to make changes.`);
+      return;
+    }
+    if (reloading) return; // mid hand-off — wait for the latest content to load
     setSaving(true); setErr(null);
     const update: Record<string, any> = { content: c, status };
     if (c.approval?.enabled) update.is_shared = true;
@@ -447,6 +525,12 @@ export default function MonthlyReportEdit() {
   if (!report || !brand) return null;
 
   const brandInactive = brand.client_status === 'closed';
+  // Freeze the form body when another teammate holds the lock OR while we're
+  // pulling the latest content right after taking over.
+  const formFrozen = lock.isLockedOut || reloading;
+  const lockStyle: CSSProperties | undefined = formFrozen
+    ? { pointerEvents: 'none', opacity: 0.55, userSelect: 'none' }
+    : undefined;
 
   // ---------- small inline UI helpers ----------
   const FeedbackButton = ({ section }: { section: CommentSection }) => {
@@ -456,6 +540,17 @@ export default function MonthlyReportEdit() {
       <Button size="sm" variant="outline-info" className="ms-2" onClick={() => setFeedbackSection(section)}>
         <i className="bi bi-chat-left-text me-1" /> {n > 0 ? `Feedback (${n})` : 'Notes'}
       </Button>
+    );
+  };
+  // Small "Saving… / Saved" badge shown on auto-saved (rich-text) sections.
+  const AutoSaveBadge = () => {
+    if (autoSave === 'idle') return null;
+    return (
+      <span className={`small ${autoSave === 'error' ? 'text-danger' : 'text-muted'}`}>
+        {autoSave === 'saving' && (<><Spinner animation="border" size="sm" className="me-1" />Saving…</>)}
+        {autoSave === 'saved' && (<><i className="bi bi-check2 me-1" />Saved</>)}
+        {autoSave === 'error' && (<><i className="bi bi-exclamation-triangle me-1" />Save failed</>)}
+      </span>
     );
   };
   const StdPresetMenu = ({ sectionId }: { sectionId: keyof MonthlyReportContent }) => {
@@ -529,12 +624,26 @@ export default function MonthlyReportEdit() {
           </div>
         </Alert>
       )}
+      {lock.isLockedOut && lock.editorName && (
+        <EditLockBanner editorName={lock.editorName} onTakeOver={lock.takeOver} />
+      )}
+      {reloading && (
+        <Alert variant="info" className="d-flex align-items-center gap-2">
+          <Spinner animation="border" size="sm" />
+          <span>You took over — loading the latest changes…</span>
+        </Alert>
+      )}
       <div className="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
         <div>
           <h2 className="mb-1">{brand.name} <small className="text-muted fs-6">— {brand.client}</small></h2>
           <div className="text-muted">
             Monthly · {fmtMonth(report.month)}
             <Badge bg={report.status === 'draft' ? 'secondary' : 'success'} className="ms-2">{report.status}</Badge>
+            {lock.ready && lock.othersCount > 0 && lock.isOwner && (
+              <Badge bg="success" className="ms-2">
+                <i className="bi bi-pencil-fill me-1" />You have control · {lock.othersCount} watching
+              </Badge>
+            )}
           </div>
         </div>
         <div className="d-flex gap-2 flex-wrap">
@@ -548,13 +657,13 @@ export default function MonthlyReportEdit() {
               if (f) onImportFile(f);
             }}
           />
-          <Button variant="outline-warning" disabled={importing} onClick={() => importInputRef.current?.click()}
+          <Button variant="outline-warning" disabled={importing || formFrozen} onClick={() => importInputRef.current?.click()}
             title="Upload a monthly-report PDF and auto-fill the form fields">
             <i className="bi bi-file-earmark-arrow-up me-1" />
             {importing ? 'Reading PDF…' : 'Import from PDF'}
           </Button>
           <Dropdown>
-            <Dropdown.Toggle variant="outline-info" title="Insert a saved custom-section preset (monthly library)">
+            <Dropdown.Toggle variant="outline-info" disabled={formFrozen} title="Insert a saved custom-section preset (monthly library)">
               <i className="bi bi-bookmark me-1" /> Add from preset
               {customPresets.length > 0 && <Badge bg="info" pill className="ms-1">{customPresets.length}</Badge>}
             </Dropdown.Toggle>
@@ -579,12 +688,12 @@ export default function MonthlyReportEdit() {
               ))}
             </Dropdown.Menu>
           </Dropdown>
-          <Button variant="outline-success" onClick={openAddCustom}>
+          <Button variant="outline-success" disabled={formFrozen} onClick={openAddCustom}>
             <i className="bi bi-plus-square me-1" /> Add custom section
           </Button>
           <Button variant="outline-secondary" onClick={() => nav('/reporting/monthly')}>Cancel</Button>
-          <Button variant="outline-primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
-          <Button variant="primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
+          <Button variant="outline-primary" disabled={saving || brandInactive || formFrozen} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
+          <Button variant="primary" disabled={saving || brandInactive || formFrozen} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
         </div>
       </div>
 
@@ -597,6 +706,7 @@ export default function MonthlyReportEdit() {
         </Alert>
       )}
 
+      <div style={lockStyle} aria-disabled={formFrozen}>
       {renderCustomAt('start')}
 
       {/* Total Sales */}
@@ -812,7 +922,10 @@ export default function MonthlyReportEdit() {
       {(['strategy_insights','discounting','gmv_max_ads','paid_collabs','ai_content','strategy_moving_forward'] as const).map(sec => (
         <div key={sec}>
           <Card className="mb-4" data-section={sec}>
-            <Card.Header><HeaderWithFeedback title={SECTION_LABELS[sec]} sectionId={sec} /></Card.Header>
+            <Card.Header className="d-flex justify-content-between align-items-center">
+              <HeaderWithFeedback title={SECTION_LABELS[sec]} sectionId={sec} />
+              <AutoSaveBadge />
+            </Card.Header>
             <Card.Body>
               <RichTextEditor
                 value={(c as any)[sec].body}
@@ -841,6 +954,7 @@ export default function MonthlyReportEdit() {
             Approval Needed / Action Items
           </span>
           <div className="d-flex align-items-center gap-2">
+            <AutoSaveBadge />
             <FeedbackButton section="approval" />
             <Form.Check
               type="switch"
@@ -886,6 +1000,7 @@ export default function MonthlyReportEdit() {
           </Card.Body>
         )}
       </Card>
+      </div>
 
       <CustomSectionDefModal
         show={csModalOpen}
@@ -921,8 +1036,8 @@ export default function MonthlyReportEdit() {
 
       <div className="d-flex justify-content-end gap-2 mb-4">
         <Button variant="outline-secondary" onClick={() => nav('/reporting/monthly')}>Cancel</Button>
-        <Button variant="outline-primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
-        <Button variant="primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
+        <Button variant="outline-primary" disabled={saving || brandInactive || formFrozen} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
+        <Button variant="primary" disabled={saving || brandInactive || formFrozen} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
       </div>
     </div>
   );

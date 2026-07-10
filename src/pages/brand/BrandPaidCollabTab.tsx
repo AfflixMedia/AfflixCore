@@ -1,11 +1,12 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { Spinner, Alert } from 'react-bootstrap';
 import { supabase } from '../../lib/supabase';
-import { setCreatorVideoAuth } from '../handler-collab/store';
+import { applyFollowUps, setCreatorVideoAuth } from '../handler-collab/store';
 import type { HandlerBrandMonth, HandlerCreator } from '../handler-collab/store';
 import { BrandPerformancePane } from '../handler-collab/HandlerCollabApp';
+import { copyText, showToast } from '../../lib/copyToast';
 import {
-  fmt$, monthKey, monthLabel, focusProductList, deliveredCount,
+  fmt$, monthKey, monthLabel, focusProductList, deliveredCount, isValidUrl, tiktokAccounts, getGradient,
   Kpi, CreatorRowRO, CreatorListHeadRO,
 } from '../paid-collab/handlerCollabReadonly';
 
@@ -13,7 +14,15 @@ interface Props {
   brandId: string;
   brandName: string;
   canEdit: boolean;
+  /** Reports the live count of not-yet-authorised videos (drives the tab-strip dot in BrandDetail). */
+  onPendingAuthChange?: (count: number) => void;
 }
+
+// A video row counts as "awaiting authorisation" once it has a video link or an
+// ad code but no auth flag (empty placeholders skipped). Shared with BrandDetail,
+// which uses it to show a dot on the Paid Collab tab itself.
+export const isPendingAuthCode = (code: any): boolean =>
+  !!code && !code.auth && !!((code.video || '').trim() || (code.adCode || '').trim());
 
 /* ════════════════════════════════════════════════════════════
    Paid Collab tab for THIS brand, styled like the handler Workspace drilldown (pc-*
@@ -25,19 +34,25 @@ interface Props {
      through store.setCreatorMonthly (SECURITY DEFINER RPC, so APCs can write too).
    Creator/budget editing still happens in the handler's own workspace.
 ════════════════════════════════════════════════════════════ */
-export default function BrandPaidCollabTab({ brandId, brandName, canEdit }: Props) {
+export default function BrandPaidCollabTab({ brandId, brandName, canEdit, onPendingAuthChange }: Props) {
   const [months, setMonths] = useState<HandlerBrandMonth[]>([]);
   const [creators, setCreators] = useState<HandlerCreator[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   // Overview = the read-only summary below; Performance = the editable GMV matrix
-  // (monthly/weekly), available to staff who may edit (Bob / assigned APC).
-  const [view, setView] = useState<'overview' | 'performance'>('overview');
+  // (monthly/weekly), staff who may edit only (Bob / assigned APC / Team Lead);
+  // Authorization = queue of not-yet-authorised videos with bulk actions —
+  // available to everyone on this tab (the auth toggle is also the Ads Manager's
+  // edit surface; the RPC enforces who may actually write).
+  const [view, setView] = useState<'overview' | 'performance' | 'auth'>('overview');
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true); setErr(null);
+      // Apply the follow-up / payment-pending status rules server-side before reading
+      // (1-week stall sweep — same call the handler workspace makes on load).
+      await applyFollowUps();
       const [{ data: mRows, error: mErr }, { data: cRows, error: cErr }] = await Promise.all([
         supabase.from('handler_collab_brand_months').select('*').eq('brand_id', brandId),
         supabase.from('handler_collab_creators').select('*').eq('brand_id', brandId),
@@ -64,22 +79,86 @@ export default function BrandPaidCollabTab({ brandId, brandName, canEdit }: Prop
     return { budget, allocated, paid, videos, delivered };
   }, [months, creators]);
 
-  // Toggle a video's "Authorised" flag (APC/Bob). Optimistic; reverts on failure.
-  const handleToggleAuth = useCallback(async (creatorId: string, index: number, auth: boolean) => {
-    const apply = (val: boolean) => setCreators(prev => prev.map(c => {
+  // Patch one video's auth flag in local state (optimistic UI).
+  const applyAuth = useCallback((creatorId: string, index: number, val: boolean) => {
+    setCreators(prev => prev.map(c => {
       if (c.id !== creatorId) return c;
       const codes = Array.isArray(c.video_codes) ? c.video_codes.slice() : [];
       if (codes[index]) codes[index] = { ...codes[index], auth: val };
       return { ...c, video_codes: codes };
     }));
-    apply(auth);
+  }, []);
+
+  // Toggle a video's "Authorised" flag (APC/Bob). Optimistic; reverts on failure.
+  const handleToggleAuth = useCallback(async (creatorId: string, index: number, auth: boolean) => {
+    applyAuth(creatorId, index, auth);
     try {
       await setCreatorVideoAuth(creatorId, index, auth);
     } catch (e) {
-      apply(!auth); // revert
+      applyAuth(creatorId, index, !auth); // revert
       alert(`Couldn't update authorised status: ${(e as Error).message}`);
     }
-  }, []);
+  }, [applyAuth]);
+
+  // ── Authorization queue: every video row not yet authorised, grouped by creator.
+  // A row counts once it has a video link or an ad code (empty placeholders skipped).
+  const pendingAuth = useMemo(() => {
+    return creators
+      .map(c => ({
+        creator: c,
+        rows: (Array.isArray(c.video_codes) ? c.video_codes : [])
+          .map((code, index) => ({ code, index }))
+          .filter(r => isPendingAuthCode(r.code)),
+      }))
+      .filter(g => g.rows.length > 0)
+      .sort((a, b) => String(a.creator.name || '').localeCompare(String(b.creator.name || '')));
+  }, [creators]);
+  const pendingCount = useMemo(() => pendingAuth.reduce((n, g) => n + g.rows.length, 0), [pendingAuth]);
+
+  // Keep BrandDetail's tab-strip dot in sync as videos get authorised in here.
+  useEffect(() => {
+    if (!loading) onPendingAuthChange?.(pendingCount);
+  }, [loading, pendingCount, onPendingAuthChange]);
+  const pendingCodes = useMemo(
+    () => pendingAuth.flatMap(g => g.rows.map(r => (r.code.adCode || '').trim()).filter(Boolean)),
+    [pendingAuth],
+  );
+
+  const [authBusy, setAuthBusy] = useState(false);
+  const [copiedKey, setCopiedKey] = useState('');
+  const copyOneCode = (key: string, code: string) => {
+    copyText(code);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(k => (k === key ? '' : k)), 1400);
+  };
+
+  // Copy every pending (unauthorised) ad code, one per line.
+  const copyAllCodes = useCallback(() => {
+    if (!pendingCodes.length) return;
+    copyText(pendingCodes.join('\n'));
+    showToast(`${pendingCodes.length} ad code${pendingCodes.length === 1 ? '' : 's'} copied`);
+  }, [pendingCodes]);
+
+  // Authorise every pending video. Sequential on purpose: two rows of the SAME
+  // creator both rewrite the video_codes jsonb, so parallel RPC calls could race.
+  const authorizeAll = useCallback(async () => {
+    const targets = pendingAuth.flatMap(g => g.rows.map(r => ({ creatorId: g.creator.id, index: r.index })));
+    if (!targets.length || authBusy) return;
+    if (!window.confirm(`Mark all ${targets.length} video${targets.length === 1 ? '' : 's'} as authorised?`)) return;
+    setAuthBusy(true);
+    let failed = 0;
+    for (const t of targets) {
+      try {
+        await setCreatorVideoAuth(t.creatorId, t.index, true);
+        applyAuth(t.creatorId, t.index, true);
+      } catch {
+        failed += 1;
+      }
+    }
+    setAuthBusy(false);
+    if (failed) alert(`${failed} video${failed === 1 ? '' : 's'} couldn't be updated — please try again.`);
+    else showToast(`${targets.length} video${targets.length === 1 ? '' : 's'} authorised`);
+  }, [pendingAuth, authBusy, applyAuth]);
 
   const sortedMonths = useMemo(
     () => [...months].sort((a, b) => String(b.month).localeCompare(String(a.month))),
@@ -155,17 +234,113 @@ export default function BrandPaidCollabTab({ brandId, brandName, canEdit }: Prop
     </>
   );
 
+  // Authorization queue pane: all not-yet-authorised videos across creators, with
+  // one-click bulk authorise + copy-all-ad-codes. Rows reuse the pc-vx-* look.
+  const authPane = (
+    <div className="pc-card pc-authq">
+      <div className="pc-authq-head">
+        <div>
+          <div className="pc-authq-title">Videos awaiting authorisation</div>
+          <div className="pc-authq-sub">
+            {pendingCount > 0
+              ? <>{pendingCount} video{pendingCount === 1 ? '' : 's'} across {pendingAuth.length} creator{pendingAuth.length === 1 ? '' : 's'} still unauthorised</>
+              : 'Every video with content or an ad code is authorised.'}
+          </div>
+        </div>
+        {pendingCount > 0 && (
+          <div className="pc-authq-actions">
+            <button type="button" className="pc-btn pc-btn-ghost pc-btn-sm" onClick={copyAllCodes}
+              disabled={!pendingCodes.length}
+              title={pendingCodes.length ? 'Copy every pending ad code, one per line' : 'No pending video has an ad code yet'}>
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg>
+              Copy all codes{pendingCodes.length ? ` (${pendingCodes.length})` : ''}
+            </button>
+            <button type="button" className="pc-btn pc-btn-primary pc-btn-sm" onClick={authorizeAll} disabled={authBusy}>
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+              {authBusy ? 'Authorising…' : `Authorise all (${pendingCount})`}
+            </button>
+          </div>
+        )}
+      </div>
+      {pendingCount === 0 ? (
+        <div className="pc-empty">
+          <div className="pc-empty-icon">✅</div>
+          <h3>All caught up</h3>
+          <p>New videos and ad codes added by the handler will show up here for authorisation.</p>
+        </div>
+      ) : (
+        pendingAuth.map(g => {
+          const accounts = tiktokAccounts(g.creator.tiktok_handle);
+          return (
+            <div key={g.creator.id} className="pc-authq-group">
+              <div className="pc-authq-creator">
+                <span className="pc-authq-ava" style={{ background: getGradient(g.creator.name) }}>
+                  {(g.creator.name || '?').trim().charAt(0).toUpperCase() || '?'}
+                </span>
+                <span className="pc-cname">{g.creator.name}</span>
+                {accounts[0] && (
+                  <a className="pc-handle" href={accounts[0].url} target="_blank" rel="noopener noreferrer">{accounts[0].handle}</a>
+                )}
+                <span className="pc-vx-authtally">{g.rows.length} pending</span>
+              </div>
+              <div className="pc-vx-collabels"><span /><span>Video</span><span>Ad code</span><span className="pc-vx-cl-auth">Authorise</span><span /></div>
+              <div className="pc-vx-list">
+                {g.rows.map(({ code, index }) => {
+                  const vOk = isValidUrl(code.video);
+                  const key = `${g.creator.id}:${index}`;
+                  return (
+                    <div className="pc-vx-row" key={key}>
+                      <span className="pc-vx-num">{index + 1}</span>
+                      <div className="pc-vx-inp" style={{ alignItems: 'center' }}>
+                        <span className="pc-vx-inp-ico"><svg viewBox="0 0 24 24" fill="currentColor" width="11" height="11"><path d="M8 5v14l11-7z" /></svg></span>
+                        {vOk
+                          ? <a className="pc-handle pc-vx-val" href={code.video} target="_blank" rel="noopener noreferrer" title={code.video}>{code.video}</a>
+                          : <span className="pc-handle pc-vx-val" title={code.video || ''}>{code.video || '—'}</span>}
+                      </div>
+                      <div className="pc-vx-inp pc-vx-inp-ad" style={{ alignItems: 'center' }}>
+                        <span className="pc-vx-inp-ico">#</span>
+                        <span className="pc-vx-val" title={code.adCode || ''}>{code.adCode || '—'}</span>
+                        {code.adCode ? (
+                          <button type="button" className={`pc-vx-copy ${copiedKey === key ? 'ok' : ''}`} title="Copy ad code"
+                            onClick={() => copyOneCode(key, code.adCode)}>
+                            {copiedKey === key
+                              ? <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                              : <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg>}
+                          </button>
+                        ) : null}
+                      </div>
+                      <button type="button" role="checkbox" aria-checked={false}
+                        className="pc-vx-auth pc-vx-auth-edit"
+                        title="Mark as authorised" disabled={authBusy}
+                        onClick={() => handleToggleAuth(g.creator.id, index, true)} />
+                      <a className="pc-vx-open" href={vOk ? code.video : undefined} target="_blank" rel="noopener noreferrer" aria-disabled={!vOk}>
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 17 17 7M9 7h8v8" /></svg>
+                      </a>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+
   return (
     <div className="pc-app" style={{ minHeight: 0, background: 'transparent' }}>
-      {canEdit && (
-        <div className="pc-seg" style={{ marginBottom: 16 }}>
-          <button type="button" className={`pc-seg-btn ${view === 'overview' ? 'active' : ''}`} onClick={() => setView('overview')}>Overview</button>
+      <div className="pc-seg" style={{ marginBottom: 16 }}>
+        <button type="button" className={`pc-seg-btn ${view === 'overview' ? 'active' : ''}`} onClick={() => setView('overview')}>Overview</button>
+        {canEdit && (
           <button type="button" className={`pc-seg-btn ${view === 'performance' ? 'active' : ''}`} onClick={() => setView('performance')}>Performance</button>
-        </div>
-      )}
-      {canEdit && view === 'performance'
+        )}
+        <button type="button" className={`pc-seg-btn ${view === 'auth' ? 'active' : ''}`} onClick={() => setView('auth')}>
+          Authorization{pendingCount > 0 && <span className="pc-seg-count">{pendingCount}</span>}
+        </button>
+      </div>
+      {view === 'performance' && canEdit
         ? <BrandPerformancePane brandId={brandId} brandName={brandName} canEdit={canEdit} />
-        : overview}
+        : view === 'auth' ? authPane : overview}
     </div>
   );
 }

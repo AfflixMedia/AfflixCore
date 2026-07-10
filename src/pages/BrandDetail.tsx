@@ -7,7 +7,7 @@ import BrandResourcesTab from './brand/BrandResourcesTab';
 import BrandReportingTab from './brand/BrandReportingTab';
 import BrandGmvMaxTab from './brand/BrandGmvMaxTab';
 import BrandSamplesTab from './brand/BrandSamplesTab';
-import BrandPaidCollabTab from './brand/BrandPaidCollabTab';
+import BrandPaidCollabTab, { isPendingAuthCode } from './brand/BrandPaidCollabTab';
 import BrandProductsTab from './brand/BrandProductsTab';
 import BrandBillingTab from './brand/BrandBillingTab';
 import PaymentControlsTab from '../components/paidcollab/PaymentControlsTab';
@@ -54,6 +54,9 @@ export default function BrandDetail() {
   const isBob = profile?.role === 'bob';
   const isApc = profile?.role === 'apc';
   const isTeamLead = profile?.role === 'team_lead';
+  // Ads Manager: APC-like VIEW access to their assigned brands; edits only GMV Max
+  // (+ the paid-collab video Authorised toggle, enforced by its RPC).
+  const isAdsManager = profile?.role === 'ads_manager';
   const canManageGmvMax = !!profile?.can_manage_gmv_max;
 
   const [brand, setBrand] = useState<Brand | null>(null);
@@ -71,22 +74,31 @@ export default function BrandDetail() {
   // of the same status; the funnel lets you override.
   const [navStatus, setNavStatus] = useState<'all' | ClientStatus>('in_progress');
   const [filterOpen, setFilterOpen] = useState(false);
+  // Not-yet-authorised paid-collab videos for this brand — drives the red dot on
+  // the Paid Collab tab. Fetched on load; the tab reports live changes upward so
+  // the dot clears as videos get authorised.
+  const [pendingAuthCount, setPendingAuthCount] = useState(0);
 
   const tabFromUrl = (params.get('tab') as TabKey) || 'resources';
 
   useEffect(() => {
     (async () => {
       setLoading(true); setErr(null);
-      const [{ data: b, error: bErr }, { data: assigns }, { data: siblings }] = await Promise.all([
+      const [{ data: b, error: bErr }, { data: assigns }, { data: siblings }, { data: authRows }] = await Promise.all([
         supabase.from('brands').select('id,name,client,client_id,share_enabled,client_status').eq('id', id).maybeSingle(),
         isApc
           ? supabase.from('apc_brands').select('brand_id').eq('apc_id', profile?.id ?? '').eq('brand_id', id ?? '')
           : isTeamLead
           ? supabase.from('team_lead_brands').select('brand_id').eq('team_lead_id', profile?.id ?? '').eq('brand_id', id ?? '')
+          : isAdsManager
+          ? supabase.from('ads_manager_brands').select('brand_id').eq('ads_manager_id', profile?.id ?? '').eq('brand_id', id ?? '')
           : Promise.resolve({ data: [] }),
         // RLS already scopes this to brands the user can see (Bob sees all,
         // APC sees their assigned brands).
         supabase.from('brands').select('id,name,client_status').order('name'),
+        // Pending-authorisation videos for the Paid Collab tab dot. RLS returns
+        // rows only to users with brand access; errors just leave the dot off.
+        supabase.from('handler_collab_creators').select('video_codes').eq('brand_id', id ?? ''),
       ]);
       if (bErr) { setErr(bErr.message); setLoading(false); return; }
       if (!b) { setErr('Brand not found.'); setLoading(false); return; }
@@ -97,12 +109,14 @@ export default function BrandDetail() {
       const st = ((b as Brand).client_status ?? 'in_progress') as ClientStatus;
       setNavStatus(prev => (prev === 'all' || prev === st) ? prev : st);
       setAssignedToMe(((assigns as any[])?.length ?? 0) > 0);
+      setPendingAuthCount(((authRows as any[]) ?? []).reduce((n, r) =>
+        n + (Array.isArray(r.video_codes) ? r.video_codes.filter(isPendingAuthCode).length : 0), 0));
       setSiblings(((siblings as any[]) ?? []).map(x => ({
         id: x.id, name: x.name, status: (x.client_status ?? 'in_progress') as ClientStatus,
       })));
       setLoading(false);
     })();
-  }, [id, isApc, isTeamLead, profile?.id]);
+  }, [id, isApc, isTeamLead, isAdsManager, profile?.id]);
 
   // Brands that pass the active status filter, in alphabetical order. Drives both
   // the prev/next walk and the switcher list.
@@ -160,11 +174,17 @@ export default function BrandDetail() {
 
   const visibleTabs = useMemo(() => {
     if (isBob) return TABS;
-    // Team Lead: APC-level access to their brands, minus Paid Collab (separate
-    // operation) and the Bob-only financials (Billing / Payments).
+    // Team Lead: APC-level access to their brands (incl. Paid Collab since
+    // 2026-07-06), minus the Bob-only financials (Billing / Payments).
     if (isTeamLead) {
       if (!assignedToMe) return [];
-      return TABS.filter(t => !['paid-collab', 'billing', 'payments'].includes(t.key));
+      return TABS.filter(t => !['billing', 'payments'].includes(t.key));
+    }
+    // Ads Manager: view-only APC tab set (GMV Max always included — it's their
+    // edit surface), minus the Bob-only financials.
+    if (isAdsManager) {
+      if (!assignedToMe) return [];
+      return TABS.filter(t => !['billing', 'payments'].includes(t.key));
     }
     if (!isApc || !assignedToMe) return [];
     return TABS.filter(t => {
@@ -173,7 +193,7 @@ export default function BrandDetail() {
       if (t.key === 'payments') return false; // Bob-only payment-popup controls
       return true;
     });
-  }, [isBob, isApc, isTeamLead, assignedToMe, canManageGmvMax]);
+  }, [isBob, isApc, isTeamLead, isAdsManager, assignedToMe, canManageGmvMax]);
 
   const currentTab: TabKey = useMemo(() => {
     const fromUrl = visibleTabs.find(t => t.key === tabFromUrl);
@@ -207,10 +227,12 @@ export default function BrandDetail() {
   // Compose per-tab "can edit" flags by AND-ing role-based perms with brand active.
   // A Team Lead handles their assigned brands with APC-level edit rights.
   const tlAssigned = isTeamLead && assignedToMe;
+  // Ads Manager's ONLY tab-level edit surface is GMV Max (RLS mirrors this).
+  const amAssigned = isAdsManager && assignedToMe;
   const canEditResources = (isBob) && brandActive;
-  const canEditGmvMax    = (isBob || canManageGmvMax || tlAssigned) && brandActive;
+  const canEditGmvMax    = (isBob || canManageGmvMax || tlAssigned || amAssigned) && brandActive;
   const canEditSamples   = (isBob || (isApc && assignedToMe) || tlAssigned) && brandActive;
-  const canEditPaidCollab = (isBob || (isApc && assignedToMe)) && brandActive;
+  const canEditPaidCollab = (isBob || (isApc && assignedToMe) || tlAssigned) && brandActive;
   const canEditProducts   = (isBob || (isApc && assignedToMe) || tlAssigned) && brandActive;
   // Reporting share toggles are Bob-only and require active brand.
   const canEditReporting = isBob && brandActive;
@@ -365,6 +387,12 @@ export default function BrandDetail() {
               <Nav.Item key={t.key}>
                 <Nav.Link eventKey={t.key}>
                   <i className={`bi ${t.icon} me-1`} />{t.label}
+                  {t.key === 'paid-collab' && pendingAuthCount > 0 && (
+                    <span
+                      className="ac-tab-dot"
+                      title={`${pendingAuthCount} video${pendingAuthCount === 1 ? '' : 's'} awaiting authorisation`}
+                    />
+                  )}
                 </Nav.Link>
               </Nav.Item>
             ))}
@@ -377,7 +405,7 @@ export default function BrandDetail() {
       {currentTab === 'gmv-max'     && <BrandGmvMaxTab brandId={brand.id} canEdit={canEditGmvMax} />}
       {currentTab === 'samples'     && <BrandSamplesTab brandId={brand.id} canEdit={canEditSamples} />}
       {currentTab === 'products'    && <BrandProductsTab brandId={brand.id} canEdit={canEditProducts} />}
-      {currentTab === 'paid-collab' && <BrandPaidCollabTab brandId={brand.id} brandName={brand.name} canEdit={canEditPaidCollab} />}
+      {currentTab === 'paid-collab' && <BrandPaidCollabTab brandId={brand.id} brandName={brand.name} canEdit={canEditPaidCollab} onPendingAuthChange={setPendingAuthCount} />}
       {currentTab === 'payments'    && <PaymentControlsTab brandId={brand.id} brandName={brand.name} canEdit={isBob && brandActive} />}
       {currentTab === 'billing'     && <BrandBillingTab brandId={brand.id} />}
     </div>

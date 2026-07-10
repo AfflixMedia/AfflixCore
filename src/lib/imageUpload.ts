@@ -27,3 +27,24 @@ export async function uploadReportImage(file: File, opts: { brandId?: string; re
   if (!data?.publicUrl) throw new Error('Could not resolve public URL for uploaded image');
   return data.publicUrl;
 }
+
+// Profile photos live in the 'avatars' bucket (public-read), each user writing
+// only inside their own uid-prefixed folder (RLS — see migration 20260709090000).
+const AVATAR_BUCKET = 'avatars';
+
+export async function uploadAvatar(userId: string, file: File): Promise<string> {
+  const ext = (file.name.split('.').pop() ?? 'jpg').toLowerCase().slice(0, 8) || 'jpg';
+  // A fresh filename each time busts the CDN cache so the new photo shows at once.
+  const path = `${userId}/avatar-${Date.now()}.${ext}`;
+
+  const { error } = await supabase.storage.from(AVATAR_BUCKET).upload(path, file, {
+    cacheControl: '3600',
+    upsert: true,
+    contentType: file.type || undefined,
+  });
+  if (error) throw error;
+
+  const { data } = supabase.storage.from(AVATAR_BUCKET).getPublicUrl(path);
+  if (!data?.publicUrl) throw new Error('Could not resolve public URL for uploaded avatar');
+  return data.publicUrl;
+}

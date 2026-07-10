@@ -8,7 +8,8 @@ import Avatar from '../../components/Avatar';
 import MessageBubble from './MessageBubble';
 import MessageComposer from './MessageComposer';
 import MessageInfoModal from './MessageInfoModal';
-import type { ChatContact, ChatMessage, ChatEvent, ChatReaction, ConversationView, Participant } from './types';
+import BrandChatBar from './BrandChatBar';
+import type { ChatBookmark, ChatContact, ChatMessage, ChatEvent, ChatReaction, ConversationView, Participant } from './types';
 import { dayLabel, roleLabel, roleBadge, contactName, eventText, messageReceipts, rollupReceipt } from './types';
 
 interface Props {
@@ -27,7 +28,9 @@ interface Props {
   announcementCount: number;       // total internal staff (announcement header)
   canPost: boolean;                // false → announcement read-only for non-admins
   reactionsByMsg: Map<string, ChatReaction[]>;
+  resources: ChatBookmark[];       // conversation bookmarks → "/" resource tags
   onReact: (messageId: string, emoji: string) => void;
+  onOpenContact: (userId: string) => void;  // clicked a @mention → contact card
   onOpenGroup: () => void;         // open the group manage modal
   onOpenSettings: () => void;      // open announcement settings (Bob)
   onOpenBookmarks: () => void;     // open the Bookmarks tab
@@ -46,7 +49,8 @@ type Item =
 export default function ChatPanel({
   view, messages, events, loading, hasMoreOlder, loadingOlder, onLoadOlder,
   myId, directory, unreadAnchorId, participantsByUser, members, announcementCount,
-  canPost, reactionsByMsg, onReact, onOpenGroup, onOpenSettings, onOpenBookmarks,
+  canPost, reactionsByMsg, resources, onReact, onOpenContact, onOpenGroup,
+  onOpenSettings, onOpenBookmarks,
   replyTo, onReply, onForward, onDelete, onSend, onBack,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -187,14 +191,18 @@ export default function ChatPanel({
         <button type="button" className="ac-chat-back" onClick={onBack} title="Back">
           <i className="bi bi-arrow-left" />
         </button>
-        <Avatar name={view.title} variant={isGroup || isAnnouncement ? 'dark' : 'brand'} />
+        <Avatar
+          name={view.title}
+          src={isGroup || isAnnouncement ? undefined : view.otherUser?.avatar_url}
+          variant={isGroup || isAnnouncement ? 'dark' : 'brand'}
+        />
         <div className="min-w-0 flex-grow-1">
           <div className="d-flex align-items-center gap-2">
             {isAnnouncement && <i className="bi bi-megaphone-fill text-warning" />}
             <span className="fw-semibold text-truncate">{view.title}</span>
             {!isGroup && !isAnnouncement && view.otherUser && (
               <Badge bg={roleBadge(view.otherUser.role)} className="ac-role-badge">
-                {roleLabel(view.otherUser.role)}
+                {roleLabel(view.otherUser.role, view.otherUser.is_superbob)}
               </Badge>
             )}
           </div>
@@ -208,6 +216,9 @@ export default function ChatPanel({
             </div>
           )}
         </div>
+        {view.conversation.brand_id && (
+          <BrandChatBar brandId={view.conversation.brand_id} brandName={view.title} />
+        )}
         <button type="button" className="ac-chat-action" title="Bookmarks" onClick={onOpenBookmarks}>
           <i className="bi bi-bookmark-star" />
         </button>
@@ -260,7 +271,7 @@ export default function ChatPanel({
                     mine={m.sender_id === myId}
                     isGroup={isGroup || isAnnouncement}
                     sender={m.sender_id ? directory.get(m.sender_id) ?? null : null}
-                    mentionNames={(m.mentions ?? []).map(id => contactName(directory.get(id) ?? null))}
+                    mentions={(m.mentions ?? []).map(id => ({ id, name: contactName(directory.get(id) ?? null) }))}
                     replyTo={replyTarget}
                     replyToSender={replyTarget?.sender_id ? directory.get(replyTarget.sender_id) ?? null : null}
                     canReply={canPost}
@@ -274,6 +285,7 @@ export default function ChatPanel({
                     onForward={onForward}
                     onDelete={onDelete}
                     onInfo={setInfoMsg}
+                    onMentionClick={onOpenContact}
                   />
                 </div>
               );
@@ -303,6 +315,7 @@ export default function ChatPanel({
             : undefined}
         readOnlyIcon={view.archived ? 'bi-archive' : 'bi-megaphone'}
         mentionables={mentionables}
+        resources={resources}
         replyTo={replyTo}
         replyToSender={replyTo?.sender_id ? directory.get(replyTo.sender_id) ?? null : null}
         onCancelReply={() => onReply(null)}

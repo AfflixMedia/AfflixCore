@@ -173,11 +173,13 @@ export default function PaidCollabCreators() {
   }, [creators, programById, brandById, brandFilter, programFilter, statusFilter, paymentFilter, search, revealPending]);
 
   // Order rows by payment state: pending first, then "remaining", paid last.
-  // Stable sort keeps the original order inside each group.
+  // Inside each group, sort by onboarding date (most recent first; no date → last).
   const displayed = useMemo(() => {
     const rank = (c: PaidCreator) =>
       cctPendingVisible(c, revealPending) ? 0 : (c.paid_out ? 2 : 1);
-    return [...filtered].sort((a, b) => rank(a) - rank(b));
+    const onboarded = (c: PaidCreator) => (c as any).onboard_date || '';
+    return [...filtered].sort((a, b) =>
+      rank(a) - rank(b) || onboarded(b).localeCompare(onboarded(a)));
   }, [filtered, revealPending]);
 
   if (loading) return <div className="text-center py-5"><Spinner animation="border" /></div>;

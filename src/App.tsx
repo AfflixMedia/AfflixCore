@@ -13,6 +13,7 @@ import Clients from './pages/Clients';
 import ClientAccess from './pages/ClientAccess';
 import Resources from './pages/Resources';
 import NotificationsPage from './pages/Notifications';
+import Profile from './pages/Profile';
 import SharedReports from './pages/SharedReports';
 import Reporting from './pages/Reporting';
 import BudgetManager from './pages/BudgetManager';
@@ -34,6 +35,11 @@ import ReportingCanvasList from './pages/templates/ReportingCanvasList';
 import ReportingCanvasEditor from './pages/templates/ReportingCanvasEditor';
 import GlobalChat from './pages/global-chat/GlobalChat';
 import TeamLeads from './pages/TeamLeads';
+import AdsManagers from './pages/AdsManagers';
+import AdsManagerNotes from './pages/AdsManagerNotes';
+import MyNotes from './pages/Notes';
+import Bobs from './pages/Bobs';
+import Teams from './pages/Teams';
 import Tasks from './pages/Tasks';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { useAuth } from './auth/AuthContext';
@@ -52,7 +58,7 @@ function RoleHome() {
   if (profile.role === 'paid_collab_client' || profile.role === 'paid_collab_handler') {
     return <Navigate to="/paid-collab" replace />;
   }
-  if (profile.role === 'apc' || profile.role === 'team_lead') return <Navigate to="/brands" replace />;
+  if (profile.role === 'apc' || profile.role === 'team_lead' || profile.role === 'ads_manager') return <Navigate to="/brands" replace />;
   return <Navigate to="/dashboard" replace />;
 }
 
@@ -72,28 +78,40 @@ export default function App() {
       >
         <Route index element={<RoleHome />} />
         <Route path="dashboard" element={<ProtectedRoute roles={['bob', 'apc']}><Dashboard /></ProtectedRoute>} />
-        <Route path="brands" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead']}><Brands /></ProtectedRoute>} />
-        <Route path="brands/:id" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead']}><BrandDetail /></ProtectedRoute>} />
+        <Route path="brands" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead', 'ads_manager']}><Brands /></ProtectedRoute>} />
+        <Route path="brands/:id" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead', 'ads_manager']}><BrandDetail /></ProtectedRoute>} />
         <Route path="apcs" element={<ProtectedRoute roles={['bob', 'team_lead']}><APCs /></ProtectedRoute>} />
+        <Route path="ads-managers" element={<ProtectedRoute roles={['bob']}><AdsManagers /></ProtectedRoute>} />
+        {/* Ads Manager Keep-style notes board (also reachable via the app-wide floating button). */}
+        <Route path="notes" element={<ProtectedRoute roles={['ads_manager']}><AdsManagerNotes /></ProtectedRoute>} />
+        {/* Personal Keep-style notes board for Bob / Team Lead / APC — own notes only. */}
+        <Route path="my-notes" element={<ProtectedRoute roles={['bob', 'team_lead', 'apc']}><MyNotes /></ProtectedRoute>} />
         <Route path="team-leads" element={<ProtectedRoute roles={['bob']}><TeamLeads /></ProtectedRoute>} />
-        <Route path="tasks" element={<ProtectedRoute roles={['bob', 'team_lead', 'apc']}><Tasks /></ProtectedRoute>} />
+        {/* Teams — Bob/Super Boss hub consolidating Team Leads / APCs / Ads Managers /
+            Paid Collab Clients / Paid Collab Handlers / Bobs into one tabbed page. */}
+        <Route path="teams" element={<ProtectedRoute roles={['bob']}><Teams /></ProtectedRoute>} />
+        {/* Bobs management — role-gated to bob here; the page itself additionally requires is_superbob. */}
+        <Route path="bobs" element={<ProtectedRoute roles={['bob']}><Bobs /></ProtectedRoute>} />
+        <Route path="tasks" element={<ProtectedRoute roles={['bob', 'team_lead', 'apc', 'ads_manager']} allowInternalHandler><Tasks /></ProtectedRoute>} />
         <Route path="paid-collab-clients" element={<ProtectedRoute roles={['bob']}><PaidCollabClients /></ProtectedRoute>} />
         <Route path="paid-collab-handlers" element={<ProtectedRoute roles={['bob']}><PaidCollabHandlers /></ProtectedRoute>} />
         <Route path="clients" element={<ProtectedRoute roles={['bob']}><Clients /></ProtectedRoute>} />
         <Route path="client-access" element={<ProtectedRoute roles={['bob']}><ClientAccess /></ProtectedRoute>} />
-        <Route path="resources" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead']}><Resources /></ProtectedRoute>} />
+        <Route path="resources" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead', 'ads_manager']}><Resources /></ProtectedRoute>} />
         <Route path="budget" element={<Navigate to="/budget/brands" replace />} />
         <Route path="budget/brands" element={<ProtectedRoute roles={['bob']}><BudgetManager /></ProtectedRoute>} />
         <Route path="budget/company" element={<ProtectedRoute roles={['bob']}><CompanyBudget /></ProtectedRoute>} />
         <Route path="notifications" element={<NotificationsPage />} />
-        <Route path="chats" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead']}><GlobalChat /></ProtectedRoute>} />
-        <Route path="reporting/weekly" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead']}><WeeklyReports /></ProtectedRoute>} />
-        <Route path="reporting/weekly/:id" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead']}><WeeklyReportView /></ProtectedRoute>} />
+        <Route path="profile" element={<Profile />} />
+        <Route path="chats" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead', 'ads_manager']} allowInternalHandler><GlobalChat /></ProtectedRoute>} />
+        <Route path="reporting/weekly" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead', 'ads_manager']}><WeeklyReports /></ProtectedRoute>} />
+        <Route path="reporting/weekly/:id" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead', 'ads_manager']}><WeeklyReportView /></ProtectedRoute>} />
+        {/* Report EDIT routes stay closed to ads_manager (view-only role). */}
         <Route path="reporting/weekly/:id/edit" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead']}><WeeklyReportEdit /></ProtectedRoute>} />
-        <Route path="reporting/monthly" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead']}><MonthlyReports /></ProtectedRoute>} />
-        <Route path="reporting/monthly/:id" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead']}><MonthlyReportView /></ProtectedRoute>} />
+        <Route path="reporting/monthly" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead', 'ads_manager']}><MonthlyReports /></ProtectedRoute>} />
+        <Route path="reporting/monthly/:id" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead', 'ads_manager']}><MonthlyReportView /></ProtectedRoute>} />
         <Route path="reporting/monthly/:id/edit" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead']}><MonthlyReportEdit /></ProtectedRoute>} />
-        <Route path="reporting/bi-weekly" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead']}><Reporting kind="Bi-Weekly" /></ProtectedRoute>} />
+        <Route path="reporting/bi-weekly" element={<ProtectedRoute roles={['bob', 'apc', 'team_lead', 'ads_manager']}><Reporting kind="Bi-Weekly" /></ProtectedRoute>} />
         <Route path="paid-collab" element={<ProtectedRoute roles={['paid_collab_client', 'paid_collab_handler']}><PaidCollabHome /></ProtectedRoute>} />
         <Route path="paid-collab/brands" element={<ProtectedRoute roles={['paid_collab_client', 'paid_collab_handler']}><PaidCollabPortal /></ProtectedRoute>} />
         <Route path="paid-collab/brands/:id" element={<ProtectedRoute roles={['paid_collab_client', 'paid_collab_handler']}><PaidCollabBrandView /></ProtectedRoute>} />
