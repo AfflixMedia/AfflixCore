@@ -10,7 +10,7 @@ import * as store from './store';
 import { useAuth } from '../../auth/AuthContext';
 import { PayChip, PayoutDetail } from '../paid-collab/handlerCollabReadonly';
 import PaidCollabComments from '../../components/paidcollab/PaidCollabComments';
-import NotesBoard, { BrandNotesDrawer, AllNotesDrawer, NoteEditor } from './NotesBoard';
+import NotesBoard, { BrandNotesDrawer, CreatorNotesDrawer, AllNotesDrawer, NoteEditor } from './NotesBoard';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -265,6 +265,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
   const [creatorEditor, setCreatorEditor] = useState(null); // { mode, brandId, creator? }
   const [notesBrand, setNotesBrand] = useState(null);     // { id, name } — quick month note drawer
   const [keepBrand, setKeepBrand] = useState(null);       // { id, name } — Keep-notes list drawer
+  const [keepCreator, setKeepCreator] = useState(null);   // { id, key, name, handle, brandId, brandName } — creator Keep-notes drawer
   const [allNotesOpen, setAllNotesOpen] = useState(false); // global notes drawer (floating button)
   const [openNote, setOpenNote] = useState(null);          // a single note opened directly (deep link)
   const [pendingNoteId, setPendingNoteId] = useState(null); // ?note=<id> waiting for notes to load
@@ -346,6 +347,31 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
     notes.forEach(n => { if (n.brand_id && !n.archived) m[n.brand_id] = (m[n.brand_id] || 0) + 1; });
     return m;
   }, [notes]);
+  // Per-creator Keep-note counts (for the journal icon next to a creator's name).
+  // A note links ONE deal row, but the icon aggregates by creator identity within
+  // the brand (store.creatorNoteKey), so notes follow the creator across months.
+  const creatorNoteKeyById = useMemo(() => {
+    const m = {};
+    creators.forEach(c => { m[c.id] = store.creatorNoteKey(c); });
+    return m;
+  }, [creators]);
+  const noteCountByCreatorKey = useMemo(() => {
+    const m = {};
+    notes.forEach(n => {
+      if (n.archived || !n.creator_id) return;
+      const k = creatorNoteKeyById[n.creator_id];
+      if (k) m[k] = (m[k] || 0) + 1;
+    });
+    return m;
+  }, [notes, creatorNoteKeyById]);
+  const creatorNoteCount = useCallback(
+    (c) => noteCountByCreatorKey[creatorNoteKeyById[c.id]] || 0,
+    [noteCountByCreatorKey, creatorNoteKeyById]);
+  const openCreatorNotes = useCallback((c) => setKeepCreator({
+    id: c.id, key: creatorNoteKeyById[c.id] || store.creatorNoteKey(c),
+    name: c.name, handle: tiktokAccounts(c.tiktok_handle)[0]?.handle || '',
+    brandId: c.brand_id, brandName: brandById[c.brand_id]?.name || '',
+  }), [creatorNoteKeyById, brandById]);
 
   // ── keep in sync with the database (teammates / other devices) ──
   const busyRef = useRef(false);
@@ -733,7 +759,8 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
           tab === 'creators' ? (
             <CreatorsView rows={allCreatorsList}
               onEdit={(c) => setCreatorEditor({ mode: 'edit', brandId: c.brand_id, creator: c })}
-              onSetStatus={setCreatorStatus} onToggleVisible={setCreatorPendingVisible} />
+              onSetStatus={setCreatorStatus} onToggleVisible={setCreatorPendingVisible}
+              creatorNoteCount={creatorNoteCount} onCreatorNotes={openCreatorNotes} />
           ) : tab === 'performance' ? (
             <PerformanceView brands={brands} creators={creators} brandById={brandById} month={month} reportWeeks={reportWeeks} reportAnchors={reportAnchors} onCreateWeek={createWeeklyReport} onSaveMonthly={saveCreatorMonthly} />
           ) : tab === 'reporting' ? (
@@ -741,7 +768,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
           ) : tab === 'discussions' ? (
             <DiscussionsView comments={comments} brandById={brandById} creators={creators} onOpen={openComments} />
           ) : tab === 'notes' ? (
-            <NotesBoard brands={brands} brandById={brandById} month={month} />
+            <NotesBoard brands={brands} brandById={brandById} creators={creators} month={month} />
           ) : (
             drillId && drillBrand
               ? <Drilldown
@@ -758,6 +785,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
                   onToggleVisible={setCreatorPendingVisible}
                   commentCount={comments.filter(c => c.brand_id === drillId).length}
                   onComments={() => openComments(drillId, 'brand', '')}
+                  creatorNoteCount={creatorNoteCount} onCreatorNotes={openCreatorNotes}
                 />
               : <BrandLevel
                   rows={brandRows} totals={totals} month={month}
@@ -798,9 +826,15 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
       )}
       {keepBrand && (
         <BrandNotesDrawer brandId={keepBrand.id} brandName={keepBrand.name}
-          brands={brands} brandById={brandById} month={month}
+          brands={brands} brandById={brandById} creators={creators} month={month}
           notes={notes.filter(n => n.brand_id === keepBrand.id)}
           onClose={() => setKeepBrand(null)} onChanged={reload} />
+      )}
+      {keepCreator && (
+        <CreatorNotesDrawer creator={keepCreator}
+          brands={brands} brandById={brandById} creators={creators} month={month}
+          notes={notes.filter(n => n.creator_id && creatorNoteKeyById[n.creator_id] === keepCreator.key)}
+          onClose={() => setKeepCreator(null)} onChanged={reload} />
       )}
       {/* global notes — reachable from anywhere in the workspace */}
       <button className="pc-notesfab" onClick={() => setAllNotesOpen(true)} title="Notes" aria-label="Open notes">
@@ -808,11 +842,11 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
         {dueReminderCount > 0 && <span className="pc-notesfab-badge">{dueReminderCount}</span>}
       </button>
       {allNotesOpen && (
-        <AllNotesDrawer notes={notes} brands={brands} brandById={brandById} month={month}
+        <AllNotesDrawer notes={notes} brands={brands} brandById={brandById} creators={creators} month={month}
           onClose={() => setAllNotesOpen(false)} onChanged={reload} />
       )}
       {openNote && (
-        <NoteEditor editor={{ mode: 'edit', note: openNote }} brands={brands} brandById={brandById} month={month}
+        <NoteEditor editor={{ mode: 'edit', note: openNote }} brands={brands} brandById={brandById} creators={creators} month={month}
           overlayClass="pc-overlay-top"
           onClose={() => setOpenNote(null)} onPersist={persistOpenNote}
           onDelete={() => deleteOpenNote(openNote)} />
@@ -1251,7 +1285,7 @@ function BrandRow({ r, onOpen, onEditBudget, onNotes, noteCount = 0, onBrandNote
 /* ════════════════════════════════════════════════════════════
    Drilldown
 ════════════════════════════════════════════════════════════ */
-function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCreator, onDeleteCreator, onEditBudget, onDeleteBrand, onNotes, notesText, patchCreatorLocal, onSetStatus, onToggleVisible, commentCount, onComments }) {
+function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCreator, onDeleteCreator, onEditBudget, onDeleteBrand, onNotes, notesText, patchCreatorLocal, onSetStatus, onToggleVisible, commentCount, onComments, creatorNoteCount, onCreatorNotes }) {
   const [openId, setOpenId] = useState(null);
   const bm = row?.bm || {};
   const products = focusProductList(bm);
@@ -1335,7 +1369,9 @@ function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCr
                 <CreatorRow key={c.id} c={c} idx={idx} open={openId === c.id}
                   onToggle={() => setOpenId(openId === c.id ? null : c.id)}
                   onEdit={() => onEditCreator(c)} onDelete={() => onDeleteCreator(c.id)}
-                  patchCreatorLocal={patchCreatorLocal} onSetStatus={onSetStatus} onToggleVisible={onToggleVisible} />
+                  patchCreatorLocal={patchCreatorLocal} onSetStatus={onSetStatus} onToggleVisible={onToggleVisible}
+                  noteCount={creatorNoteCount ? creatorNoteCount(c) : 0}
+                  onNotes={onCreatorNotes ? () => onCreatorNotes(c) : null} />
               ))}
             </React.Fragment>
           ))}
@@ -1345,9 +1381,17 @@ function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCr
   );
 }
 
-function CreatorRow({ c, idx, open, onToggle, onEdit, onDelete, patchCreatorLocal, onSetStatus, onToggleVisible }) {
+function CreatorRow({ c, idx, open, onToggle, onEdit, onDelete, patchCreatorLocal, onSetStatus, onToggleVisible, noteCount = 0, onNotes = null }) {
   const accounts = tiktokAccounts(c.tiktok_handle);
   const filled = Array.isArray(c.video_codes) ? c.video_codes.filter(v => v?.video).length : 0;
+  const keepBtn = onNotes ? (
+    <button className={`pc-keepnote-btn pc-keepnote-mini ${noteCount > 0 ? 'has' : ''}`}
+      onClick={e => { e.stopPropagation(); onNotes(); }}
+      title={noteCount > 0 ? `${noteCount} creator note${noteCount === 1 ? '' : 's'}` : 'Creator notes'} aria-label="Creator notes">
+      <i className="bi bi-journal-text" />
+      {noteCount > 0 && <span className="pc-keepnote-count">{noteCount}</span>}
+    </button>
+  ) : null;
   const rowRef = useRef(null);
   useEffect(() => {
     if (open && rowRef.current?.scrollIntoView) {
@@ -1359,7 +1403,7 @@ function CreatorRow({ c, idx, open, onToggle, onEdit, onDelete, patchCreatorLoca
       <div ref={rowRef} className={`pc-ct-row ${open ? 'open' : ''}`} onClick={onToggle} role="button" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter') onToggle(); }}>
         <div className="pc-cell pc-num pc-idxcell" data-label="#"><span className="pc-idx">#{idx}</span></div>
         <div className="pc-cell" data-label="Completed on">{c.completed_on ? fmtDate(c.completed_on) : <span className="pc-handle">—</span>}</div>
-        <div className="pc-cell" data-label="Name"><span className="pc-cname">{c.name}</span></div>
+        <div className="pc-cell" data-label="Name"><span className="pc-cname">{c.name}</span>{keepBtn}</div>
         <div className="pc-cell" data-label="TikTok">
           {accounts.length > 0
             ? <span className="pc-tiktok"><a className="pc-handle" href={accounts[0].url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>{accounts[0].handle}</a>{accounts.length > 1 && <span className="pc-more" title={accounts.slice(1).map(a => a.handle).join(', ')}>+{accounts.length - 1}</span>}</span>
@@ -1379,7 +1423,7 @@ function CreatorRow({ c, idx, open, onToggle, onEdit, onDelete, patchCreatorLoca
         <div className="pc-mc">
           <div className="pc-mc-head">
             <div className="pc-mc-idblock">
-              <div className="pc-mc-name">{c.name}</div>
+              <div className="pc-mc-name">{c.name}{keepBtn}</div>
               <div className="pc-mc-subline">
                 {accounts[0]
                   ? <a className="pc-mc-handle" href={accounts[0].url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>{accounts[0].handle}</a>
@@ -1420,7 +1464,7 @@ function PayoutCell({ paypal, zelle }) {
 /* ════════════════════════════════════════════════════════════
    Creators tab — every creator (per brand) for the month
 ════════════════════════════════════════════════════════════ */
-function CreatorsView({ rows, onEdit, onSetStatus, onToggleVisible }) {
+function CreatorsView({ rows, onEdit, onSetStatus, onToggleVisible, creatorNoteCount, onCreatorNotes }) {
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(() => new Set());
   const [copied, setCopied] = useState('');
@@ -1498,7 +1542,8 @@ function CreatorsView({ rows, onEdit, onSetStatus, onToggleVisible }) {
           {groups.map(g => (
             <React.Fragment key={g.key}>
               <div className="pc-cv-monthhead"><span>{monthLabel(g.key)}</span><span className="pc-cv-monthcount">{g.items.length}</span></div>
-              {g.items.map((c, i) => <CreatorGlobalRow key={c.id} c={c} idx={i + 1} onEdit={() => onEdit(c)} onSetStatus={onSetStatus} onToggleVisible={onToggleVisible} selected={sel.has(c.id)} onToggleSelect={() => toggle(c.id)} />)}
+              {g.items.map((c, i) => <CreatorGlobalRow key={c.id} c={c} idx={i + 1} onEdit={() => onEdit(c)} onSetStatus={onSetStatus} onToggleVisible={onToggleVisible} selected={sel.has(c.id)} onToggleSelect={() => toggle(c.id)}
+                noteCount={creatorNoteCount ? creatorNoteCount(c) : 0} onNotes={onCreatorNotes ? () => onCreatorNotes(c) : null} />)}
             </React.Fragment>
           ))}
         </div>
@@ -1515,8 +1560,16 @@ function CreatorsView({ rows, onEdit, onSetStatus, onToggleVisible }) {
   );
 }
 
-function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, onToggleVisible, selected, onToggleSelect }) {
+function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, onToggleVisible, selected, onToggleSelect, noteCount = 0, onNotes = null }) {
   const accounts = tiktokAccounts(c.tiktok_handle);
+  const keepBtn = onNotes ? (
+    <button className={`pc-keepnote-btn pc-keepnote-mini ${noteCount > 0 ? 'has' : ''}`}
+      onClick={e => { e.stopPropagation(); onNotes(); }}
+      title={noteCount > 0 ? `${noteCount} creator note${noteCount === 1 ? '' : 's'}` : 'Creator notes'} aria-label="Creator notes">
+      <i className="bi bi-journal-text" />
+      {noteCount > 0 && <span className="pc-keepnote-count">{noteCount}</span>}
+    </button>
+  ) : null;
   const amount = Number(c.amount) || 0;
   const videos = parseInt(c.videos_count, 10) || 0;
   const delivered = Array.isArray(c.video_codes) ? c.video_codes.filter(v => v?.video && String(v.video).trim()).length : 0;
@@ -1527,7 +1580,7 @@ function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, onToggleVisible, select
       <div className="pc-cell pc-cv-check" data-label="" onClick={e => e.stopPropagation()}><input type="checkbox" className="pc-check" checked={selected} onChange={onToggleSelect} /></div>
       <div className="pc-cell pc-num pc-idxcell" data-label="#"><span className="pc-idx">#{idx}</span></div>
       <div className="pc-cell pc-cv-namecell" data-label="Name">
-        <span className="pc-cname">{c.name}</span>
+        <span className="pc-cname">{c.name}{keepBtn}</span>
         {accounts.length > 0 && (
           <span className="pc-tiktok pc-cv-sub">
             <a className="pc-handle" href={accounts[0].url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>{accounts[0].handle}</a>
@@ -1555,7 +1608,7 @@ function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, onToggleVisible, select
       <div className="pc-mc">
         <div className="pc-mc-head">
           <div className="pc-mc-idblock">
-            <div className="pc-mc-name">{c.name}</div>
+            <div className="pc-mc-name">{c.name}{keepBtn}</div>
             <div className="pc-mc-subline">
               {accounts[0]
                 ? <a className="pc-mc-handle" href={accounts[0].url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>{accounts[0].handle}</a>

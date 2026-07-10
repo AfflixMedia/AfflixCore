@@ -372,6 +372,7 @@ export interface HandlerNote {
   id: string;
   owner_id: string;
   brand_id: string | null;
+  creator_id: string | null;   // optional "creator-wise" link → handler_collab_creators
   month: string | null;
   title: string;
   body: string;
@@ -389,6 +390,18 @@ export interface HandlerNote {
 }
 
 export type NotePatch = Partial<Omit<HandlerNote, 'id' | 'owner_id' | 'created_at' | 'updated_at'>>;
+
+/* A note's creator_id points at ONE handler_collab_creators row (a deal), but
+   the UI groups creator notes by "the same creator" across months WITHIN a
+   brand — the repo-wide identity convention (handle, else name; mirrors
+   creatorIdentityKey in lib/paidCollabSchema). */
+export function creatorNoteKey(c: { brand_id?: string | null; tiktok_handle?: string | null; name?: string | null }): string {
+  const first = String(c.tiktok_handle || '').split(/[\n,]+/).map(s => s.trim()).filter(Boolean)[0] || '';
+  const handle = (first.startsWith('http') ? (first.replace(/\/+$/, '').split('/').pop() || '') : first)
+    .replace(/^@+/, '').toLowerCase().trim();
+  const ident = handle ? `h:${handle}` : `n:${String(c.name || '').toLowerCase().trim()}`;
+  return `${c.brand_id || ''}|${ident}`;
+}
 
 // ownerId: restrict to one owner's notes — needed for Bob, whose read-all RLS
 // would otherwise pull every user's notes onto his personal board.

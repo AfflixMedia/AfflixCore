@@ -1100,10 +1100,11 @@ a.pc-vx-prod:hover{ text-decoration:none; filter:brightness(.97); }
 .pc-nchip-rem{ background:var(--pc-info-bg); color:var(--pc-info-fg); cursor:pointer; }
 .pc-nchip-rem.due{ background:var(--pc-warn-bg); color:var(--pc-warn-fg); }
 .pc-nchip-brand{ background:var(--pc-accent-light); color:var(--pc-accent); }
+.pc-nchip-creator{ background:var(--pc-warn-bg); color:var(--pc-warn-fg); }
 .pc-nchip-prog{ background:var(--pc-info-bg); color:var(--pc-info-fg); }
 /* label chips (rail tone = purple) */
 .pc-nchip .bi-tag{ color:#7C3AED; }
-.pc-nchip-brand .bi-shop, .pc-nchip-prog .bi-calendar3{ color:inherit; }
+.pc-nchip-brand .bi-shop, .pc-nchip-prog .bi-calendar3, .pc-nchip-creator .bi-person{ color:inherit; }
 
 .pc-ncard-actions{ display:flex; gap:2px; justify-content:flex-end; margin-top:10px; opacity:0; transition:opacity .15s; }
 .pc-ncard:hover .pc-ncard-actions{ opacity:1; }
@@ -1154,6 +1155,9 @@ a.pc-vx-prod:hover{ text-decoration:none; filter:brightness(.97); }
 .pc-keepnote-count{ font-size:12px; font-weight:800; line-height:1; }
 /* group the two note buttons together at the right (keep takes the free space) */
 .pc-keepnote-btn + .pc-note-btn{ margin-left:0; }
+/* smaller inline variant — journal icon next to a creator's name */
+.pc-keepnote-btn.pc-keepnote-mini{ height:22px; min-width:22px; padding:0 5px; margin-left:7px; border-radius:7px; font-size:11px; gap:4px; vertical-align:middle; }
+.pc-keepnote-btn.pc-keepnote-mini .pc-keepnote-count{ font-size:11px; }
 
 /* floating notes button — global access from any tab */
 .pc-notesfab{ position:fixed; right:26px; bottom:26px; z-index:1500; width:56px; height:56px; border-radius:50%; border:0; background:var(--pc-accent); color:#fff; font-size:22px; display:flex; align-items:center; justify-content:center; box-shadow:0 8px 28px rgba(18,89,195,.36); cursor:pointer; transition:transform .15s var(--pc-ease), box-shadow .2s; }
