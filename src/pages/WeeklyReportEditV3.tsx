@@ -1,4 +1,4 @@
-import { useEffect, useState, FormEvent, Fragment } from 'react';
+import { useEffect, useRef, useState, FormEvent, Fragment } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card, Form, Button, Spinner, Alert, Badge, Offcanvas } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
@@ -39,6 +39,8 @@ export default function WeeklyReportEditV3() {
   const [productsMsg, setProductsMsg] = useState<Msg>(null);
   const [fetchingGmv, setFetchingGmv] = useState(false);
   const [gmvMsg, setGmvMsg] = useState<Msg>(null);
+  // Guards the one-time auto-fill of §1 Sampling on first open.
+  const autoFilledSampling = useRef(false);
 
   useEffect(() => {
     (async () => {
@@ -99,6 +101,21 @@ export default function WeeklyReportEditV3() {
     setC(prev => ({ ...prev, sampling: { ...prev.sampling, samples_approved: approved, new_videos_posted: videos } }));
     setSamplingMsg({ kind: 'success', text: `Pulled ${approved} approved sample${approved === 1 ? '' : 's'} and ${videos} new video${videos === 1 ? '' : 's'} for ${label}. Don't forget to save.` });
   };
+
+  // Auto-fill §1 Sampling on first open. The brand's Sample-Seeding data
+  // (samples approved + new videos posted this week) is always available to
+  // whoever manages the brand, so pull it without waiting for a click — but
+  // only while both fields are still empty, so manual edits are never clobbered.
+  useEffect(() => {
+    if (!report || autoFilledSampling.current) return;
+    const s = c.sampling ?? {};
+    if (s.samples_approved == null && s.new_videos_posted == null) {
+      autoFilledSampling.current = true;
+      fetchSamplingFromBrand();
+    }
+    // Runs once when the report finishes loading; fetch reads live state itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [report]);
 
   // ----- §3 Product Analytics — load the brand's product catalogue into rows --
   const loadProductsIntoAnalytics = async () => {
