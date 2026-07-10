@@ -1282,6 +1282,25 @@ function BrandRow({ r, onOpen, onEditBudget, onNotes, noteCount = 0, onBrandNote
   );
 }
 
+// Contract column — fill the standard agreement template from the deal row.
+// Featured products: the creator's own list, else the month's focus products
+// (passed by the Drilldown; the Creators tab has no brand-month in scope).
+async function downloadContractFor(c, brandName, focusNames = []) {
+  const prodNames = creatorProducts(c).map(p => p.name).filter(Boolean);
+  const accounts = tiktokAccounts(c.tiktok_handle);
+  const { downloadCreatorContract } = await import('./contractPdf');
+  await downloadCreatorContract({
+    brandName: brandName || 'Brand',
+    creatorName: c.name || '',
+    username: accounts[0] ? accounts[0].handle.replace(/^@/, '') : (c.name || ''),
+    amount: Number(c.amount) || 0,
+    videosCount: parseInt(c.videos_count, 10) || 0,
+    paymentMethod: c.zelle && c.paypal ? 'Zelle or PayPal' : c.paypal ? 'PayPal' : 'Zelle',
+    effectiveDate: c.onboarded_on || null,
+    productNames: prodNames.length ? prodNames : focusNames,
+  });
+}
+
 /* ════════════════════════════════════════════════════════════
    Drilldown
 ════════════════════════════════════════════════════════════ */
@@ -1355,7 +1374,7 @@ function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCr
         <div className="pc-card pc-list">
           <div className="pc-ct-head">
             <div className="pc-num">#</div><div>Completed on</div><div>Name</div><div>TikTok</div><div className="pc-num">Amount</div>
-            <div className="pc-num">Videos</div><div>Payout</div><div>Status</div><div className="pc-num">Content</div>
+            <div className="pc-num">Videos</div><div>Payout</div><div>Status</div><div>Contract</div><div className="pc-num">Content</div>
           </div>
           {statusGroups.map(g => (
             <React.Fragment key={g.opt.value}>
@@ -1371,7 +1390,8 @@ function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCr
                   onEdit={() => onEditCreator(c)} onDelete={() => onDeleteCreator(c.id)}
                   patchCreatorLocal={patchCreatorLocal} onSetStatus={onSetStatus} onToggleVisible={onToggleVisible}
                   noteCount={creatorNoteCount ? creatorNoteCount(c) : 0}
-                  onNotes={onCreatorNotes ? () => onCreatorNotes(c) : null} />
+                  onNotes={onCreatorNotes ? () => onCreatorNotes(c) : null}
+                  onContract={() => downloadContractFor(c, brand.name, products.map(p => p.name).filter(Boolean))} />
               ))}
             </React.Fragment>
           ))}
@@ -1381,9 +1401,15 @@ function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCr
   );
 }
 
-function CreatorRow({ c, idx, open, onToggle, onEdit, onDelete, patchCreatorLocal, onSetStatus, onToggleVisible, noteCount = 0, onNotes = null }) {
+function CreatorRow({ c, idx, open, onToggle, onEdit, onDelete, patchCreatorLocal, onSetStatus, onToggleVisible, noteCount = 0, onNotes = null, onContract = null }) {
   const accounts = tiktokAccounts(c.tiktok_handle);
   const filled = Array.isArray(c.video_codes) ? c.video_codes.filter(v => v?.video).length : 0;
+  const contractBtn = onContract ? (
+    <button type="button" className="pc-contract-btn" title="Download contract (PDF)" aria-label="Download contract PDF"
+      onClick={e => { e.stopPropagation(); onContract(); }}>
+      <i className="bi bi-file-earmark-pdf" />
+    </button>
+  ) : null;
   const keepBtn = onNotes ? (
     <button className={`pc-keepnote-btn pc-keepnote-mini ${noteCount > 0 ? 'has' : ''}`}
       onClick={e => { e.stopPropagation(); onNotes(); }}
@@ -1417,6 +1443,7 @@ function CreatorRow({ c, idx, open, onToggle, onEdit, onDelete, patchCreatorLoca
           <PendingVisibilityToggle c={c} onToggleVisible={onToggleVisible} />
           <ClientPaidBadge c={c} />
         </div>
+        <div className="pc-cell pc-contract-cell" data-label="Contract">{contractBtn}</div>
         <div className="pc-cell pc-num" data-label="Content"><span className="pc-content-cell">{filled > 0 ? <b>{filled}</b> : ''} {open ? '▴' : '▾'}</span></div>
 
         {/* ── purpose-built mobile card ── */}
@@ -1442,6 +1469,7 @@ function CreatorRow({ c, idx, open, onToggle, onEdit, onDelete, patchCreatorLoca
             <StatusDropdown value={c.payment_status} onChange={v => onSetStatus(c.id, v)} />
             <PendingVisibilityToggle c={c} onToggleVisible={onToggleVisible} />
             <ClientPaidBadge c={c} />
+            {contractBtn}
             {(c.paypal || c.zelle) && <span className="pc-mc-footmeta"><PayoutCell paypal={c.paypal} zelle={c.zelle} /></span>}
           </div>
         </div>
@@ -1537,13 +1565,14 @@ function CreatorsView({ rows, onEdit, onSetStatus, onToggleVisible, creatorNoteC
           <div className="pc-cv-head">
             <div className="pc-cv-check"><input type="checkbox" className="pc-check" checked={allSelected} onChange={toggleAll} title="Select all" /></div>
             <div className="pc-num pc-idxcell">#</div><div>Name</div><div>Category</div>
-            <div>Brand</div><div className="pc-num">Deal</div><div className="pc-num">Rate/Vid</div><div>Status</div>
+            <div>Brand</div><div className="pc-num">Deal</div><div className="pc-num">Rate/Vid</div><div>Status</div><div>Contract</div>
           </div>
           {groups.map(g => (
             <React.Fragment key={g.key}>
               <div className="pc-cv-monthhead"><span>{monthLabel(g.key)}</span><span className="pc-cv-monthcount">{g.items.length}</span></div>
               {g.items.map((c, i) => <CreatorGlobalRow key={c.id} c={c} idx={i + 1} onEdit={() => onEdit(c)} onSetStatus={onSetStatus} onToggleVisible={onToggleVisible} selected={sel.has(c.id)} onToggleSelect={() => toggle(c.id)}
-                noteCount={creatorNoteCount ? creatorNoteCount(c) : 0} onNotes={onCreatorNotes ? () => onCreatorNotes(c) : null} />)}
+                noteCount={creatorNoteCount ? creatorNoteCount(c) : 0} onNotes={onCreatorNotes ? () => onCreatorNotes(c) : null}
+                onContract={() => downloadContractFor(c, c._brandName)} />)}
             </React.Fragment>
           ))}
         </div>
@@ -1560,8 +1589,14 @@ function CreatorsView({ rows, onEdit, onSetStatus, onToggleVisible, creatorNoteC
   );
 }
 
-function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, onToggleVisible, selected, onToggleSelect, noteCount = 0, onNotes = null }) {
+function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, onToggleVisible, selected, onToggleSelect, noteCount = 0, onNotes = null, onContract = null }) {
   const accounts = tiktokAccounts(c.tiktok_handle);
+  const contractBtn = onContract ? (
+    <button type="button" className="pc-contract-btn" title="Download contract (PDF)" aria-label="Download contract PDF"
+      onClick={e => { e.stopPropagation(); onContract(); }}>
+      <i className="bi bi-file-earmark-pdf" />
+    </button>
+  ) : null;
   const keepBtn = onNotes ? (
     <button className={`pc-keepnote-btn pc-keepnote-mini ${noteCount > 0 ? 'has' : ''}`}
       onClick={e => { e.stopPropagation(); onNotes(); }}
@@ -1603,6 +1638,7 @@ function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, onToggleVisible, select
         <StatusDropdown value={c.payment_status} onChange={v => onSetStatus(c.id, v)} />
         <PendingVisibilityToggle c={c} onToggleVisible={onToggleVisible} />
       </div>
+      <div className="pc-cell pc-contract-cell" data-label="Contract">{contractBtn}</div>
 
       {/* ── purpose-built mobile card ── */}
       <div className="pc-mc">
@@ -1630,6 +1666,7 @@ function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, onToggleVisible, select
         <div className="pc-mc-foot">
           <StatusDropdown value={c.payment_status} onChange={v => onSetStatus(c.id, v)} />
           <PendingVisibilityToggle c={c} onToggleVisible={onToggleVisible} />
+          {contractBtn}
           <div className="pc-mc-footmeta">
             {c.category ? <span className="pc-cat">{c.category}</span> : null}
             {c.onboarded_on && <span className="pc-mc-muted">{fmtDate(c.onboarded_on)}</span>}
