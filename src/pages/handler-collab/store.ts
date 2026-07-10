@@ -68,6 +68,9 @@ export interface HandlerCreator {
   client_paid_confirmed_name?: string | null;
   onboarded_on: string | null;
   completed_on: string | null;
+  // Link to the signed contract (e.g. Google Drive), pasted by the handler
+  // after the creator returns the signed agreement PDF.
+  contract_url?: string | null;
   // Last time the posted-video count increased (drives the 1-week follow-up rule).
   video_count_updated_at?: string | null;
   video_codes: VideoCode[];
@@ -222,6 +225,7 @@ export async function addCreator(data: Record<string, any>) {
     category: data.category || '',
     payment_status: data.payment_status || 'videos_in_progress',
     onboarded_on: data.onboarded_on || null,
+    contract_url: (data.contract_url || '').trim(),
     video_codes: Array.isArray(data.video_codes) ? data.video_codes : [],
     monthly: data.monthly && typeof data.monthly === 'object' ? data.monthly : {},
     products: Array.isArray(data.products) ? data.products : [],
