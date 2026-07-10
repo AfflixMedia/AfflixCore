@@ -188,9 +188,9 @@ export async function downloadCreatorContract(input: ContractInput) {
   rule();
   para([{ t: 'Creator', b: true }], { size: 12, after: 8 });
   para([{ t: 'Username:', b: true }, { t: username || '____________________' }], { after: 6 });
-  para([{ t: 'Name:', b: true }, { t: '______________________' }], { after: 6 });
+  para([{ t: 'Name:', b: true }, { t: input.creatorName || '______________________' }], { after: 6 });
   para([{ t: 'Signature:', b: true }, { t: '____________________' }], { after: 6 });
-  para([{ t: 'Date:', b: true }, { t: '______________________' }]);
+  para([{ t: 'Date:', b: true }, { t: dateTxt || '______________________' }]);
 
   const safe = (s: string) => s.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
   const who = input.creatorName || username || 'Creator';
