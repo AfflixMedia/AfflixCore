@@ -20,7 +20,9 @@ export interface WowPoint { label: string; gmv: number; orders: number }
 // Sections the internal team sees but the client does not (ad-spend cost).
 const CLIENT_HIDE = new Set<string>(['gmv_max']);
 
-const num = (v: any): number | null => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+// num() preserves "never entered" as null (blank -> "—", no fabricated 0);
+// numv() coerces to 0 for sums / chart values where a real number is required.
+const num = (v: any): number | null => { if (v == null || v === '') return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
 const numv = (v: any): number => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 const PIE = ['#e8862e', '#0d6efd', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444'];
 
@@ -236,7 +238,10 @@ function initials(name: string): string {
 }
 function ProductTable({ def, rows, prevRows }: { def: SectionDefV3; rows: RowData[]; prevRows: RowData[] }) {
   if (!rows || rows.length === 0) return <div className="s14-empty">No products yet</div>;
-  const prevById = new Map(prevRows.map(r => [String(r.product_id ?? r.product ?? ''), r]));
+  // product_id is always a string ('' when unset), so fall back to the product
+  // name with || and never key on an empty string (that would collide rows).
+  const keyOf = (r: RowData) => String(r.product_id || r.product || '');
+  const prevById = new Map(prevRows.filter(r => keyOf(r) !== '').map(r => [keyOf(r), r]));
   const cols = def.fields.filter(f => f.key !== 'product' && f.key !== 'product_id');
   const gmvF = def.fields.find(f => f.key === 'total_gmv');
   return (
@@ -249,7 +254,8 @@ function ProductTable({ def, rows, prevRows }: { def: SectionDefV3; rows: RowDat
           </tr></thead>
           <tbody>
             {rows.map((row, i) => {
-              const prev = prevById.get(String(row.product_id ?? row.product ?? ''));
+              const k = keyOf(row);
+              const prev = k ? prevById.get(k) : undefined;
               const name = String(row.product ?? '').trim() || 'Product';
               return (
                 <tr key={i}>
@@ -520,6 +526,12 @@ export default function ReportDashboardV3({
   const sectionHasData = (def: SectionDefV3): boolean => {
     const data = (c as any)[def.id];
     if (def.kind === 'scalar') return def.fields.some(f => !f.auto && data?.[f.key] != null);
+    // Fixed sections (channel_analytics) always carry their locked rows, so
+    // count them as "has data" only when a real metric was entered.
+    if (def.kind === 'fixed') {
+      return Array.isArray(data) && data.some((r: any) =>
+        def.fields.some(f => f.key !== def.labelKey && !f.auto && r?.[f.key] != null));
+    }
     return Array.isArray(data) && data.length > 0;
   };
 
