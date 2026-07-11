@@ -4188,3 +4188,11 @@ body.ac-pdf-capturing .dash-sidebar { display: none !important; }
 /* §11 — top live sessions */
 .v3-live-badge { display: inline-flex; align-items: center; gap: 5px; background: rgba(225,29,99,.1); color: #e11d63; font-weight: 800; font-size: .7rem; padding: 5px 10px; border-radius: 999px; text-transform: uppercase; letter-spacing: .06em; }
 .v3-live-meta { font-size: .84rem; color: #475569; }
+
+/* Weekly reports — "pick any month" calendar chip (jump beyond the recent 3) */
+.wr-month-pick { position: relative; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.wr-month-pick i { font-size: .9rem; }
+.wr-month-input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; border: 0; padding: 0; margin: 0; cursor: pointer; }
+/* Hide the native month-input's own text/spinners — the label shows the value. */
+.wr-month-input::-webkit-datetime-edit, .wr-month-input::-webkit-inner-spin-button, .wr-month-input::-webkit-clear-button { display: none; }
+.wr-month-input::-webkit-calendar-picker-indicator { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }

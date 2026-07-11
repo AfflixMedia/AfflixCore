@@ -292,7 +292,7 @@ export default function WeeklyReports() {
       {/* Header */}
       <div className="wr-header">
         <div className="wr-header-left">
-          <div className="wr-month-seg" role="group" aria-label="Recent months">
+          <div className="wr-month-seg" role="group" aria-label="Report month">
             <i className="bi bi-calendar3 wr-month-seg-ico" />
             {recentMonths(3).map(m => (
               <button
@@ -305,6 +305,20 @@ export default function WeeklyReports() {
                 {shortMonthLabel(m)}
               </button>
             ))}
+            {/* Calendar — jump to ANY month (incl. months outside the recent 3). */}
+            <label
+              className={`wr-month-seg-btn wr-month-pick${!recentMonths(3).includes(fMonth) ? ' is-active' : ''}`}
+              title="Pick any month"
+            >
+              <i className="bi bi-calendar-week" />
+              <span>{recentMonths(3).includes(fMonth) ? 'Pick month' : shortMonthLabel(fMonth)}</span>
+              <input
+                type="month"
+                className="wr-month-input"
+                value={fMonth}
+                onChange={e => { if (e.target.value) setFMonth(e.target.value); }}
+              />
+            </label>
           </div>
         </div>
 
