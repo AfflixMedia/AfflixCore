@@ -201,6 +201,13 @@ export default function WeeklyReportView() {
     label: formatWeekShort(t.week_start, t.week_end),
     ...chronoFromContent(t.content),
   })), [trend]);
+  // v3 week-over-week combo series (bars = orders, line = GMV) across all formats.
+  const wowData = useMemo(() => trend.map(t => {
+    const cn: any = t.content ?? {};
+    const gmv = cn?.overall?.total_gmv ?? cn?.snapshot?.total_gmv ?? cn?.gmv_performance?.total_gmv;
+    const orders = cn?.overall?.orders ?? cn?.snapshot?.orders ?? cn?.shop_analytics?.orders;
+    return { label: formatWeekShort(t.week_start, t.week_end), gmv: Number(gmv) || 0, orders: Number(orders) || 0 };
+  }), [trend]);
 
   const addComment = async (section: CommentSection, body: string, _authorName: string, parentId?: string) => {
     // We ignore the passed-in author name — the edge function uses the
@@ -303,6 +310,7 @@ export default function WeeklyReportView() {
           <ReportDashboardV3
             c={c}
             p={p}
+            wow={wowData}
             trendData={trendData}
             hasPrev={!!prev}
             openSectionOnLoad={openSection}

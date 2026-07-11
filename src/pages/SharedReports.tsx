@@ -242,6 +242,21 @@ export default function SharedReports() {
       });
   }, [openReport, reports]);
 
+  // v3 week-over-week combo series (bars = orders, line = GMV).
+  const wowData = useMemo(() => {
+    if (!openReport) return [];
+    return reports
+      .filter(r => r.brand_id === openReport.brand_id && r.week_start <= openReport.week_start)
+      .sort((a, b) => a.week_start.localeCompare(b.week_start))
+      .slice(-8)
+      .map(t => {
+        const cn: any = t.content ?? {};
+        const gmv = cn?.overall?.total_gmv ?? cn?.snapshot?.total_gmv ?? cn?.gmv_performance?.total_gmv;
+        const orders = cn?.overall?.orders ?? cn?.snapshot?.orders ?? cn?.shop_analytics?.orders;
+        return { label: formatWeekShort(t.week_start, t.week_end), gmv: Number(gmv) || 0, orders: Number(orders) || 0 };
+      });
+  }, [openReport, reports]);
+
   // Decisions are keyed by (report_type, report_id) so a weekly + monthly report
   // never accidentally share state.
   const decidedSet = useMemo(
@@ -474,6 +489,7 @@ export default function SharedReports() {
           c={normWeekly(openReport.content)}
           p={prevReport ? normWeekly(prevReport.content) : null}
           trendData={trendData}
+          wow={wowData}
           hasPrev={!!prevReport}
           audience={isClientDash ? 'client' : undefined}
           reportMeta={isClientDash ? {
