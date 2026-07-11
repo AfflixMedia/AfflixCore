@@ -82,6 +82,11 @@ serve(async (req) => {
         product_highlights: 'Product Highlights', shop_health: 'Shop Health', insights: 'Insights',
         approval: 'Approval Needed',
         snapshot: 'Executive Snapshot',
+        // v3 (12-section TikTok-Shop) template
+        sampling: 'Sampling & Videos', product_analytics: 'Product Analytics',
+        product_traffic: 'Product Traffic', traffic_analysis: 'Traffic Analysis',
+        channel_analytics: 'Channel Analytics', offsite: 'Offsite Performance',
+        affiliate: 'Affiliate Performance', top_lives: 'Top Live Sessions',
         '14.1': 'Key Stats — North-Star & Efficiency', '14.2': 'Key Stats — Channel & Source Mix',
         '14.3': 'Key Stats — Conversion Funnel', '14.4': 'Key Stats — Productivity & Marketing',
         '14.5': 'Key Stats — Paid Media Efficiency', '14.6': 'Key Stats — Health & Risk Signals',
