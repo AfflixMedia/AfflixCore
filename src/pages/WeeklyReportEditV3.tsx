@@ -9,6 +9,7 @@ import {
   CustomSection, CustomField, CustomFieldType, StandardSectionIdV3,
 } from '../lib/reportSchemaV3';
 import { ScalarSectionBodyV3, TableSectionBodyV3 } from '../components/report/SectionBodyV3';
+import VideoPasteBar from '../components/report/VideoPasteBar';
 import SectionComments, { Comment, CommentSection } from '../components/SectionComments';
 import { useAuth } from '../auth/AuthContext';
 import RichTextEditor from '../components/RichTextEditor';
@@ -634,6 +635,21 @@ export default function WeeklyReportEditV3() {
         <>
           <AutoFetchBar label="Pull from GMV Max" busy={fetchingGmv}
             onClick={fetchGmvMaxProduct} msg={gmvMsg} onClose={() => setGmvMsg(null)} />
+          <TableSectionBodyV3 def={def} rows={(c as any)[def.id]}
+            onCell={(i, k, v) => setCell(def.id, i, k, v)} onAddRow={() => addRow(def)} onDelRow={(i) => delRow(def.id, i)} />
+        </>
+      );
+    }
+    if (def.special === 'video_paste') {
+      return (
+        <>
+          <VideoPasteBar onParsed={(parsed) => setC(prev => ({
+            ...prev,
+            top_videos: parsed.map(r => ({
+              video_link: r.video_link, product_promoted: r.product_promoted,
+              gmv: r.gmv, items_sold: r.items_sold,
+            })),
+          }))} />
           <TableSectionBodyV3 def={def} rows={(c as any)[def.id]}
             onCell={(i, k, v) => setCell(def.id, i, k, v)} onAddRow={() => addRow(def)} onDelRow={(i) => delRow(def.id, i)} />
         </>

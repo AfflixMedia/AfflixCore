@@ -78,8 +78,9 @@ export interface SectionDefV3 {
    *   'shop_score'      -> pull Shop Performance Score (weekly avg SPS) from Sample Seeding
    *   'product_catalog' -> load the brand's product list into the rows
    *   'gmv_max_product' -> pull per-product ad spend from GMV Max
+   *   'video_paste'     -> paste-and-parse TikTok Shop video rows
    */
-  special?: 'sampling' | 'shop_score' | 'product_catalog' | 'gmv_max_product';
+  special?: 'sampling' | 'shop_score' | 'product_catalog' | 'gmv_max_product' | 'video_paste';
 }
 
 // ---- tiny formula helpers --------------------------------------------------
@@ -216,7 +217,8 @@ export const WEEKLY_SECTIONS_V3: SectionDefV3[] = [
   // 10 ─────────────────────────────────────────────────────────────────────
   {
     id: 'top_videos', num: '10', title: 'Top Videos', kind: 'table',
-    blurb: 'The best-performing videos this week.',
+    special: 'video_paste',
+    blurb: 'The best-performing videos this week. Paste the copied TikTok Shop rows to auto-fill, or add rows manually.',
     fields: [
       { key: 'video_link', label: 'Video Link', format: 'url' },
       { key: 'product_promoted', label: 'Product Promoted', format: 'text' },
