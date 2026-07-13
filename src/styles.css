@@ -1180,6 +1180,21 @@ input[type="number"] {
   overflow: hidden !important;
 }
 
+/* Global popup emphasis — every modal (Tasks, Chats, everywhere): the page
+   behind is blurred + dimmed, and the dialog floats on a deep shadow. The
+   backdrop-filter lives on Bootstrap's .modal-backdrop overlay, so it blurs
+   whatever sits underneath without touching the dialog itself. */
+.modal-backdrop.show {
+  opacity: 1;
+  background: rgba(15, 23, 42, .38);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+}
+.modal .modal-content {
+  border: none;
+  box-shadow: 0 28px 70px rgba(2, 6, 23, .35), 0 8px 24px rgba(2, 6, 23, .18);
+}
+
 /* =========================================================
    Weekly Reports page — card-based redesign
    ========================================================= */
@@ -2178,6 +2193,57 @@ input[type="number"] {
   background: #fff; border-bottom: 1px solid var(--ac-line-l);
 }
 .ac-chat-back { display: none; border: none; background: transparent; font-size: 1.2rem; color: var(--ac-text-dark); }
+
+/* Header members dropdown (groups): the "N members" line toggles a roster
+   popup; each row has an @ button that drops a mention into the composer. */
+.ac-chat-members-wrap { position: relative; }
+.ac-chat-members-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: none; background: transparent; padding: 0;
+  font-size: .8rem; color: var(--ac-text-muted); cursor: pointer;
+  max-width: 100%; white-space: nowrap;
+}
+.ac-chat-members-btn:hover { color: var(--ac-text-dark); }
+.ac-chat-members-btn i { font-size: .7rem; }
+.ac-members-pop {
+  position: absolute; top: calc(100% + 8px); left: 0; z-index: 30;
+  width: 290px; max-width: min(290px, 78vw);
+  background: #fff; border: 1px solid var(--ac-line-l); border-radius: 12px;
+  box-shadow: 0 18px 44px rgba(2, 6, 23, .22); overflow: hidden;
+}
+.ac-members-pop-head {
+  display: flex; align-items: center; gap: 4px; padding: 9px 12px 7px;
+  font-size: .72rem; font-weight: 700; letter-spacing: .4px; text-transform: uppercase;
+  color: var(--ac-text-muted); border-bottom: 1px solid var(--ac-line-l);
+}
+.ac-members-pop-n {
+  margin-left: auto; background: rgba(100, 116, 139, .14); color: var(--ac-text-muted);
+  border-radius: 999px; padding: 1px 8px; font-size: .7rem; font-weight: 700;
+}
+.ac-members-pop-list { max-height: 260px; overflow-y: auto; padding: 4px; }
+.ac-member-row { display: flex; align-items: center; gap: 4px; }
+.ac-member-row-main {
+  display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
+  border: none; background: transparent; padding: 6px 8px; border-radius: 8px;
+  cursor: pointer; text-align: left;
+}
+.ac-member-row-main:hover { background: rgba(100, 116, 139, .08); }
+.ac-member-row-name { font-size: .85rem; font-weight: 600; flex: 1; min-width: 0; }
+.ac-member-mention {
+  flex: none; width: 28px; height: 28px; margin-right: 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--ac-line-l); background: #fff; border-radius: 8px;
+  color: var(--ac-primary); font-size: .9rem; cursor: pointer;
+}
+.ac-member-mention:hover { background: var(--ac-primary); border-color: var(--ac-primary); color: #fff; }
+
+/* "Mention in chat" button on Products popup rows. */
+.ac-prod-tag-btn {
+  width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--ac-line-l); background: #fff; border-radius: 8px;
+  color: var(--ac-primary); font-size: 1rem; cursor: pointer;
+}
+.ac-prod-tag-btn:hover { background: var(--ac-primary); border-color: var(--ac-primary); color: #fff; }
 .ac-stream-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .ac-chat-stream { position: relative; flex: 1; min-height: 0; overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 2px; }
 .ac-scroll-bottom-btn {
@@ -2350,6 +2416,25 @@ input[type="number"] {
   text-transform: uppercase; color: var(--ac-text-muted);
 }
 .ac-slash-icon { font-size: 1.05rem; flex: none; }
+.ac-slash-empty { padding: 6px 10px 10px; font-size: .8rem; color: var(--ac-text-muted); }
+/* "/" tag popup: taller than the mention popup + a pinned kind-filter row so
+   Products / Tasks are reachable even when the bookmark list is long. */
+.ac-slash-pop { max-height: 320px; padding-top: 0; }
+.ac-slash-tabs {
+  position: sticky; top: 0; z-index: 2;
+  display: flex; gap: 4px; flex-wrap: wrap;
+  padding: 8px 8px 6px; margin: 0 -4px 2px;
+  background: #fff; border-bottom: 1px solid var(--ac-line-l);
+}
+.ac-slash-tabs button {
+  border: 1px solid var(--ac-line-l); background: #fff; border-radius: 999px;
+  padding: 2px 10px; font-size: .74rem; font-weight: 600; color: var(--ac-text-muted);
+  cursor: pointer; display: inline-flex; align-items: center;
+}
+.ac-slash-tabs button:hover { border-color: var(--ac-primary); color: var(--ac-primary); }
+.ac-slash-tabs button.on {
+  background: var(--ac-primary); border-color: var(--ac-primary); color: #fff;
+}
 
 .ac-composer-readonly {
   display: flex; align-items: center; justify-content: center;
@@ -3209,7 +3294,7 @@ input[type="number"] {
 /* Priority colouring on task rows (red / amber / blue): full background tint
    + the whole border in the priority colour (left edge kept thicker as the
    at-a-glance accent). Hover deepens both. */
-.ac-task { border-width: 2px; border-left-width: 5px; }
+.ac-task { border-width: 4px; border-left-width: 5px; }
 .ac-task.ac-task--high {
   background: rgba(239,68,68,.10);
   border-color: #ef4444;
@@ -3754,7 +3839,7 @@ input[type="number"] {
 /* --- Task cards: rounded accent bar + softer tint + tactile hover --- */
 .ac-tasks-main .ac-task,
 .ac-task-group.ac-task {
-  border-left-width: 1px;              /* drop the flat colour border… */
+  border-left-width: 3px;              /* drop the flat colour border… */
   border-radius: 15px;
   padding-left: 20px;                  /* room for the pseudo accent bar */
   transition: box-shadow .2s ease, transform .18s ease, border-color .18s ease;

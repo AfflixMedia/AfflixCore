@@ -77,6 +77,20 @@ export interface ChatBookmark {
   updated_at: string;
 }
 
+/** A brand product taggable from the composer ("/" popup, brand groups). */
+export interface ChatTagProduct {
+  id: string;
+  name: string;
+  price: number | null;
+}
+
+/** A brand task taggable from the composer ("/" popup, brand groups). */
+export interface ChatTagTask {
+  id: string;
+  title: string;
+  status: string;
+}
+
 /** Per-conversation rollup from the chat_overview() RPC. */
 export interface ConversationOverview {
   conversation_id: string;

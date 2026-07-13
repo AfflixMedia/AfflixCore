@@ -28,6 +28,7 @@ interface Props {
   onRemove: (userId: string) => Promise<void>;
   onSetAdmin: (userId: string, isAdmin: boolean) => Promise<void>;
   onLeave: () => Promise<void>;
+  onMention?: (contact: ChatContact) => void;  // @ button on member rows → composer
   onClose: () => void;
 }
 
@@ -89,6 +90,12 @@ export default function GroupModal(p: Props) {
                   </div>
                   <div className="text-muted small text-truncate">{c.email}</div>
                 </div>
+                {p.onMention && c.id !== p.myId && (
+                  <button type="button" className="ac-member-mention" title={`Mention ${contactName(c)} in the chat`}
+                    aria-label={`Mention ${contactName(c)}`} onClick={() => p.onMention!(c)}>
+                    <i className="bi bi-at" />
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -187,6 +194,12 @@ export default function GroupModal(p: Props) {
                       : isAdmin ? <Badge bg="warning" text="dark" className="ac-role-badge">Admin</Badge> : null}
                   </div>
                 </div>
+                {p.onMention && c.id !== p.myId && (
+                  <button type="button" className="ac-member-mention" title={`Mention ${contactName(c)} in the chat`}
+                    aria-label={`Mention ${contactName(c)}`} onClick={() => p.onMention!(c)}>
+                    <i className="bi bi-at" />
+                  </button>
+                )}
                 {p.canManage && !isBrandGroup && !isCreatorRow && c.id !== p.myId && (
                   <div className="d-flex gap-1" onClick={e => e.stopPropagation()}>
                     {p.isCreator && (

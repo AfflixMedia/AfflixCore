@@ -83,7 +83,10 @@ const approvedOf = (rows: Pick<DailyEntry, 'product_counts' | 'others_count'>[])
 
 type BarModal = 'samples' | 'products' | 'reports' | 'gmv' | 'tasks' | null;
 
-export default function BrandChatBar({ brandId, brandName }: { brandId: string; brandName: string }) {
+export default function BrandChatBar({ brandId, brandName, onTagProduct }: {
+  brandId: string; brandName: string;
+  onTagProduct?: (name: string) => void;   // set → Products popup rows get a "mention in chat" icon
+}) {
   const { profile } = useAuth();
   const [modal, setModal] = useState<BarModal>(null);
   const [summary, setSummary] = useState<{ approved: number; goal: number } | null>(null);
@@ -221,7 +224,8 @@ export default function BrandChatBar({ brandId, brandName }: { brandId: string; 
         <SamplesModal brandId={brandId} brandName={brandName} onClose={() => setModal(null)} />
       )}
       {modal === 'products' && (
-        <ProductsModal brandId={brandId} brandName={brandName} onClose={() => setModal(null)} />
+        <ProductsModal brandId={brandId} brandName={brandName} onClose={() => setModal(null)}
+          onTag={onTagProduct} />
       )}
       {modal === 'reports' && (
         <ReportsModal brandId={brandId} brandName={brandName} onClose={() => setModal(null)} />
@@ -418,7 +422,10 @@ function SamplesModal({ brandId, brandName, onClose }: { brandId: string; brandN
 // Products popup — read-only view of the brand's product catalog.
 // ---------------------------------------------------------------------------
 
-function ProductsModal({ brandId, brandName, onClose }: { brandId: string; brandName: string; onClose: () => void }) {
+function ProductsModal({ brandId, brandName, onClose, onTag }: {
+  brandId: string; brandName: string; onClose: () => void;
+  onTag?: (name: string) => void;   // "mention in chat" → insert a product tag into the composer
+}) {
   const [products, setProducts] = useState<BrandProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -455,6 +462,7 @@ function ProductsModal({ brandId, brandName, onClose }: { brandId: string; brand
           <Table responsive size="sm" className="align-middle mb-0">
             <thead>
               <tr>
+                {onTag && <th style={{ width: 44 }} />}
                 <th>Name</th>
                 <th>Product ID</th>
                 <th>TikTok link</th>
@@ -465,6 +473,16 @@ function ProductsModal({ brandId, brandName, onClose }: { brandId: string; brand
             <tbody>
               {products.map(p => (
                 <tr key={p.id}>
+                  {onTag && (
+                    <td className="text-center">
+                      <button type="button" className="ac-prod-tag-btn"
+                        title={`Mention "${p.name}" in the chat`}
+                        aria-label={`Mention ${p.name} in the chat`}
+                        onClick={() => { onTag(p.name); onClose(); }}>
+                        <i className="bi bi-at" />
+                      </button>
+                    </td>
+                  )}
                   <td className="fw-semibold">{p.name}</td>
                   <td className="text-muted small" style={{ fontFamily: 'monospace' }}>
                     {p.external_product_id || '—'}

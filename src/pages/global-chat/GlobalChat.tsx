@@ -9,6 +9,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { useNotifications } from '../../notifications/NotificationsContext';
 import ConversationList from './ConversationList';
 import ChatPanel from './ChatPanel';
+import type { MessageComposerHandle } from './MessageComposer';
 import NewChatModal from './NewChatModal';
 import ForwardModal from './ForwardModal';
 import GroupModal, { GroupMember } from './GroupModal';
@@ -68,6 +69,9 @@ export default function GlobalChat() {
   const [unreadAnchorId, setUnreadAnchorId] = useState<string | null>(null);
   // Contact card opened by clicking a @mention.
   const [contactCard, setContactCard] = useState<ChatContact | null>(null);
+  // Handle into the active conversation's composer — the header members
+  // dropdown, Group-info modal, and contact card use it to insert @mentions.
+  const composerRef = useRef<MessageComposerHandle>(null);
 
   const activeIdRef = useRef<string | null>(activeId);
   useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
@@ -592,6 +596,9 @@ export default function GlobalChat() {
 
   const isAnnouncementActive = !!activeView?.conversation.is_announcement;
   const isGroupActive = !!activeView?.conversation.is_group && !isAnnouncementActive;
+  const canPostActive = !activeView?.archived && (!isAnnouncementActive || isBob);
+  // Insert "@Name " into the active composer (members dropdown / modals).
+  const mentionContact = (c: ChatContact) => composerRef.current?.insertMention(contactName(c));
 
   return (
     <div className={`ac-chat-shell ${activeId ? 'has-active' : ''}`}>
@@ -625,6 +632,7 @@ export default function GlobalChat() {
           canPost={!activeView?.archived && (!(activeView?.conversation.is_announcement) || isBob)}
           reactionsByMsg={reactionsByMsg}
           resources={bookmarks}
+          composerRef={composerRef}
           onReact={handleReact}
           onOpenContact={(userId) => {
             const c = directory.get(userId);
@@ -682,6 +690,9 @@ export default function GlobalChat() {
           onRemove={(uid) => groupOp(() => removeMember(activeId!, uid))}
           onSetAdmin={(uid, a) => groupOp(() => setMemberAdmin(activeId!, uid, a))}
           onLeave={handleLeave}
+          onMention={groupModal.mode !== 'create' && canPostActive
+            ? (c) => { setGroupModal(null); mentionContact(c); }
+            : undefined}
           onClose={() => setGroupModal(null)}
         />
       )}
@@ -707,6 +718,9 @@ export default function GlobalChat() {
         contact={contactCard}
         isSelf={contactCard?.id === myId}
         onMessage={(c) => { setContactCard(null); startChatWith(c); }}
+        onMention={(isGroupActive || isAnnouncementActive) && canPostActive
+          ? (c) => { setContactCard(null); mentionContact(c); }
+          : undefined}
         onClose={() => setContactCard(null)}
       />
       <DeleteMessageModal
