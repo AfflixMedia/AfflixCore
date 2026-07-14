@@ -1,8 +1,8 @@
 // Bottom composer: reply preview, formatting bar, emoji picker, @-mention
 // autocomplete, "/" tag autocomplete (conversation bookmarks → clickable
-// links; brand groups also tag the brand's Products + Tasks as text chips),
-// growing textarea, send button. Icon buttons open the @ / product / task
-// popups without typing the trigger. Enter sends; Shift+Enter makes a new
+// links; brand groups also tag the brand's Products + Tasks as clickable
+// links to the Products page / the task's detail popup), growing textarea,
+// send button. Enter sends; Shift+Enter makes a new
 // line. List mode keeps adding bullets until turned off. Announcement
 // channels render read-only for non-admins. Resets per conversation
 // (re-keyed). ChatPanel holds a ref to insert @mentions from the header's
@@ -72,9 +72,9 @@ function TagRow({ it, onPick }: { it: SlashItem; onPick: (it: SlashItem) => void
         <i className="bi bi-box-seam ac-slash-icon" style={{ color: '#e8862e' }} />
         <span className="min-w-0 flex-grow-1">
           <span className="fw-semibold text-truncate d-block">{it.p.name}</span>
-          {it.p.price != null && (
+          {it.p.standard_commission != null && (
             <span className="text-muted text-truncate d-block" style={{ fontSize: '.72rem' }}>
-              ${Number(it.p.price).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+              {Number(it.p.standard_commission)}% commission
             </span>
           )}
         </span>
@@ -240,25 +240,6 @@ const MessageComposer = forwardRef<MessageComposerHandle, Props>(function Messag
     detectMention(e.target.value, e.target.selectionStart ?? e.target.value.length);
   };
 
-  // Icon buttons: drop the trigger character at the caret (space-separated)
-  // and open the matching popup — same flow as typing "@" / "/".
-  const openTrigger = (ch: '@' | '/', kind: TagKind | null = null) => {
-    const ta = taRef.current;
-    const caret = ta?.selectionStart ?? text.length;
-    const before = text.slice(0, caret);
-    const needsSpace = before.length > 0 && !/\s$/.test(before);
-    const insert = (needsSpace ? ' ' : '') + ch;
-    setText(before + insert + text.slice(caret));
-    const start = caret + (needsSpace ? 1 : 0);   // index of the trigger char
-    if (ch === '@') { setMention({ start, query: '' }); closeSlash(); }
-    else { setSlash({ start, query: '' }); setSlashKind(kind); setMention(null); }
-    requestAnimationFrame(() => {
-      ta?.focus();
-      const pos = caret + insert.length;
-      ta?.setSelectionRange(pos, pos);
-    });
-  };
-
   // Insert `raw` at the caret (space-padded when needed), close both popups,
   // and place the caret after it. Shared by the ref methods below.
   const insertAtCaret = (raw: string) => {
@@ -307,14 +288,19 @@ const MessageComposer = forwardRef<MessageComposerHandle, Props>(function Messag
     });
   };
 
-  // What a picked tag inserts: a bookmark / product become clickable links
-  // (product → the brand's Products page); a task stays a bold text chip.
+  // A task tag: a clickable markdown link that opens that exact task's detail
+  // popup on the Tasks page (/tasks?t=<id>, consumed there).
+  const taskInsert = (t: ChatTagTask): string =>
+    `[✅ ${t.title.replace(/[[\]]/g, '')}](${window.location.origin}/tasks?t=${t.id}) `;
+
+  // What a picked tag inserts: bookmark / product / task all become clickable
+  // links (product → the brand's Products page, task → its detail popup).
   const tagInsertText = (it: SlashItem): string =>
     it.kind === 'resource'
       ? `[${it.r.title}](${it.r.url}) `
       : it.kind === 'product'
         ? productInsert(it.p.name)
-        : `✅ **${it.t.title}** `;
+        : taskInsert(it.t);
 
   const pickMention = (c: ChatContact) => {
     if (mention) replaceTrigger(mention.start, `@${contactName(c)} `);
@@ -526,25 +512,6 @@ const MessageComposer = forwardRef<MessageComposerHandle, Props>(function Messag
           </button>
           {showEmoji && <div className="ac-emoji-pop"><EmojiPicker onPick={insertEmoji} /></div>}
         </div>
-        {mentionables.length > 0 && (
-          <button type="button" className="ac-composer-icon" title="Mention someone" disabled={disabled}
-            onClick={() => openTrigger('@')}>
-            <i className="bi bi-at" />
-          </button>
-        )}
-        {(brandGroup || products.length > 0) && (
-          <button type="button" className="ac-composer-icon" title="Tag a product" disabled={disabled}
-            onClick={() => openTrigger('/', 'product')}>
-            <i className="bi bi-box-seam" />
-          </button>
-        )}
-        {(brandGroup || tasks.length > 0) && (
-          <button type="button" className="ac-composer-icon" title="Tag a task" disabled={disabled}
-            onClick={() => openTrigger('/', 'task')}>
-            <i className="bi bi-check2-square" />
-          </button>
-        )}
-
         <textarea
           ref={taRef}
           className="ac-composer-input"

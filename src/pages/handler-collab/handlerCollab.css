@@ -1190,7 +1190,9 @@ a.pc-vx-prod:hover{ text-decoration:none; filter:brightness(.97); }
 .pc-keepnote-btn.pc-keepnote-mini .pc-keepnote-count{ font-size:11px; }
 
 /* floating notes button — global access from any tab */
-.pc-notesfab{ position:fixed; right:26px; bottom:26px; z-index:1500; width:56px; height:56px; border-radius:50%; border:0; background:var(--pc-accent); color:#fff; font-size:22px; display:flex; align-items:center; justify-content:center; box-shadow:0 8px 28px rgba(18,89,195,.36); cursor:pointer; transition:transform .15s var(--pc-ease), box-shadow .2s; }
+.pc-notesfab{ position:fixed; right:26px; bottom:26px; z-index:1500; width:56px; height:56px; border-radius:50%; border:0; background:var(--pc-accent); color:#fff; font-size:22px; display:flex; align-items:center; justify-content:center; box-shadow:0 8px 28px rgba(18,89,195,.36); cursor:pointer; transition:transform .15s var(--pc-ease), box-shadow .2s, opacity .2s, bottom .2s var(--pc-ease); }
+/* hidden until the page scrolls (usePageScrolled in AdsNotesFab) */
+.pc-notesfab.pc-fab-hidden{ opacity:0; pointer-events:none; transform:translateY(14px); }
 .pc-notesfab:hover{ transform:translateY(-2px); box-shadow:0 12px 34px rgba(18,89,195,.46); }
 .pc-notesfab:active{ transform:scale(.93); }
 .pc-notesfab-badge{ position:absolute; top:-2px; right:-2px; min-width:20px; height:20px; padding:0 5px; border-radius:999px; background:var(--pc-warn-fg); color:#fff; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center; border:2px solid var(--pc-bg); }

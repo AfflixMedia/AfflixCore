@@ -71,14 +71,16 @@ export default function ChatPanel({
     if (!brandId) { setProducts([]); setTasks([]); return; }
     let on = true;
     (async () => {
-      const { data: prod } = await supabase
-        .from('brand_products').select('id,name,price')
+      const { data: prod, error: pErr } = await supabase
+        .from('brand_products').select('id,name,standard_commission')
         .eq('brand_id', brandId).order('name');
+      if (pErr) console.warn('[chat] brand products fetch failed:', pErr.message);
       if (on) setProducts((prod ?? []) as ChatTagProduct[]);
-      const { data: tk } = await supabase
+      const { data: tk, error: tErr } = await supabase
         .from('tasks').select('id,title,status')
         .eq('brand_id', brandId).neq('status', 'done')
         .order('created_at', { ascending: false }).limit(30);
+      if (tErr) console.warn('[chat] brand tasks fetch failed:', tErr.message);
       if (on) setTasks((tk ?? []) as ChatTagTask[]);
     })();
     return () => { on = false; };

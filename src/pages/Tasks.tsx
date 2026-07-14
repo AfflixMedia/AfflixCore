@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, FormEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Button, Card, Modal, Form, Spinner, Alert, Badge } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/AuthContext';
@@ -154,6 +155,19 @@ export default function Tasks() {
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null); // editing a whole multi-assignee group
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [detailId, setDetailId] = useState<string | null>(null); // task open in detail popup
+  // Deep link: /tasks?t=<id> (chat task tags) opens that task's detail popup.
+  // Consumed once — the param is stripped so refresh/back isn't sticky. The
+  // popup appears once the task list has loaded (detailTask lookup); a task
+  // the viewer can't see (RLS) simply never resolves.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const tid = searchParams.get('t');
+    if (!tid) return;
+    setDetailId(tid);
+    const next = new URLSearchParams(searchParams);
+    next.delete('t');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
   // Right-rail person whose task list popup is open (null = closed).
   const [railPerson, setRailPerson] = useState<PersonLite | null>(null);
   const brandBarRef = useRef<HTMLDivElement>(null);

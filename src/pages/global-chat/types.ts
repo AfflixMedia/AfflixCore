@@ -77,11 +77,13 @@ export interface ChatBookmark {
   updated_at: string;
 }
 
-/** A brand product taggable from the composer ("/" popup, brand groups). */
+/** A brand product taggable from the composer ("/" popup, brand groups).
+    NB: `brand_products` has no price column (dropped in 20260514) — the
+    catalog carries commissions instead. */
 export interface ChatTagProduct {
   id: string;
   name: string;
-  price: number | null;
+  standard_commission: number | null;
 }
 
 /** A brand task taggable from the composer ("/" popup, brand groups). */
