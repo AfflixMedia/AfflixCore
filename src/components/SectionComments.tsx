@@ -30,6 +30,8 @@ export interface SectionCommentsProps {
   onDelete?: (id: string) => Promise<void>;
   /** When set and matching a comment in this section, scroll to + flash-highlight that comment. */
   highlightCommentId?: string;
+  /** Authed mode: whether the viewer may reply (Bob only — APCs/Team Leads read-only). Defaults to true. */
+  canReply?: boolean;
 }
 
 const STANDARD_LABELS: Record<string, string> = {
@@ -48,7 +50,7 @@ const labelFor = (section: CommentSection, override?: string) =>
   override ?? STANDARD_LABELS[section] ?? 'this section';
 
 export default function SectionComments(props: SectionCommentsProps) {
-  const { section, sectionLabel, comments, mode, currentAuthorName, defaultPublicName, onAdd, highlightCommentId } = props;
+  const { section, sectionLabel, comments, mode, currentAuthorName, defaultPublicName, onAdd, highlightCommentId, canReply = true } = props;
   const SECTION_LABEL = labelFor(section, sectionLabel);
   const [body, setBody] = useState('');
   const [name, setName] = useState(defaultPublicName ?? '');
@@ -129,6 +131,7 @@ export default function SectionComments(props: SectionCommentsProps) {
                     hasSavedName={hasSavedName}
                     onAdd={onAdd}
                     highlightCommentId={highlightCommentId}
+                    canReply={canReply}
                   />
                 ))}
               </div>
@@ -190,10 +193,11 @@ interface NodeProps {
   hasSavedName: boolean;
   onAdd: (body: string, authorName: string, parentId?: string) => Promise<void>;
   highlightCommentId?: string;
+  canReply: boolean;
 }
 
 function CommentNode(p: NodeProps) {
-  const { comment, all, depth, mode, currentAuthorName, defaultPublicName, hasSavedName, onAdd, highlightCommentId } = p;
+  const { comment, all, depth, mode, currentAuthorName, defaultPublicName, hasSavedName, onAdd, highlightCommentId, canReply } = p;
   const cardRef = useRef<HTMLDivElement | null>(null);
   const isHighlight = highlightCommentId === comment.id;
   const [flash, setFlash] = useState(isHighlight);
@@ -259,15 +263,17 @@ function CommentNode(p: NodeProps) {
           {/* Comment deletion is intentionally disabled — feedback history is permanent. */}
         </div>
         <div style={{ whiteSpace: 'pre-wrap' }}>{comment.body}</div>
-        <div className="mt-2">
-          <button type="button" className="btn btn-link btn-sm p-0 text-decoration-none"
-            onClick={() => setReplying(v => !v)}>
-            <i className="bi bi-reply me-1" />{replying ? 'Cancel' : 'Reply'}
-          </button>
-        </div>
+        {canReply && (
+          <div className="mt-2">
+            <button type="button" className="btn btn-link btn-sm p-0 text-decoration-none"
+              onClick={() => setReplying(v => !v)}>
+              <i className="bi bi-reply me-1" />{replying ? 'Cancel' : 'Reply'}
+            </button>
+          </div>
+        )}
       </div>
 
-      {replying && (
+      {canReply && replying && (
         <div className="mt-2" style={{ marginLeft: Math.min(depth + 1, 3) * 16 }}>
           <Form onSubmit={submitReply}>
             {err && <Alert variant="danger" className="py-2 mb-2 small">{err}</Alert>}

@@ -1,5 +1,5 @@
 // Supabase Edge Function: post-staff-comment
-// Authenticated. Inserts a Bob/APC reply into report_comments and dispatches
+// Authenticated. Inserts a Bob reply into report_comments and dispatches
 // in-app + (optionally) web-push notifications to the other staff watching
 // the brand. Mirrors the public post-shared-comment flow, but for the staff
 // side of the thread (where direct table inserts can't write notifications
@@ -38,7 +38,8 @@ serve(async (req) => {
     const { data: profile } = await admin.from('profiles')
       .select('id,role,full_name,email').eq('id', user.id).single();
     if (!profile) return json({ error: 'Profile not found' }, 401);
-    if (profile.role !== 'bob' && profile.role !== 'apc') {
+    // Replying to client feedback is Bob-only (APCs / Team Leads read-only).
+    if (profile.role !== 'bob') {
       return json({ error: 'Not allowed' }, 403);
     }
 
@@ -57,12 +58,6 @@ serve(async (req) => {
       .select(`id,brand_id,${periodLabelField},content`).eq('id', report_id).single();
     if (!report) return json({ error: 'Report not found' }, 404);
 
-    if (profile.role === 'apc') {
-      const { data: assigned } = await admin.from('apc_brands')
-        .select('brand_id').eq('apc_id', profile.id).eq('brand_id', report.brand_id).maybeSingle();
-      if (!assigned) return json({ error: 'Not assigned to this brand' }, 403);
-    }
-
     if (parent_id) {
       const { data: parent } = await admin.from('report_comments')
         .select('report_id,report_type').eq('id', parent_id).maybeSingle();
@@ -78,7 +73,7 @@ serve(async (req) => {
       report_id,
       report_type,
       section,
-      author_type: profile.role === 'bob' ? 'bob' : 'apc',
+      author_type: 'bob',
       author_name: authorName,
       body: cleanBody,
       parent_id: parent_id ?? null,
@@ -102,14 +97,16 @@ serve(async (req) => {
         }
         return s;
       };
-      const [{ data: brand }, { data: bobs }, { data: apcRows }] = await Promise.all([
+      const [{ data: brand }, { data: bobs }, { data: apcRows }, { data: leadRows }] = await Promise.all([
         admin.from('brands').select('id,name').eq('id', report.brand_id).single(),
         admin.from('profiles').select('id').eq('role', 'bob'),
         admin.from('apc_brands').select('apc_id').eq('brand_id', report.brand_id),
+        admin.from('team_lead_brands').select('team_lead_id').eq('brand_id', report.brand_id),
       ]);
       const recipientIds = new Set<string>();
       (bobs ?? []).forEach((p: any) => recipientIds.add(p.id));
       (apcRows ?? []).forEach((r: any) => recipientIds.add(r.apc_id));
+      (leadRows ?? []).forEach((r: any) => recipientIds.add(r.team_lead_id));
       recipientIds.delete(profile.id);  // don't notify self
 
       const periodLabel = report_type === 'monthly'

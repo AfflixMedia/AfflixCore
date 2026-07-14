@@ -17,6 +17,8 @@ export interface CommentsConfig {
   currentAuthorName?: string;
   defaultPublicName?: string;
   onAdd: (section: CommentSection, body: string, authorName: string, parentId?: string) => Promise<void>;
+  /** Authed mode: whether the viewer may reply (Bob only — APCs/Team Leads read-only). Defaults to true. */
+  canReply?: boolean;
 }
 
 export interface ApprovalDecisionView {
@@ -199,6 +201,7 @@ export default function ReportDashboard({
               currentAuthorName={commentsConfig.currentAuthorName}
               defaultPublicName={commentsConfig.defaultPublicName}
               onAdd={(b, n, parentId) => commentsConfig.onAdd(feedbackSection, b, n, parentId)}
+              canReply={commentsConfig.canReply}
               highlightCommentId={highlightCommentId ?? undefined}
             />
           )}

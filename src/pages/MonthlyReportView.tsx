@@ -262,6 +262,7 @@ export default function MonthlyReportView() {
             comments,
             currentAuthorName: profile?.full_name || profile?.email || 'User',
             onAdd: addComment,
+            canReply: profile?.role === 'bob',
           }}
         />
       </div>
