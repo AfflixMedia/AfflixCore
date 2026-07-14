@@ -43,6 +43,21 @@ h1, h2, h3, h4, h5, h6, .h1, .h2, .h3, .h4, .h5, .h6 {
   color: var(--ac-text-dark);
 }
 
+/* Themed scrollbars — everywhere. Firefox via scrollbar-width/color, WebKit
+   via ::-webkit-scrollbar. Orange pill thumb on a transparent track; the
+   transparent border + padding-box clip keeps the thumb slim inside the
+   10px gutter. Components that deliberately HIDE their scrollbar (sidebar,
+   chat filter strips, brand/TL rails) keep their more-specific rules. */
+* { scrollbar-width: thin; scrollbar-color: var(--ac-primary) transparent; }
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--ac-primary);
+  border-radius: 0;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--ac-primary-2); }
+::-webkit-scrollbar-corner { background: transparent; }
+
 /* Bootstrap primary remap */
 .btn-primary {
   background: var(--ac-primary);
@@ -2178,6 +2193,17 @@ input[type="number"] {
 
 /* ---- Contact lists (modals) ---- */
 .ac-contact-list { display: flex; flex-direction: column; max-height: 60vh; overflow-y: auto; }
+
+/* Group info / announcement / new-group modals: the modal BODY never scrolls —
+   only the contact list(s) inside do, killing the double scrollbar. Must come
+   after (and out-important) the global modal scroll guard's overflow-y: auto.
+   Lists take their natural height but shrink + scroll when space runs out. */
+.ac-group-modal .modal-body {
+  overflow: hidden !important;
+  display: flex !important; flex-direction: column !important;
+}
+.ac-group-modal .modal-body > * { flex: 0 0 auto; }
+.ac-group-modal .ac-contact-list { flex: 0 1 auto; min-height: 96px; max-height: none; }
 .ac-contact-row {
   display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px;
   border: none; background: transparent; border-radius: 10px; cursor: pointer; transition: background .12s;
@@ -2743,14 +2769,10 @@ input[type="number"] {
   padding: 14px;
 }
 .ac-tasks-main { flex: 1; min-width: 0; }
-/* Folder / label lists scroll once they grow past a set height */
-.ac-rail-scroll {
-  max-height: 240px; overflow-y: auto;
-  scrollbar-width: thin; scrollbar-color: var(--ac-line-l) transparent;
-}
+/* Folder / label lists scroll once they grow past a set height
+   (scrollbar styling comes from the global theme). */
+.ac-rail-scroll { max-height: 240px; overflow-y: auto; }
 .ac-rail-scroll.labels { max-height: 160px; padding-right: 2px; }
-.ac-rail-scroll::-webkit-scrollbar { width: 6px; }
-.ac-rail-scroll::-webkit-scrollbar-thumb { background: var(--ac-line-l); border-radius: 999px; }
 .ac-rail-head {
   display: flex; align-items: center; justify-content: space-between;
   font-family: var(--ac-font-heading); font-weight: 700;
