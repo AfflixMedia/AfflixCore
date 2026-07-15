@@ -130,18 +130,22 @@ serve(async (req) => {
       ? await admin.from('resource_comments').select('*').in('resource_id', sharedResourceIds).order('created_at', { ascending: true })
       : { data: [] };
 
-    // Approval decisions made via THIS link only — across both report types
+    // Approval decisions — across both report types. approval_decisions_all
+    // carries EVERY link's decisions on this link's reports (the "Approved"
+    // history tab must survive link rotation); approval_decisions stays the
+    // per-link subset that drives the "your decision" state + pending popup.
     const [{ data: weeklyDecisions }, { data: monthlyDecisions }] = await Promise.all([
       reportIds.length > 0
         ? admin.from('report_approval_decisions').select('*')
-            .in('report_id', reportIds).eq('share_link_id', link.id).eq('report_type', 'weekly')
+            .in('report_id', reportIds).eq('report_type', 'weekly')
         : Promise.resolve({ data: [] as any[] }),
       monthlyReportIds.length > 0
         ? admin.from('report_approval_decisions').select('*')
-            .in('report_id', monthlyReportIds).eq('share_link_id', link.id).eq('report_type', 'monthly')
+            .in('report_id', monthlyReportIds).eq('report_type', 'monthly')
         : Promise.resolve({ data: [] as any[] }),
     ]);
-    const approval_decisions = [...(weeklyDecisions ?? []), ...(monthlyDecisions ?? [])];
+    const approval_decisions_all = [...(weeklyDecisions ?? []), ...(monthlyDecisions ?? [])];
+    const approval_decisions = approval_decisions_all.filter((d: any) => d.share_link_id === link.id);
 
     // Paid Collab — only loaded when the link explicitly opts in.
     let paid_collab_programs: any[] = [];
@@ -223,6 +227,7 @@ serve(async (req) => {
       comments,
       resource_comments: resource_comments ?? [],
       approval_decisions,
+      approval_decisions_all,
       label: link.label ?? null,
       include_reports: includeReports,
       include_monthly_reports: includeMonthlyReports,
