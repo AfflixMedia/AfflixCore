@@ -222,17 +222,22 @@ export default function WeeklyReportView() {
     let alive = true;
     (async () => {
       const monthStart = `${report.week_end.slice(0, 7)}-01`;
+      // Fetch from the earlier of month-start and week-start, so a week that
+      // straddles a month boundary still has its pre-1st days for the per-product
+      // "this week" count. MTD is then scoped back to the month window below.
+      const fetchFrom = report.week_start < monthStart ? report.week_start : monthStart;
       const [{ data: daily }, { data: sprods }] = await Promise.all([
         supabase.from('brand_samples_daily').select('entry_date,new_videos,others_count,product_counts')
-          .eq('brand_id', report.brand_id).gte('entry_date', monthStart).lte('entry_date', report.week_end),
+          .eq('brand_id', report.brand_id).gte('entry_date', fetchFrom).lte('entry_date', report.week_end),
         supabase.from('brand_samples_products').select('id,external_product_id').eq('brand_id', report.brand_id),
       ]);
       if (!alive) return;
       const rows = (daily as any[]) ?? [];
       const sumCounts = (pc: any) => Object.values(pc ?? {}).reduce((a: number, v: any) => a + (Number(v) || 0), 0);
-      setMtd(rows.length === 0 ? { samples: null, videos: null } : {
-        samples: rows.reduce((s, d) => s + sumCounts(d.product_counts) + (Number(d.others_count) || 0), 0),
-        videos: rows.reduce((s, d) => s + (Number(d.new_videos) || 0), 0),
+      const monthRows = rows.filter(d => d.entry_date >= monthStart);
+      setMtd(monthRows.length === 0 ? { samples: null, videos: null } : {
+        samples: monthRows.reduce((s, d) => s + sumCounts(d.product_counts) + (Number(d.others_count) || 0), 0),
+        videos: monthRows.reduce((s, d) => s + (Number(d.new_videos) || 0), 0),
       });
       // Per-product samples this week: aggregate product_counts over the week,
       // then map each sample-seeding product id -> its external product id so it
