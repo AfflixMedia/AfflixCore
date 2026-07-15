@@ -3,6 +3,7 @@ import { Button, Card, Modal, Form, Spinner, Alert } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import { fnError } from '../lib/functionError';
 import Avatar from '../components/Avatar';
+import ChangeRoleModal from '../components/ChangeRoleModal';
 
 // Bob-only management page for Ads Managers: APC-like VIEW access to their
 // assigned brands (reports, sample seeding, products, resources, paid collab),
@@ -44,6 +45,8 @@ export default function AdsManagers() {
   const [delMgr, setDelMgr] = useState<AdsManager | null>(null);
   const [delBusy, setDelBusy] = useState(false);
   const [delErr, setDelErr] = useState<string | null>(null);
+
+  const [roleMgr, setRoleMgr] = useState<AdsManager | null>(null);
 
   const load = async () => {
     setLoading(true); setErr(null);
@@ -239,6 +242,9 @@ export default function AdsManagers() {
                   <button className="ac-icon-btn" onClick={() => openEdit(m)} title="Edit">
                     <i className="bi bi-pencil" />
                   </button>
+                  <button className="ac-icon-btn" onClick={() => setRoleMgr(m)} title="Change role">
+                    <i className="bi bi-person-gear" />
+                  </button>
                   <button className="ac-icon-btn danger"
                     onClick={() => { setDelMgr(m); setDelErr(null); }} title="Delete Ads Manager">
                     <i className="bi bi-trash" />
@@ -359,6 +365,8 @@ export default function AdsManagers() {
           }}>{delBusy ? 'Deleting…' : 'Delete Ads Manager'}</Button>
         </Modal.Footer>
       </Modal>
+
+      <ChangeRoleModal target={roleMgr} onHide={() => setRoleMgr(null)} onChanged={load} />
     </>
   );
 }

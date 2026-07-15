@@ -3,6 +3,7 @@ import { Button, Card, Modal, Form, Spinner, Alert } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import { fnError } from '../lib/functionError';
 import Avatar from '../components/Avatar';
+import ChangeRoleModal from '../components/ChangeRoleModal';
 
 interface Handler {
   id: string;
@@ -40,6 +41,8 @@ export default function PaidCollabHandlers() {
   const [delHandler, setDelHandler] = useState<Handler | null>(null);
   const [delBusy, setDelBusy] = useState(false);
   const [delErr, setDelErr] = useState<string | null>(null);
+
+  const [roleHandler, setRoleHandler] = useState<Handler | null>(null);
 
   const load = async () => {
     setLoading(true); setErr(null);
@@ -258,6 +261,9 @@ export default function PaidCollabHandlers() {
                   <button className="ac-icon-btn" onClick={() => openEdit(h)} title="Edit">
                     <i className="bi bi-pencil" />
                   </button>
+                  <button className="ac-icon-btn" onClick={() => setRoleHandler(h)} title="Change role">
+                    <i className="bi bi-person-gear" />
+                  </button>
                   <button className="ac-icon-btn danger"
                     onClick={() => { setDelHandler(h); setDelErr(null); }} title="Delete handler">
                     <i className="bi bi-trash" />
@@ -432,6 +438,12 @@ export default function PaidCollabHandlers() {
           }}>{delBusy ? 'Deleting…' : 'Delete handler'}</Button>
         </Modal.Footer>
       </Modal>
+
+      <ChangeRoleModal
+        target={roleHandler ? { ...roleHandler, is_internal: !!roleHandler.is_internal_handler } : null}
+        onHide={() => setRoleHandler(null)}
+        onChanged={load}
+      />
     </>
   );
 }

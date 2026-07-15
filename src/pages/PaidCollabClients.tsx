@@ -3,6 +3,7 @@ import { Button, Card, Modal, Form, Spinner, Alert } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import { fnError } from '../lib/functionError';
 import Avatar from '../components/Avatar';
+import ChangeRoleModal from '../components/ChangeRoleModal';
 
 interface Client {
   id: string;
@@ -38,6 +39,8 @@ export default function PaidCollabClients() {
   const [delClient, setDelClient] = useState<Client | null>(null);
   const [delBusy, setDelBusy] = useState(false);
   const [delErr, setDelErr] = useState<string | null>(null);
+
+  const [roleClient, setRoleClient] = useState<Client | null>(null);
 
   const load = async () => {
     setLoading(true); setErr(null);
@@ -235,6 +238,9 @@ export default function PaidCollabClients() {
                   <button className="ac-icon-btn" onClick={() => openEdit(c)} title="Edit">
                     <i className="bi bi-pencil" />
                   </button>
+                  <button className="ac-icon-btn" onClick={() => setRoleClient(c)} title="Change role">
+                    <i className="bi bi-person-gear" />
+                  </button>
                   <button className="ac-icon-btn danger"
                     onClick={() => { setDelClient(c); setDelErr(null); }} title="Delete client">
                     <i className="bi bi-trash" />
@@ -368,6 +374,8 @@ export default function PaidCollabClients() {
           }}>{delBusy ? 'Deleting…' : 'Delete client'}</Button>
         </Modal.Footer>
       </Modal>
+
+      <ChangeRoleModal target={roleClient} onHide={() => setRoleClient(null)} onChanged={load} />
     </>
   );
 }
