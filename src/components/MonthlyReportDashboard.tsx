@@ -6,6 +6,7 @@ import {
 } from 'recharts';
 import DOMPurify from 'dompurify';
 import { MonthlyReportContent, ThisLast } from '../lib/monthlyReportSchema';
+import { setReportCurrency, formatMoney } from '../lib/currency';
 import { Comment, CommentSection } from './SectionComments';
 import SectionComments from './SectionComments';
 import { CommentsConfig, ApprovalDecisionView, ApprovalActionConfig, CustomSectionView } from './ReportDashboard';
@@ -38,7 +39,7 @@ const SECTION_LABELS: Record<string, string> = {
 
 export default function MonthlyReportDashboard({
   c, p, hasPrev, trendData,
-  monthLabel, brandName, clientName,
+  monthLabel, brandName, clientName, currency,
   commentsConfig, approvalAction, approvalDecisions,
   openSectionOnLoad, highlightCommentId, paidCollab, onOpenPaidCollabProgram,
 }: {
@@ -49,6 +50,8 @@ export default function MonthlyReportDashboard({
   monthLabel: string;
   brandName: string;
   clientName?: string | null;
+  /** brand display currency (e.g. 'USD', 'EUR'); drives all money formatting. */
+  currency?: string;
   commentsConfig?: CommentsConfig;
   approvalAction?: ApprovalActionConfig;
   approvalDecisions?: ApprovalDecisionView[];
@@ -57,6 +60,7 @@ export default function MonthlyReportDashboard({
   paidCollab?: PaidCollabPrefetch;
   onOpenPaidCollabProgram?: (programId: string) => void;
 }) {
+  setReportCurrency(currency);
   const [feedbackSection, setFeedbackSection] = useState<CommentSection | null>(null);
 
   useEffect(() => {
@@ -138,9 +142,9 @@ export default function MonthlyReportDashboard({
   // KPI grid + comparison data
 
   const kpiCards: { label: string; value: string; cur: number; prev?: number; money?: boolean; sub?: string }[] = [
-    { label: 'Total Sales', value: `$${c.total_sales.month.toLocaleString()}`,
+    { label: 'Total Sales', value: formatMoney(c.total_sales.month),
       cur: c.total_sales.month, prev: p?.total_sales.month, money: true,
-      sub: c.total_sales.all_time > 0 ? `All time: $${c.total_sales.all_time.toLocaleString()}` : undefined },
+      sub: c.total_sales.all_time > 0 ? `All time: ${formatMoney(c.total_sales.all_time)}` : undefined },
     { label: 'Total Orders', value: c.kpis.total_orders.this.toLocaleString(),
       cur: c.kpis.total_orders.this, prev: c.kpis.total_orders.last },
     { label: 'Samples Approved', value: c.kpis.samples_approved.this.toLocaleString(),
@@ -359,7 +363,7 @@ export default function MonthlyReportDashboard({
                       <div className="fw-semibold">{r.product_name || '—'}</div>
                     </td>
                     <td className="text-end">{r.units_sold.toLocaleString()}</td>
-                    <td className="text-end">${r.gmv.toLocaleString()}</td>
+                    <td className="text-end">{formatMoney(r.gmv)}</td>
                     <td className="text-end">{r.samples_approved.toLocaleString()}</td>
                     <td className="small text-muted">{r.notes}</td>
                   </tr>
@@ -513,7 +517,7 @@ function CreatorsTable({ rows }: { rows: { username: string; gmv: number }[] }) 
               </a>
             ) : '—'}
           </td>
-          <td className="text-end pe-3">${r.gmv.toLocaleString()}</td>
+          <td className="text-end pe-3">{formatMoney(r.gmv)}</td>
         </tr>
       ))}</tbody>
     </Table>
@@ -532,7 +536,7 @@ function VideosTable({ rows }: { rows: { username: string; video_url: string; gm
               ? <a href={r.video_url} target="_blank" rel="noreferrer">{r.username || r.video_url}</a>
               : (r.username || '—')}
           </td>
-          <td className="text-end pe-3">${r.gmv.toLocaleString()}</td>
+          <td className="text-end pe-3">{formatMoney(r.gmv)}</td>
         </tr>
       ))}</tbody>
     </Table>
@@ -566,7 +570,7 @@ function MiniStat({ label, tl, money, integer, suffix }: {
   label: string; tl: ThisLast; money?: boolean; integer?: boolean; suffix?: string;
 }) {
   const fmt = (n: number) =>
-    money ? `$${n.toLocaleString()}`
+    money ? formatMoney(n)
     : integer ? n.toLocaleString()
     : suffix ? `${n.toFixed(2)}${suffix}`
     : n.toLocaleString();
@@ -596,7 +600,7 @@ function Delta({ cur, prev, money, dec }: { cur: number; prev?: number; money?: 
   const up = diff >= 0;
   const color = up ? 'text-success' : 'text-danger';
   const icon = up ? 'bi-arrow-up-right' : 'bi-arrow-down-right';
-  const fmt = (n: number) => money ? `$${Math.abs(n).toLocaleString()}` : dec ? Math.abs(n).toFixed(2) : Math.abs(n).toLocaleString();
+  const fmt = (n: number) => money ? formatMoney(Math.abs(n)) : dec ? Math.abs(n).toFixed(2) : Math.abs(n).toLocaleString();
   return (
     <small className={color} title={`${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`}>
       <i className={`bi ${icon}`} /> {fmt(diff)} ({pct >= 0 ? '+' : ''}{fmtPct(pct)}%)

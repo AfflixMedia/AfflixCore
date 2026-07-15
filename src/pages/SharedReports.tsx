@@ -45,7 +45,7 @@ interface ApprovalDecisionRow {
   decided_at: string;
 }
 
-interface Brand { id: string; name: string; client: string | null; client_id: string | null; payment_popup_default?: 'auto' | 'force_hide' | 'force_show'; }
+interface Brand { id: string; name: string; client: string | null; client_id: string | null; payment_popup_default?: 'auto' | 'force_hide' | 'force_show'; currency?: string | null; }
 interface Report {
   id: string; brand_id: string; week_start: string; week_end: string;
   week_number: number; status: string; content: WeeklyReportContent;
@@ -573,6 +573,7 @@ export default function SharedReports() {
         <WeeklyDash
           c={normWeekly(openReport.content)}
           p={prevReport ? normWeekly(prevReport.content) : null}
+          currency={activeBrand.currency ?? undefined}
           trendData={trendData}
           wow={wowData}
           sampleSeries={sampleSeries}
@@ -713,6 +714,7 @@ export default function SharedReports() {
           monthLabel={fmtMonthLabel(openMonthly.month)}
           brandName={activeBrand.name}
           clientName={activeBrand.client}
+          currency={activeBrand.currency ?? undefined}
           approvalDecisions={decisions
             .filter(d => d.report_id === openMonthly.id && d.report_type === 'monthly')
             .map(d => ({

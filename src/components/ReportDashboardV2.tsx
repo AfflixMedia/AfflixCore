@@ -10,6 +10,7 @@ import {
   ScalarData, RowData, fieldValue, formatValue, FieldFormat, deriveSnapshot,
 } from '../lib/reportSchemaV2';
 import { sanitizeRich } from '../lib/sanitize';
+import { setReportCurrency } from '../lib/currency';
 import { computeSection14 } from '../lib/section14';
 import Section14Dashboard from './report/Section14Dashboard';
 import TopPerformers from './report/TopPerformers';
@@ -59,10 +60,12 @@ const S14_LABELS: Record<string, string> = {
 export default function ReportDashboard({
   c, p, trendData, hasPrev, commentsConfig, openSectionOnLoad, highlightCommentId,
   approvalDecisions, approvalAction, paidCollab, onOpenPaidCollabProgram, audience = 'staff',
-  chronologyData, reportMeta,
+  chronologyData, reportMeta, currency,
 }: {
   c: WeeklyReportContentV2;
   p: WeeklyReportContentV2 | null;
+  /** brand display currency (e.g. 'USD', 'EUR'); drives all money formatting. */
+  currency?: string;
   trendData: TrendPoint[];
   hasPrev: boolean;
   /** §2 auto-timeline (this report + prior weeks), built by the page. */
@@ -81,6 +84,7 @@ export default function ReportDashboard({
    *  'staff' (default) = the full input dashboard + a §14 client preview. */
   audience?: 'staff' | 'client';
 }) {
+  setReportCurrency(currency);
   const isClient = audience === 'client';
   const section14 = computeSection14(c, p);
   const [feedbackSection, setFeedbackSection] = useState<CommentSection | null>(null);

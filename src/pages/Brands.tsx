@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button, Card, Modal, Form, Spinner, Alert, Row, Col, InputGroup } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
+import { CURRENCIES } from '../lib/currency';
 import { useAuth } from '../auth/AuthContext';
 import Avatar from '../components/Avatar';
 
@@ -14,6 +15,7 @@ interface Brand {
   client_status: ClientStatus;
   shop_code: string | null;
   notes: string | null;
+  currency: string;
   created_at: string;
 }
 interface ClientLite { id: string; name: string; }
@@ -56,6 +58,7 @@ const empty = {
   client_status: 'in_progress' as ClientStatus,
   shop_code: '',
   notes: '',
+  currency: 'USD',
   monthly_fee: 0,
   paid_current_month: false,
 };
@@ -221,6 +224,7 @@ export default function Brands() {
       client_status: b.client_status,
       shop_code: b.shop_code ?? '',
       notes: b.notes ?? '',
+      currency: b.currency ?? 'USD',
       monthly_fee: isBob ? Number(feeByBrand[b.id] ?? 0) : 0,
       paid_current_month: false,
     });
@@ -259,6 +263,7 @@ export default function Brands() {
       client_status: form.client_status,
       shop_code: form.shop_code.trim() || null,
       notes: form.notes.trim() || null,
+      currency: form.currency || 'USD',
     };
     const fee = Number.isFinite(form.monthly_fee) ? form.monthly_fee : 0;
     let brandId = editId;
@@ -569,11 +574,18 @@ export default function Brands() {
                   <Form.Text className="text-muted">No clients yet — add one from the Clients menu first.</Form.Text>
                 )}
               </Form.Group>
-              <Form.Group className="col-md-5">
+              <Form.Group className="col-md-4">
                 <Form.Label>Client status</Form.Label>
                 <Form.Select value={form.client_status} onChange={e => setForm({ ...form, client_status: e.target.value as ClientStatus })}>
                   {STATUS_ORDER.map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
                 </Form.Select>
+              </Form.Group>
+              <Form.Group className="col-md-3">
+                <Form.Label>Currency</Form.Label>
+                <Form.Select value={form.currency} onChange={e => setForm({ ...form, currency: e.target.value })}>
+                  {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
+                </Form.Select>
+                <Form.Text className="text-muted">Used to format all report values for this brand.</Form.Text>
               </Form.Group>
               {/* Monthly fee + paid-status — Bob only. APCs never see or
                   submit budget data. */}

@@ -48,7 +48,7 @@ interface ReportRow {
   template_id?: string | null;
   review_status?: ReviewStatus; reviewed_at?: string | null; review_note?: string | null;
 }
-interface Brand { id: string; name: string; client: string; client_status: string | null; }
+interface Brand { id: string; name: string; client: string; client_status: string | null; currency?: string | null; }
 
 export default function WeeklyReportView() {
   const { id } = useParams<{ id: string }>();
@@ -141,7 +141,7 @@ export default function WeeklyReportView() {
       if (error) { setErr(error.message); setLoading(false); return; }
       const r = cur as ReportRow;
       setReport(r);
-      const { data: bd } = await supabase.from('brands').select('id,name,client,client_status').eq('id', r.brand_id).single();
+      const { data: bd } = await supabase.from('brands').select('id,name,client,client_status,currency').eq('id', r.brand_id).single();
       setBrand(bd as Brand);
       if (r.template_id) {
         const { data: tpl } = await supabase
@@ -379,6 +379,7 @@ export default function WeeklyReportView() {
           <ReportDashboardV3
             c={c}
             p={p}
+            currency={brand?.currency ?? undefined}
             wow={wowData}
             sampleSeries={sampleSeries}
             mtd={mtd ?? undefined}
@@ -402,6 +403,7 @@ export default function WeeklyReportView() {
           <ReportDashboardV2
             c={c}
             p={p}
+            currency={brand?.currency ?? undefined}
             trendData={trendData}
             chronologyData={chronologyData}
             hasPrev={!!prev}
@@ -420,6 +422,7 @@ export default function WeeklyReportView() {
           <ReportDashboard
             c={c}
             p={p}
+            currency={brand?.currency ?? undefined}
             trendData={trendData}
             hasPrev={!!prev}
             prevTopVideos={p?.top_videos}

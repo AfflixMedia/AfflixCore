@@ -8,6 +8,7 @@ import {
   WeeklyReportContentV3, WEEKLY_SECTIONS_V3, SECTION_BY_ID_V3, SectionDefV3, SectionField,
   ScalarData, RowData, fieldValue, formatValue,
 } from '../lib/reportSchemaV3';
+import { setReportCurrency } from '../lib/currency';
 import { sanitizeRich } from '../lib/sanitize';
 import DashSidebar, { DashNavItem } from './report/DashSidebar';
 import SectionComments, { Comment, CommentSection } from './SectionComments';
@@ -799,10 +800,12 @@ const SECTION_ACCENT: Record<string, string> = {
 
 export default function ReportDashboardV3({
   c, p, wow, sampleSeries, mtd, productSamples, offsiteSeries, affiliateSeries, gmvMaxSeries, hasPrev, commentsConfig, openSectionOnLoad, highlightCommentId,
-  approvalDecisions, approvalAction, audience = 'staff', reportMeta,
+  approvalDecisions, approvalAction, audience = 'staff', reportMeta, currency,
 }: {
   c: WeeklyReportContentV3;
   p: WeeklyReportContentV3 | null;
+  /** brand display currency (e.g. 'USD', 'EUR'); drives all money formatting. */
+  currency?: string;
   /** week-over-week series (bars=orders, line=GMV) built by the page. Falls back to trendData GMV. */
   wow?: WowPoint[];
   /** per-week samples/videos series for the §1 line chart (last point = current week). */
@@ -827,6 +830,9 @@ export default function ReportDashboardV3({
   approvalAction?: ApprovalActionConfig;
   audience?: 'staff' | 'client';
 }) {
+  // Set the report currency during render (before children paint) so every
+  // formatValue('currency', …) below emits this brand's symbol.
+  setReportCurrency(currency);
   const isClient = audience === 'client';
   const [feedbackSection, setFeedbackSection] = useState<CommentSection | null>(null);
   const [navCollapsed, setNavCollapsed] = useState<boolean>(() => {

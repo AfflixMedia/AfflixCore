@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState, FormEvent, Fragment } from 'react';
+import { useEffect, useMemo, useRef, useState, FormEvent, Fragment } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Card, Form, Button, Spinner, Alert, Badge, Modal, Offcanvas, Dropdown } from 'react-bootstrap';
+import { Card, Form, Button, Spinner, Alert, Badge, Modal, Offcanvas, Dropdown, Accordion } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import { formatRange } from '../lib/dates';
+import { sanitizeRich } from '../lib/sanitize';
+import { setReportCurrency } from '../lib/currency';
 import {
   WeeklyReportContentV3, emptyContentV3, normalizeContentV3, numOrNull,
   WEEKLY_SECTIONS_V3, SECTION_LABELS_V3, SectionDefV3, emptyRow,
@@ -32,7 +34,7 @@ interface ReportRow {
   id: string; brand_id: string; week_start: string; week_end: string;
   week_number: number; status: string; content: any;
 }
-interface Brand { id: string; name: string; client: string; client_status: string | null; }
+interface Brand { id: string; name: string; client: string; client_status: string | null; currency?: string | null; }
 type Msg = { kind: 'success' | 'warning' | 'danger'; text: string } | null;
 
 export default function WeeklyReportEditV3() {
@@ -46,6 +48,9 @@ export default function WeeklyReportEditV3() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Autosave: silently persist content (never status) after a short idle.
+  const lastSavedContent = useRef<string | null>(null);
+  const [autoSave, setAutoSave] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   const [showComments, setShowComments] = useState(false);
   const [priorReports, setPriorReports] = useState<ReportRow[]>([]);
@@ -94,8 +99,10 @@ export default function WeeklyReportEditV3() {
       if (error) { setErr(error.message); setLoading(false); return; }
       const r = data as ReportRow;
       setReport(r);
-      setC(normalizeContentV3(r.content));
-      const { data: bd } = await supabase.from('brands').select('id,name,client,client_status').eq('id', r.brand_id).single();
+      const normalized = normalizeContentV3(r.content);
+      setC(normalized);
+      lastSavedContent.current = JSON.stringify(normalized);   // autosave baseline
+      const { data: bd } = await supabase.from('brands').select('id,name,client,client_status,currency').eq('id', r.brand_id).single();
       setBrand(bd as Brand);
       const { data: pcp } = await supabase.from('paid_creator_programs')
         .select('id,name,ended_at').eq('brand_id', r.brand_id)
@@ -117,6 +124,23 @@ export default function WeeklyReportEditV3() {
       setLoading(false);
     })();
   }, [id]);
+
+  // ----- autosave: debounced, content-only (status is left untouched) --------
+  const contentKey = JSON.stringify(c);
+  useEffect(() => {
+    if (loading || !report || lastSavedContent.current === null) return;   // not until first load
+    if (brand?.client_status === 'closed') return;                          // inactive brand
+    if (contentKey === lastSavedContent.current) return;                    // nothing changed
+    setAutoSave('saving');
+    const t = setTimeout(async () => {
+      const { error } = await supabase.from('weekly_reports').update({ content: c }).eq('id', id);
+      if (error) { setAutoSave('error'); return; }
+      lastSavedContent.current = contentKey;
+      setAutoSave('saved');
+    }, 1200);
+    return () => clearTimeout(t);   // debounce: cancel on each keystroke / unmount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contentKey]);
 
   // ----- preset helpers (custom + standard) ---------------------------------
   const addCustomFromPreset = (preset: PresetRow) => {
@@ -453,7 +477,17 @@ export default function WeeklyReportEditV3() {
   if (err && !report) return <Alert variant="danger">{err}</Alert>;
   if (!report || !brand) return null;
 
+  // Editor previews format money too — set the brand currency so a stale value
+  // from a previously-viewed dashboard doesn't leak into this brand's preview.
+  setReportCurrency(brand.currency);
   const brandInactive = brand.client_status === 'closed';
+  const autoSaveBadge = autoSave === 'idle' ? null : (
+    <span className={`small d-inline-flex align-items-center me-2 ${autoSave === 'error' ? 'text-danger' : 'text-muted'}`}>
+      {autoSave === 'saving' && <><Spinner animation="border" size="sm" className="me-1" style={{ width: 13, height: 13 }} />Saving…</>}
+      {autoSave === 'saved' && <><i className="bi bi-check-circle-fill text-success me-1" />Saved</>}
+      {autoSave === 'error' && <><i className="bi bi-exclamation-triangle-fill me-1" />Autosave failed</>}
+    </span>
+  );
   const sectionFeedbackCount = (section: CommentSection) => comments.filter(x => x.section === section).length;
 
   const FeedbackButton = ({ section }: { section: CommentSection }) => {
@@ -697,6 +731,7 @@ export default function WeeklyReportEditV3() {
               <i className="bi bi-chat-left-text me-1" /> Load previous comments
             </Button>
           )}
+          {autoSaveBadge}
           <Button variant="outline-secondary" onClick={() => nav('/reporting/weekly')}>Cancel</Button>
           <Button variant="outline-primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
           <Button variant="primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
@@ -737,6 +772,34 @@ export default function WeeklyReportEditV3() {
             placeholder="Write your insights for this week…"
             minHeight={240}
           />
+          {priorReports.length > 0 && (
+            <div className="mt-4">
+              <div className="text-muted small fw-semibold mb-2">
+                <i className="bi bi-clock-history me-1" />Previous weeks' insights (read-only) — for reference
+              </div>
+              <Accordion>
+                {priorReports.map((p, i) => {
+                  const cn: any = p.content ?? {};
+                  const html: string = cn?.insights?.summary ?? (typeof cn?.insights === 'string' ? cn.insights : '') ?? cn?.summary ?? '';
+                  const clean = sanitizeRich(html);
+                  const hasText = clean.replace(/<[^>]*>/g, '').trim().length > 0;
+                  return (
+                    <Accordion.Item eventKey={String(i)} key={p.id}>
+                      <Accordion.Header>
+                        <span className="fw-semibold">Week #{(p as any).week_number ?? i + 1}</span>
+                        <span className="text-muted ms-2 small">{formatRange(p.week_start, p.week_end)}</span>
+                      </Accordion.Header>
+                      <Accordion.Body>
+                        {hasText
+                          ? <div className="ac-rte-view" dangerouslySetInnerHTML={{ __html: clean }} />
+                          : <span className="text-muted fst-italic">No insights were written for this week.</span>}
+                      </Accordion.Body>
+                    </Accordion.Item>
+                  );
+                })}
+              </Accordion>
+            </div>
+          )}
         </Card.Body>
       </Card>
       {renderCustomAt('insights')}
@@ -807,6 +870,7 @@ export default function WeeklyReportEditV3() {
       </Offcanvas>
 
       <div className="d-flex justify-content-end gap-2 mb-4">
+        {autoSaveBadge}
         <Button variant="outline-secondary" onClick={() => nav('/reporting/weekly')}>Cancel</Button>
         <Button variant="outline-primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
         <Button variant="primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>

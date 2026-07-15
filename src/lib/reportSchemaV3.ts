@@ -22,6 +22,7 @@
 // ============================================================================
 
 import { CustomSection, CustomField, CustomFieldType, ApprovalRequest, Insights } from './reportSchema';
+import { formatMoney } from './currency';
 export type { CustomSection, CustomField, CustomFieldType, ApprovalRequest, Insights };
 
 /** Anchors a custom section relative to a v3 standard section. */
@@ -465,11 +466,7 @@ export function formatValue(format: FieldFormat, v: number | null | undefined, o
   const n = Number(v);
   if (!Number.isFinite(n)) return '—';
   switch (format) {
-    case 'currency': {
-      const abs = Math.abs(n);
-      if (opts?.compact && abs >= 10000) return `$${(n / 1000).toFixed(1).replace(/\.0$/, '')}k`;
-      return `$${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
-    }
+    case 'currency': return formatMoney(n, { compact: opts?.compact });
     case 'percent': return `${n.toFixed(2).replace(/\.00$/, '')}%`;
     case 'ratio': return `${n.toFixed(2)}x`;
     case 'score': return n.toFixed(1);

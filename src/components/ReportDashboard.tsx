@@ -5,6 +5,7 @@ import {
   LineChart, Line, RadialBarChart, RadialBar, PolarAngleAxis,
 } from 'recharts';
 import { WeeklyReportContent, ListingQuality, CustomSection, CustomField, StandardSectionId } from '../lib/reportSchema';
+import { setReportCurrency, formatMoney } from '../lib/currency';
 import DOMPurify from 'dompurify';
 import SectionComments, { Comment, CommentSection } from './SectionComments';
 import PaidCollabSectionBlock, { PaidCollabPrefetch } from './paidcollab/PaidCollabSectionBlock';
@@ -40,10 +41,12 @@ export interface ApprovalActionConfig {
 
 export default function ReportDashboard({
   c, p, trendData, hasPrev, commentsConfig, prevTopVideos, openSectionOnLoad, highlightCommentId,
-  approvalDecisions, approvalAction, paidCollab, onOpenPaidCollabProgram,
+  approvalDecisions, approvalAction, paidCollab, onOpenPaidCollabProgram, currency,
 }: {
   c: WeeklyReportContent;
   p: WeeklyReportContent | null;
+  /** brand display currency (e.g. 'USD', 'EUR'); drives all money formatting. */
+  currency?: string;
   trendData: TrendPoint[];
   hasPrev: boolean;
   commentsConfig?: CommentsConfig;
@@ -62,6 +65,7 @@ export default function ReportDashboard({
   /** When provided, paid-collab sections show a "View full program" button. */
   onOpenPaidCollabProgram?: (programId: string) => void;
 }) {
+  setReportCurrency(currency);
   const o = c.overall, po = p?.overall;
   const vp = c.video_performance, pvp = p?.video_performance;
   const gm = c.gmv_max, pgm = p?.gmv_max;
@@ -207,14 +211,14 @@ export default function ReportDashboard({
 
       {/* KPI cards */}
       <Row className="g-3 mb-4">
-        <KpiCard label="Total GMV"       value={`$${o.total_gmv.toLocaleString()}`}      prev={po?.total_gmv}      cur={o.total_gmv} money />
-        <KpiCard label="Affiliate GMV"   value={`$${o.affiliate_gmv.toLocaleString()}`}  prev={po?.affiliate_gmv}  cur={o.affiliate_gmv} money />
+        <KpiCard label="Total GMV"       value={formatMoney(o.total_gmv)}      prev={po?.total_gmv}      cur={o.total_gmv} money />
+        <KpiCard label="Affiliate GMV"   value={formatMoney(o.affiliate_gmv)}  prev={po?.affiliate_gmv}  cur={o.affiliate_gmv} money />
         <KpiCard label="Orders"          value={o.orders.toLocaleString()}               prev={po?.orders}         cur={o.orders} />
         <KpiCard label="Samples Approved"value={o.samples_approved.toLocaleString()}     prev={po?.samples_approved} cur={o.samples_approved} sub={o.samples_approved_note} />
         <KpiCard label="Pending Collabs" value={o.pending_collabs.toLocaleString()}      prev={po?.pending_collabs} cur={o.pending_collabs} />
         <KpiCard
           label="Ad Spend"
-          value={o.ad_spend_not_started ? 'Not started' : `$${o.ad_spend.toLocaleString()}`}
+          value={o.ad_spend_not_started ? 'Not started' : formatMoney(o.ad_spend)}
           prev={po?.ad_spend_not_started ? undefined : po?.ad_spend}
           cur={o.ad_spend_not_started ? 0 : o.ad_spend}
           money
@@ -314,7 +318,7 @@ export default function ReportDashboard({
                     </td>
                     <td className="text-end">{r.videos}</td>
                     <td className="text-end">{r.items_sold}</td>
-                    <td className="text-end">${r.gmv.toLocaleString()}</td>
+                    <td className="text-end">{formatMoney(r.gmv)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -411,12 +415,12 @@ export default function ReportDashboard({
                       </td>
                       <td className="text-end">{r.total_units_sold}</td>
                       <td className="text-end">{r.affiliate_units_sold}</td>
-                      <td className="text-end">${r.total_gmv.toLocaleString()}</td>
+                      <td className="text-end">{formatMoney(r.total_gmv)}</td>
                       <td className="text-end">
-                        <div>${r.affiliate_gmv.toLocaleString()}</div>
+                        <div>{formatMoney(r.affiliate_gmv)}</div>
                         {affDelta !== null && affDelta !== 0 && (
                           <small className={affDelta > 0 ? 'text-success' : 'text-danger'}>
-                            {affDelta > 0 ? '▲' : '▼'} ${Math.abs(affDelta).toLocaleString()}
+                            {affDelta > 0 ? '▲' : '▼'} {formatMoney(Math.abs(affDelta))}
                           </small>
                         )}
                       </td>
@@ -792,7 +796,7 @@ function VideosTable({ rows }: { rows: WeeklyReportContent['top_videos'] }) {
               {r.video_url ? <a href={r.video_url} target="_blank" rel="noreferrer">{r.creator_name}</a> : r.creator_name}
             </td>
             <td className="text-end">{r.items_sold}</td>
-            <td className="text-end">${r.gmv.toLocaleString()}</td>
+            <td className="text-end">{formatMoney(r.gmv)}</td>
           </tr>
         ))}
       </tbody>
@@ -836,7 +840,7 @@ function MiniStat({ label, cur, prev, money, dec, suffix, invert }: {
   invert?: boolean;
 }) {
   const fmt = (n: number) =>
-    money ? `$${n.toLocaleString()}`
+    money ? formatMoney(n)
     : dec ? n.toFixed(2)
     : suffix ? `${n.toFixed(2)}${suffix}`
     : n.toLocaleString();
@@ -868,7 +872,7 @@ function Delta({ cur, prev, money, dec, invert }: { cur: number; prev?: number; 
   const good = invert ? diff <= 0 : diff >= 0;
   const color = good ? 'text-success' : 'text-danger';
   const icon = up ? 'bi-arrow-up-right' : 'bi-arrow-down-right';
-  const fmt = (n: number) => money ? `$${Math.abs(n).toLocaleString()}` : dec ? Math.abs(n).toFixed(2) : Math.abs(n).toLocaleString();
+  const fmt = (n: number) => money ? formatMoney(Math.abs(n)) : dec ? Math.abs(n).toFixed(2) : Math.abs(n).toLocaleString();
   return (
     <small className={color} title={`${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`}>
       <i className={`bi ${icon}`} /> {fmt(diff)} ({pct >= 0 ? '+' : ''}{fmtPct(pct)}%)

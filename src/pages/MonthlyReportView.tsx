@@ -23,7 +23,7 @@ interface MonthlyRow {
   template_id?: string | null;
   review_status?: ReviewStatus; reviewed_at?: string | null; review_note?: string | null;
 }
-interface Brand { id: string; name: string; client: string; client_status: string | null; }
+interface Brand { id: string; name: string; client: string; client_status: string | null; currency?: string | null; }
 
 function shiftMonth(yyyymm: string, delta: number) {
   const [y, m] = yyyymm.split('-').map(Number);
@@ -102,7 +102,7 @@ export default function MonthlyReportView() {
       if (error) { setErr(error.message); setLoading(false); return; }
       const r = cur as MonthlyRow;
       setReport(r);
-      const { data: bd } = await supabase.from('brands').select('id,name,client,client_status').eq('id', r.brand_id).single();
+      const { data: bd } = await supabase.from('brands').select('id,name,client,client_status,currency').eq('id', r.brand_id).single();
       setBrand(bd as Brand);
       if (r.template_id) {
         const { data: tpl } = await supabase
@@ -254,6 +254,7 @@ export default function MonthlyReportView() {
           monthLabel={fmtMonth(report.month)}
           brandName={brand.name}
           clientName={brand.client}
+          currency={brand.currency ?? undefined}
           openSectionOnLoad={openSection}
           highlightCommentId={highlightCommentId}
           approvalDecisions={decisions}

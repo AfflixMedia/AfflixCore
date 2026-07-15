@@ -79,7 +79,7 @@ serve(async (req) => {
       { data: rawResources },
     ] = await Promise.all([
       admin.from('clients').select('id,name').eq('id', link.client_id).single(),
-      admin.from('brands').select('id,name,client,client_id,share_enabled,payment_popup_default').in('id', brandIds),
+      admin.from('brands').select('id,name,client,client_id,share_enabled,payment_popup_default,currency').in('id', brandIds),
       includeReports
         ? admin.from('weekly_reports').select('*').in('brand_id', brandIds)
             .eq('is_shared', true)
