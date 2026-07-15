@@ -272,6 +272,22 @@ export default function SharedReports() {
       });
   }, [openReport, reports]);
 
+  // v3 §7 — per-week offsite metric series for the trend sparklines (client-safe;
+  // read straight from each shared report's content).
+  const offsiteSeries = useMemo(() => {
+    if (!openReport) return [];
+    return reports
+      .filter(r => r.brand_id === openReport.brand_id && r.week_start <= openReport.week_start)
+      .sort((a, b) => a.week_start.localeCompare(b.week_start))
+      .slice(-8)
+      .map(t => {
+        const cn: any = t.content ?? {};
+        const o: any = cn?.offsite ?? {};
+        const toN = (v: any) => (v == null || v === '') ? null : (Number.isFinite(Number(v)) ? Number(v) : null);
+        return { label: formatWeekShort(t.week_start, t.week_end), offsite_gmv: toN(o.offsite_gmv), tiktok_shop_gmv: toN(o.tiktok_shop_gmv), offsite_effect: toN(o.offsite_effect) };
+      });
+  }, [openReport, reports]);
+
   // Decisions are keyed by (report_type, report_id) so a weekly + monthly report
   // never accidentally share state.
   const decidedSet = useMemo(
@@ -506,6 +522,7 @@ export default function SharedReports() {
           trendData={trendData}
           wow={wowData}
           sampleSeries={sampleSeries}
+          offsiteSeries={offsiteSeries}
           hasPrev={!!prevReport}
           audience={isClientDash ? 'client' : undefined}
           reportMeta={isClientDash ? {

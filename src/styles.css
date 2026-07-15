@@ -4242,3 +4242,12 @@ body.ac-pdf-capturing .dash-sidebar { display: none !important; }
 .v3-live-pulse { width: 9px; height: 9px; border-radius: 50%; background: #16c784; box-shadow: 0 0 0 0 rgba(22,199,132,.5); animation: v3pulse 1.4s infinite; }
 @keyframes v3pulse { 0% { box-shadow: 0 0 0 0 rgba(22,199,132,.55); } 70% { box-shadow: 0 0 0 7px rgba(22,199,132,0); } 100% { box-shadow: 0 0 0 0 rgba(22,199,132,0); } }
 .v3-mtd-note { font-size: .66rem; color: #a78a76; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+
+/* §7 Offsite — metric value + WoW delta + trend sparkline rows */
+.v3-offtrends { display: flex; flex-direction: column; gap: .6rem; }
+.v3-offtrend { border: 1px solid #eef0f4; border-radius: 14px; padding: .65rem .9rem; background: #fbfcfe; }
+.v3-offtrend.is-accent { background: #f0fdf8; border-color: #c9f0e0; }
+.v3-offtrend-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .05rem; }
+.v3-offtrend-body { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.v3-offtrend-val { font-size: 1.5rem; font-weight: 800; color: #1f2733; line-height: 1.15; white-space: nowrap; }
+.v3-offtrend-spark { flex: 1 1 0; min-width: 0; height: 58px; }

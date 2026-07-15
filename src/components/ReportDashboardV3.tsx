@@ -1,7 +1,7 @@
 import { useEffect, useState, ReactNode } from 'react';
 import { Offcanvas, Button, Badge, Alert, Form } from 'react-bootstrap';
 import {
-  ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid,
+  ResponsiveContainer, ComposedChart, LineChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid,
   PieChart, Pie, Cell, LabelList,
 } from 'recharts';
 import {
@@ -133,24 +133,26 @@ const LIVE = '#16c784';
 // Dot renderer: plain series-coloured dots, but the latest point (the report
 // being viewed) gets a big blinking green "live" marker — expanding halo +
 // pulsing inner dot + white ring, so no hover is needed to spot the current week.
-function makeDot(lastIdx: number, baseColor: string) {
+function makeDot(lastIdx: number, baseColor: string, opts?: { small?: boolean }) {
+  const s = opts?.small;
+  const h0 = s ? 5 : 9, h1 = s ? 11 : 17, inner = s ? 4.5 : 6, ring = s ? 2 : 2.5, base = s ? 2.5 : 3.5;
   return (props: any) => {
     const { cx, cy, index } = props;
     if (cx == null || cy == null) return <g key={index} />;
     if (index === lastIdx) {
       return (
         <g key={index}>
-          <circle cx={cx} cy={cy} r={9} fill={LIVE} opacity={0.22}>
-            <animate attributeName="r" values="8;17;8" dur="1.4s" repeatCount="indefinite" />
+          <circle cx={cx} cy={cy} r={h0} fill={LIVE} opacity={0.22}>
+            <animate attributeName="r" values={`${h0};${h1};${h0}`} dur="1.4s" repeatCount="indefinite" />
             <animate attributeName="opacity" values="0.35;0;0.35" dur="1.4s" repeatCount="indefinite" />
           </circle>
-          <circle cx={cx} cy={cy} r={6} fill={LIVE} stroke="#fff" strokeWidth={2.5}>
+          <circle cx={cx} cy={cy} r={inner} fill={LIVE} stroke="#fff" strokeWidth={ring}>
             <animate attributeName="fill-opacity" values="1;0.5;1" dur="1.4s" repeatCount="indefinite" />
           </circle>
         </g>
       );
     }
-    return <circle key={index} cx={cx} cy={cy} r={3.5} fill={baseColor} />;
+    return <circle key={index} cx={cx} cy={cy} r={base} fill={baseColor} />;
   };
 }
 
@@ -318,6 +320,51 @@ function LegendList({ slices }: { slices: Slice[] }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ---- ss7 · one metric as a value + WoW delta + trend sparkline -------------
+//  Replaces the old right-hand KPI cards: each metric shows its current value,
+//  the week-over-week change, and a mini trend line whose latest week is the
+//  green blinking "live" dot.
+type TrendSeries = { label: string; v: number | null }[];
+function MetricTrend({ label, format, color, series, current, lowerIsBetter, highlight }: {
+  label: string; format: 'currency' | 'percent' | 'number'; color: string;
+  series: TrendSeries; current: number | null; lowerIsBetter?: boolean; highlight?: boolean;
+}) {
+  const valued = series.filter(s => s.v != null);
+  const n = series.length;
+  // Value/delta/live-dot all describe the current (latest) week — series[n-1].
+  const cur = (n ? series[n - 1].v : null) ?? current;
+  const prev = n > 1 ? series[n - 2].v : null;
+  const diff = (cur != null && prev != null) ? cur - prev : null;
+  const pct = diff == null ? null : (prev === 0 ? 100 : (diff / Math.abs(prev as number)) * 100);
+  const good = diff == null ? false : (lowerIsBetter ? diff < 0 : diff > 0);
+  return (
+    <div className={`v3-offtrend${highlight ? ' is-accent' : ''}`}>
+      <div className="v3-offtrend-head">
+        <span className="s14-kpi-label">{label}</span>
+        {pct != null && diff !== 0 && (
+          <span className={`ac-pill ${good ? 'ac-pill-up' : 'ac-pill-down'}`} title={`${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`}>
+            <i className={`bi ${diff! >= 0 ? 'bi-arrow-up-short' : 'bi-arrow-down-short'}`} />
+            {prev === 0 ? 'new' : `${pct >= 0 ? '+' : ''}${fmtPct(pct)}%`}
+          </span>
+        )}
+      </div>
+      <div className="v3-offtrend-body">
+        <div className="v3-offtrend-val" style={highlight ? { color } : undefined}>{cur == null ? '—' : formatValue(format, cur)}</div>
+        {valued.length >= 2 && (
+          <div className="v3-offtrend-spark">
+            <ResponsiveContainer>
+              <LineChart data={series} margin={{ top: 12, right: 14, bottom: 8, left: 14 }}>
+                <Line type="monotone" dataKey="v" stroke={color} strokeWidth={2.5}
+                  dot={makeDot(series.length - 1, color, { small: true })} isAnimationActive={false} connectNulls />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -594,7 +641,7 @@ const SECTION_ACCENT: Record<string, string> = {
 };
 
 export default function ReportDashboardV3({
-  c, p, wow, sampleSeries, mtd, productSamples, hasPrev, commentsConfig, openSectionOnLoad, highlightCommentId,
+  c, p, wow, sampleSeries, mtd, productSamples, offsiteSeries, hasPrev, commentsConfig, openSectionOnLoad, highlightCommentId,
   approvalDecisions, approvalAction, audience = 'staff', reportMeta,
 }: {
   c: WeeklyReportContentV3;
@@ -607,6 +654,8 @@ export default function ReportDashboardV3({
   mtd?: { samples: number | null; videos: number | null };
   /** §3 per-product "samples approved this week", keyed by product_id. */
   productSamples?: Record<string, number | null>;
+  /** §7 per-week offsite metrics for the trend sparklines (last point = current week). */
+  offsiteSeries?: { label: string; offsite_gmv: number | null; tiktok_shop_gmv: number | null; offsite_effect: number | null }[];
   trendData?: TrendPoint[];
   hasPrev: boolean;
   reportMeta?: { title: string; period: string; compare?: string };
@@ -773,10 +822,21 @@ export default function ReportDashboardV3({
           { label: 'TikTok Shop GMV', value: numv(data?.tiktok_shop_gmv), color: '#0d6efd' },
           { label: 'Offsite GMV', value: numv(data?.offsite_gmv), color: '#e8862e' },
         ];
+        const S = offsiteSeries ?? [];
+        const serie = (k: 'offsite_gmv' | 'tiktok_shop_gmv' | 'offsite_effect') => S.map(x => ({ label: x.label, v: x[k] }));
         return (
-          <div className="row g-3">
-            <div className="col-lg-5"><div className="s14-card h-100"><div className="s14-kpi-label mb-2">Onsite vs offsite GMV</div><Donut slices={slices} centerLabel="Total GMV" /></div></div>
-            <div className="col-lg-7"><TileGrid def={def} data={data} prev={prev} col="col-12 col-sm-4" /></div>
+          <div className="s14-card">
+            <div className="s14-kpi-label mb-3">Onsite vs offsite GMV</div>
+            <div className="row g-4 align-items-center">
+              <div className="col-lg-5"><Donut slices={slices} centerLabel="Total GMV" /></div>
+              <div className="col-lg-7">
+                <div className="v3-offtrends">
+                  <MetricTrend label="Offsite GMV" format="currency" color="#e8862e" series={serie('offsite_gmv')} current={num(data?.offsite_gmv)} />
+                  <MetricTrend label="TikTok Shop GMV" format="currency" color="#0d6efd" series={serie('tiktok_shop_gmv')} current={num(data?.tiktok_shop_gmv)} />
+                  <MetricTrend label="Offsite Effect" format="percent" color="#16c784" series={serie('offsite_effect')} current={num(data?.offsite_effect)} highlight />
+                </div>
+              </div>
+            </div>
           </div>
         );
       }
