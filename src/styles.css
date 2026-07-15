@@ -4239,6 +4239,6 @@ body.ac-pdf-capturing .dash-sidebar { display: none !important; }
 
 /* #2 / #3 — "this week" live-dot legend + MTD note */
 .v3-live-legend { display: inline-flex; align-items: center; gap: 6px; font-size: .74rem; color: #8a93a6; font-weight: 600; }
-.v3-live-pulse { width: 9px; height: 9px; border-radius: 50%; background: #e8862e; box-shadow: 0 0 0 0 rgba(232,134,46,.5); animation: v3pulse 1.6s infinite; }
-@keyframes v3pulse { 0% { box-shadow: 0 0 0 0 rgba(232,134,46,.5); } 70% { box-shadow: 0 0 0 7px rgba(232,134,46,0); } 100% { box-shadow: 0 0 0 0 rgba(232,134,46,0); } }
+.v3-live-pulse { width: 9px; height: 9px; border-radius: 50%; background: #16c784; box-shadow: 0 0 0 0 rgba(22,199,132,.5); animation: v3pulse 1.4s infinite; }
+@keyframes v3pulse { 0% { box-shadow: 0 0 0 0 rgba(22,199,132,.55); } 70% { box-shadow: 0 0 0 7px rgba(22,199,132,0); } 100% { box-shadow: 0 0 0 0 rgba(22,199,132,0); } }
 .v3-mtd-note { font-size: .66rem; color: #a78a76; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }

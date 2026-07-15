@@ -127,27 +127,36 @@ function ShopHealthGauge({ score, ranking, prevRanking }: {
   );
 }
 
-// ---- ss3 · GMV (line) + Orders (bars) combo, up to 8 weeks ------------------
-//  Every GMV point carries its value label (no hover needed); the latest week
-//  (the report being viewed) gets a pulsing "live" dot.
-function LiveDot(lastIdx: number) {
+// Shared "live" accent for the current (latest) week — a vivid green that pops
+// against the orange/blue series lines so "this week" is unmistakable.
+const LIVE = '#16c784';
+// Dot renderer: plain series-coloured dots, but the latest point (the report
+// being viewed) gets a big blinking green "live" marker — expanding halo +
+// pulsing inner dot + white ring, so no hover is needed to spot the current week.
+function makeDot(lastIdx: number, baseColor: string) {
   return (props: any) => {
     const { cx, cy, index } = props;
     if (cx == null || cy == null) return <g key={index} />;
     if (index === lastIdx) {
       return (
         <g key={index}>
-          <circle cx={cx} cy={cy} r={8} fill="#e8862e" opacity={0.25}>
-            <animate attributeName="r" values="7;13;7" dur="1.6s" repeatCount="indefinite" />
-            <animate attributeName="opacity" values="0.3;0;0.3" dur="1.6s" repeatCount="indefinite" />
+          <circle cx={cx} cy={cy} r={9} fill={LIVE} opacity={0.22}>
+            <animate attributeName="r" values="8;17;8" dur="1.4s" repeatCount="indefinite" />
+            <animate attributeName="opacity" values="0.35;0;0.35" dur="1.4s" repeatCount="indefinite" />
           </circle>
-          <circle cx={cx} cy={cy} r={5} fill="#e8862e" stroke="#fff" strokeWidth={2} />
+          <circle cx={cx} cy={cy} r={6} fill={LIVE} stroke="#fff" strokeWidth={2.5}>
+            <animate attributeName="fill-opacity" values="1;0.5;1" dur="1.4s" repeatCount="indefinite" />
+          </circle>
         </g>
       );
     }
-    return <circle key={index} cx={cx} cy={cy} r={3.5} fill="#e8862e" />;
+    return <circle key={index} cx={cx} cy={cy} r={3.5} fill={baseColor} />;
   };
 }
+
+// ---- ss3 · GMV (line) + Orders (bars) combo, up to 8 weeks ------------------
+//  Every GMV point carries its value label (no hover needed); the latest week
+//  (the report being viewed) gets a blinking green "live" dot.
 function WowCombo({ data }: { data: WowPoint[] }) {
   if (data.length < 2) return null;
   return (
@@ -173,7 +182,7 @@ function WowCombo({ data }: { data: WowPoint[] }) {
               formatter={(v: any, n: any) => n === 'GMV' ? [formatValue('currency', Number(v)), 'GMV'] : [formatValue('number', Number(v)), 'Orders']} />
             <Bar yAxisId="o" dataKey="orders" name="Orders" fill="#dfe3ea" radius={[6, 6, 0, 0]} maxBarSize={44} />
             <Line yAxisId="g" type="monotone" dataKey="gmv" name="GMV" stroke="#e8862e" strokeWidth={3}
-              dot={LiveDot(data.length - 1)} activeDot={{ r: 6 }} isAnimationActive={false}>
+              dot={makeDot(data.length - 1, '#e8862e')} activeDot={{ r: 6 }} isAnimationActive={false}>
               <LabelList dataKey="gmv" position="top" offset={12}
                 formatter={(v: any) => Number(v) ? formatValue('currency', Number(v), { compact: true }) : ''}
                 style={{ fontSize: 11, fontWeight: 700, fill: '#5b6472' }} />
@@ -189,20 +198,7 @@ function WowCombo({ data }: { data: WowPoint[] }) {
 function SamplesLineChart({ data }: { data: { label: string; samples: number | null; videos: number | null }[] }) {
   if (data.filter(d => d.samples != null || d.videos != null).length < 2) return null;
   const lastIdx = data.length - 1;
-  const dotFor = (color: string) => (props: any) => {
-    const { cx, cy, index } = props;
-    if (cx == null || cy == null) return <g key={index} />;
-    if (index === lastIdx) return (
-      <g key={index}>
-        <circle cx={cx} cy={cy} r={7} fill={color} opacity={0.25}>
-          <animate attributeName="r" values="6;11;6" dur="1.6s" repeatCount="indefinite" />
-          <animate attributeName="opacity" values="0.3;0;0.3" dur="1.6s" repeatCount="indefinite" />
-        </circle>
-        <circle cx={cx} cy={cy} r={4.5} fill={color} stroke="#fff" strokeWidth={2} />
-      </g>
-    );
-    return <circle key={index} cx={cx} cy={cy} r={3} fill={color} />;
-  };
+  const numLabel = (v: any) => (v == null || v === '') ? '' : formatValue('number', Number(v));
   return (
     <div className="s14-card mt-3">
       <div className="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
@@ -213,15 +209,19 @@ function SamplesLineChart({ data }: { data: { label: string; samples: number | n
           <span className="v3-live-legend"><span className="v3-live-pulse" />This week</span>
         </div>
       </div>
-      <div style={{ height: 240 }}>
+      <div style={{ height: 252 }}>
         <ResponsiveContainer>
-          <ComposedChart data={data} margin={{ top: 18, right: 14, bottom: 4, left: 4 }}>
+          <ComposedChart data={data} margin={{ top: 24, right: 14, bottom: 16, left: 4 }}>
             <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#f1f5f9" />
             <XAxis dataKey="label" tick={{ fontSize: 12, fill: '#8a93a6' }} tickLine={false} axisLine={{ stroke: '#eadfd6' }} />
             <YAxis tick={{ fontSize: 11, fill: '#b3bac6' }} tickLine={false} axisLine={false} width={36} allowDecimals={false} />
             <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #eef0f4', boxShadow: '0 10px 28px rgba(16,24,40,.12)', fontSize: 13 }} />
-            <Line type="monotone" dataKey="samples" name="Samples" stroke="#e8862e" strokeWidth={3} dot={dotFor('#e8862e')} activeDot={{ r: 6 }} isAnimationActive={false} connectNulls />
-            <Line type="monotone" dataKey="videos" name="Videos" stroke="#0d6efd" strokeWidth={3} dot={dotFor('#0d6efd')} activeDot={{ r: 6 }} isAnimationActive={false} connectNulls />
+            <Line type="monotone" dataKey="samples" name="Samples" stroke="#e8862e" strokeWidth={3} dot={makeDot(lastIdx, '#e8862e')} activeDot={{ r: 6 }} isAnimationActive={false} connectNulls>
+              <LabelList dataKey="samples" position="top" offset={12} formatter={numLabel} style={{ fontSize: 11, fontWeight: 700, fill: '#c2691f' }} />
+            </Line>
+            <Line type="monotone" dataKey="videos" name="Videos" stroke="#0d6efd" strokeWidth={3} dot={makeDot(lastIdx, '#0d6efd')} activeDot={{ r: 6 }} isAnimationActive={false} connectNulls>
+              <LabelList dataKey="videos" position="bottom" offset={12} formatter={numLabel} style={{ fontSize: 11, fontWeight: 700, fill: '#0b5ed7' }} />
+            </Line>
           </ComposedChart>
         </ResponsiveContainer>
       </div>
