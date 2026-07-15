@@ -208,6 +208,45 @@ export default function WeeklyReportView() {
     const orders = cn?.overall?.orders ?? cn?.snapshot?.orders ?? cn?.shop_analytics?.orders;
     return { label: formatWeekShort(t.week_start, t.week_end), gmv: Number(gmv) || 0, orders: Number(orders) || 0 };
   }), [trend]);
+  // v3 §1 — per-week samples/videos line series (from each week's content).
+  const sampleSeries = useMemo(() => trend.map(t => {
+    const s: any = (t.content ?? {})?.sampling ?? {};
+    const toN = (v: any) => (v == null || v === '') ? null : (Number.isFinite(Number(v)) ? Number(v) : null);
+    return { label: formatWeekShort(t.week_start, t.week_end), samples: toN(s.samples_approved), videos: toN(s.new_videos_posted) };
+  }), [trend]);
+  // v3 §1 month-to-date + §3 per-product samples-this-week (from Sample Seeding).
+  const [mtd, setMtd] = useState<{ samples: number | null; videos: number | null } | null>(null);
+  const [productSamples, setProductSamples] = useState<Record<string, number | null>>({});
+  useEffect(() => {
+    if (!report || (report.content as any)?.format_version !== 'v3') return;
+    let alive = true;
+    (async () => {
+      const monthStart = `${report.week_end.slice(0, 7)}-01`;
+      const [{ data: daily }, { data: sprods }] = await Promise.all([
+        supabase.from('brand_samples_daily').select('entry_date,new_videos,others_count,product_counts')
+          .eq('brand_id', report.brand_id).gte('entry_date', monthStart).lte('entry_date', report.week_end),
+        supabase.from('brand_samples_products').select('id,external_product_id').eq('brand_id', report.brand_id),
+      ]);
+      if (!alive) return;
+      const rows = (daily as any[]) ?? [];
+      const sumCounts = (pc: any) => Object.values(pc ?? {}).reduce((a: number, v: any) => a + (Number(v) || 0), 0);
+      setMtd(rows.length === 0 ? { samples: null, videos: null } : {
+        samples: rows.reduce((s, d) => s + sumCounts(d.product_counts) + (Number(d.others_count) || 0), 0),
+        videos: rows.reduce((s, d) => s + (Number(d.new_videos) || 0), 0),
+      });
+      // Per-product samples this week: aggregate product_counts over the week,
+      // then map each sample-seeding product id -> its external product id so it
+      // matches the report's product_id column.
+      const weekRows = rows.filter(d => d.entry_date >= report.week_start && d.entry_date <= report.week_end);
+      const bySpid: Record<string, number> = {};
+      for (const d of weekRows) for (const [spid, cnt] of Object.entries(d.product_counts ?? {})) bySpid[spid] = (bySpid[spid] ?? 0) + (Number(cnt) || 0);
+      const extBySpid = new Map(((sprods as any[]) ?? []).map(p => [String(p.id), String(p.external_product_id ?? '')]));
+      const byExt: Record<string, number> = {};
+      for (const [spid, cnt] of Object.entries(bySpid)) { const ext = extBySpid.get(spid); if (ext) byExt[ext] = (byExt[ext] ?? 0) + cnt; }
+      setProductSamples(byExt);
+    })();
+    return () => { alive = false; };
+  }, [report]);
 
   const addComment = async (section: CommentSection, body: string, _authorName: string, parentId?: string) => {
     // We ignore the passed-in author name — the edge function uses the
@@ -311,6 +350,9 @@ export default function WeeklyReportView() {
             c={c}
             p={p}
             wow={wowData}
+            sampleSeries={sampleSeries}
+            mtd={mtd ?? undefined}
+            productSamples={productSamples}
             trendData={trendData}
             hasPrev={!!prev}
             openSectionOnLoad={openSection}

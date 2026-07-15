@@ -4196,3 +4196,49 @@ body.ac-pdf-capturing .dash-sidebar { display: none !important; }
 /* Hide the native month-input's own text/spinners — the label shows the value. */
 .wr-month-input::-webkit-datetime-edit, .wr-month-input::-webkit-inner-spin-button, .wr-month-input::-webkit-clear-button { display: none; }
 .wr-month-input::-webkit-calendar-picker-indicator { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+
+/* ===================================================================
+   v3 dashboard refinements (sidebar recolor · ss6 funnel · product
+   rank · live-dot legend · MTD note)
+   =================================================================== */
+
+/* #1 — section-jump rail in the app's dark + orange scheme (v3 only) */
+.v3-dash .dash-sidebar { background: #171a24; border-color: #2a2f3d; box-shadow: 0 12px 30px rgba(0,0,0,.30); }
+.v3-dash .dash-sidebar-title { color: #7f8798; }
+.v3-dash .dash-sidebar-toggle { color: #c4cbd8; }
+.v3-dash .dash-sidebar-toggle:hover { background: #262b38; color: #fff; }
+.v3-dash .dash-sidebar-item { color: #c4cbd8; }
+.v3-dash .dash-sidebar-item i { color: #8b93a4; }
+.v3-dash .dash-sidebar-item:hover { background: #222836; color: #fff; }
+.v3-dash .dash-sidebar-item:hover i { color: #e8862e; }
+.v3-dash .dash-sidebar-item.active { background: linear-gradient(135deg, #e8862e, #f2a355); color: #fff; box-shadow: 0 6px 16px rgba(232,134,46,.4); }
+.v3-dash .dash-sidebar-item.active i { color: #fff; }
+.v3-dash .dash-live-label { color: #7f8798; }
+
+/* #6 — ss6 conversion funnel: teal trapezoids, value on right, rate gutter */
+.v3fn { display: flex; flex-direction: column; gap: 26px; padding: 10px 6px 10px 104px; }
+.v3fn-item { position: relative; }
+.v3fn-track { position: relative; display: flex; align-items: center; background: #f2f5f8; border-radius: 8px; height: 62px; }
+.v3fn-bar { height: 100%; display: flex; align-items: center; padding: 0 18px; border-radius: 8px 0 0 8px;
+  clip-path: polygon(0 0, 100% 0, calc(100% - 26px) 100%, 0 100%); transition: width .35s ease; min-width: 130px; }
+.v3fn-name { color: #fff; font-weight: 700; font-size: .92rem; white-space: nowrap; text-shadow: 0 1px 2px rgba(0,0,0,.13); }
+.v3fn-val { position: absolute; right: 20px; font-family: 'Sora', sans-serif; font-weight: 800; font-size: 1.18rem; color: #1f2430; }
+.v3fn-rate { position: absolute; left: -104px; top: -30px; width: 90px; text-align: right; z-index: 2; }
+.v3fn-rate-lbl { display: block; font-size: .62rem; text-transform: uppercase; letter-spacing: .04em; color: #94a3b8; font-weight: 700; }
+.v3fn-rate-val { display: block; font-weight: 800; font-size: .95rem; color: #334155; }
+.v3fn-rate::after { content: ''; position: absolute; left: 94px; top: 8px; width: 18px; height: 52px;
+  border-left: 2px solid #cbd5e1; border-bottom: 2px solid #cbd5e1; border-bottom-left-radius: 9px; }
+@media (max-width: 680px) {
+  .v3fn { padding-left: 6px; }
+  .v3fn-rate { position: static; width: auto; text-align: left; margin-bottom: 4px; }
+  .v3fn-rate::after { display: none; }
+}
+
+/* #4 — product rank chip (replaces the avatar) */
+.v3-prod-rank { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 8px; background: #fdf0e6; color: #c5640f; font-weight: 800; font-size: .82rem; }
+
+/* #2 / #3 — "this week" live-dot legend + MTD note */
+.v3-live-legend { display: inline-flex; align-items: center; gap: 6px; font-size: .74rem; color: #8a93a6; font-weight: 600; }
+.v3-live-pulse { width: 9px; height: 9px; border-radius: 50%; background: #e8862e; box-shadow: 0 0 0 0 rgba(232,134,46,.5); animation: v3pulse 1.6s infinite; }
+@keyframes v3pulse { 0% { box-shadow: 0 0 0 0 rgba(232,134,46,.5); } 70% { box-shadow: 0 0 0 7px rgba(232,134,46,0); } 100% { box-shadow: 0 0 0 0 rgba(232,134,46,0); } }
+.v3-mtd-note { font-size: .66rem; color: #a78a76; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }

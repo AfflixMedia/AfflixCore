@@ -2,7 +2,7 @@ import { useEffect, useState, ReactNode } from 'react';
 import { Offcanvas, Button, Badge, Alert, Form } from 'react-bootstrap';
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid,
-  PieChart, Pie, Cell,
+  PieChart, Pie, Cell, LabelList,
 } from 'recharts';
 import {
   WeeklyReportContentV3, WEEKLY_SECTIONS_V3, SECTION_BY_ID_V3, SectionDefV3, SectionField,
@@ -128,20 +128,41 @@ function ShopHealthGauge({ score, ranking, prevRanking }: {
 }
 
 // ---- ss3 · GMV (line) + Orders (bars) combo, up to 8 weeks ------------------
+//  Every GMV point carries its value label (no hover needed); the latest week
+//  (the report being viewed) gets a pulsing "live" dot.
+function LiveDot(lastIdx: number) {
+  return (props: any) => {
+    const { cx, cy, index } = props;
+    if (cx == null || cy == null) return <g key={index} />;
+    if (index === lastIdx) {
+      return (
+        <g key={index}>
+          <circle cx={cx} cy={cy} r={8} fill="#e8862e" opacity={0.25}>
+            <animate attributeName="r" values="7;13;7" dur="1.6s" repeatCount="indefinite" />
+            <animate attributeName="opacity" values="0.3;0;0.3" dur="1.6s" repeatCount="indefinite" />
+          </circle>
+          <circle cx={cx} cy={cy} r={5} fill="#e8862e" stroke="#fff" strokeWidth={2} />
+        </g>
+      );
+    }
+    return <circle key={index} cx={cx} cy={cy} r={3.5} fill="#e8862e" />;
+  };
+}
 function WowCombo({ data }: { data: WowPoint[] }) {
   if (data.length < 2) return null;
   return (
     <div className="s14-card h-100">
       <div className="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
         <div className="s14-kpi-label">GMV &amp; Orders · last {data.length} weeks</div>
-        <div className="d-flex gap-3">
+        <div className="d-flex gap-3 align-items-center">
           <span className="ac-legend-dot" style={{ '--c': '#c9ced9' } as any}>Orders</span>
           <span className="ac-legend-dot" style={{ '--c': '#e8862e' } as any}>GMV</span>
+          <span className="v3-live-legend"><span className="v3-live-pulse" />This week</span>
         </div>
       </div>
-      <div style={{ height: 280 }}>
+      <div style={{ height: 290 }}>
         <ResponsiveContainer>
-          <ComposedChart data={data} margin={{ top: 12, right: 12, bottom: 4, left: 4 }}>
+          <ComposedChart data={data} margin={{ top: 26, right: 14, bottom: 4, left: 4 }}>
             <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#f1f5f9" />
             <XAxis dataKey="label" tick={{ fontSize: 12, fill: '#8a93a6' }} tickLine={false} axisLine={{ stroke: '#eadfd6' }} />
             <YAxis yAxisId="o" tick={{ fontSize: 11, fill: '#b3bac6' }} tickLine={false} axisLine={false} width={40} />
@@ -152,7 +173,11 @@ function WowCombo({ data }: { data: WowPoint[] }) {
               formatter={(v: any, n: any) => n === 'GMV' ? [formatValue('currency', Number(v)), 'GMV'] : [formatValue('number', Number(v)), 'Orders']} />
             <Bar yAxisId="o" dataKey="orders" name="Orders" fill="#dfe3ea" radius={[6, 6, 0, 0]} maxBarSize={44} />
             <Line yAxisId="g" type="monotone" dataKey="gmv" name="GMV" stroke="#e8862e" strokeWidth={3}
-              dot={{ r: 4, fill: '#e8862e', strokeWidth: 0 }} activeDot={{ r: 6 }} />
+              dot={LiveDot(data.length - 1)} activeDot={{ r: 6 }} isAnimationActive={false}>
+              <LabelList dataKey="gmv" position="top" offset={12}
+                formatter={(v: any) => Number(v) ? formatValue('currency', Number(v), { compact: true }) : ''}
+                style={{ fontSize: 11, fontWeight: 700, fill: '#5b6472' }} />
+            </Line>
           </ComposedChart>
         </ResponsiveContainer>
       </div>
@@ -160,25 +185,77 @@ function WowCombo({ data }: { data: WowPoint[] }) {
   );
 }
 
-// ---- ss1 · vertical conversion funnel --------------------------------------
+// ---- ss2 · Samples vs Videos weekly line chart (live dot on current week) --
+function SamplesLineChart({ data }: { data: { label: string; samples: number | null; videos: number | null }[] }) {
+  if (data.filter(d => d.samples != null || d.videos != null).length < 2) return null;
+  const lastIdx = data.length - 1;
+  const dotFor = (color: string) => (props: any) => {
+    const { cx, cy, index } = props;
+    if (cx == null || cy == null) return <g key={index} />;
+    if (index === lastIdx) return (
+      <g key={index}>
+        <circle cx={cx} cy={cy} r={7} fill={color} opacity={0.25}>
+          <animate attributeName="r" values="6;11;6" dur="1.6s" repeatCount="indefinite" />
+          <animate attributeName="opacity" values="0.3;0;0.3" dur="1.6s" repeatCount="indefinite" />
+        </circle>
+        <circle cx={cx} cy={cy} r={4.5} fill={color} stroke="#fff" strokeWidth={2} />
+      </g>
+    );
+    return <circle key={index} cx={cx} cy={cy} r={3} fill={color} />;
+  };
+  return (
+    <div className="s14-card mt-3">
+      <div className="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+        <div className="s14-kpi-label">Samples &amp; videos · last {data.length} weeks</div>
+        <div className="d-flex gap-3 align-items-center">
+          <span className="ac-legend-dot" style={{ '--c': '#e8862e' } as any}>Samples</span>
+          <span className="ac-legend-dot" style={{ '--c': '#0d6efd' } as any}>Videos</span>
+          <span className="v3-live-legend"><span className="v3-live-pulse" />This week</span>
+        </div>
+      </div>
+      <div style={{ height: 240 }}>
+        <ResponsiveContainer>
+          <ComposedChart data={data} margin={{ top: 18, right: 14, bottom: 4, left: 4 }}>
+            <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#f1f5f9" />
+            <XAxis dataKey="label" tick={{ fontSize: 12, fill: '#8a93a6' }} tickLine={false} axisLine={{ stroke: '#eadfd6' }} />
+            <YAxis tick={{ fontSize: 11, fill: '#b3bac6' }} tickLine={false} axisLine={false} width={36} allowDecimals={false} />
+            <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #eef0f4', boxShadow: '0 10px 28px rgba(16,24,40,.12)', fontSize: 13 }} />
+            <Line type="monotone" dataKey="samples" name="Samples" stroke="#e8862e" strokeWidth={3} dot={dotFor('#e8862e')} activeDot={{ r: 6 }} isAnimationActive={false} connectNulls />
+            <Line type="monotone" dataKey="videos" name="Videos" stroke="#0d6efd" strokeWidth={3} dot={dotFor('#0d6efd')} activeDot={{ r: 6 }} isAnimationActive={false} connectNulls />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+// ---- ss6 · horizontal conversion funnel (Traffic Analysis) -----------------
+//  Teal trapezoid stages in a light track: stage name in white on the left,
+//  value on the right; the conversion rate between two stages sits in a left
+//  gutter with an elbow connector — matching the TikTok-Shop funnel.
 function Funnel({ stages }: { stages: { label: string; value: number | null; rate?: number | null; rateLabel?: string }[] }) {
   const present = stages.filter(s => s.value != null);
   if (present.length === 0) return <div className="s14-empty">No funnel data yet</div>;
   const max = Math.max(1, ...present.map(s => s.value ?? 0));
-  const COLORS = ['#22b6c4', '#3fc3cf', '#7ad3db', '#e11d63'];
+  const TEAL = ['#3fc5cf', '#1aa6b4', '#0b8795', '#0b8795'];
   return (
-    <div className="v3-funnel">
+    <div className="v3fn">
       {stages.map((s, i) => {
-        const w = Math.max(16, ((s.value ?? 0) / max) * 100);
+        const w = Math.max(14, Math.round(((s.value ?? 0) / max) * 100));
         return (
-          <div className="v3-funnel-row" key={s.label}>
-            <div className="v3-funnel-stage" style={{ width: `${w}%`, background: COLORS[i] ?? '#7ad3db' }}>
-              <div className="v3-funnel-val">{formatValue('number', s.value)}</div>
-              <div className="v3-funnel-name">{s.label}</div>
-            </div>
-            {s.rate != null && (
-              <span className="v3-funnel-rate"><i className="bi bi-arrow-return-right" />{s.rate.toFixed(1)}% <span className="text-muted">{s.rateLabel}</span></span>
+          <div className="v3fn-item" key={s.label}>
+            {i > 0 && (
+              <div className="v3fn-rate">
+                <span className="v3fn-rate-lbl">{s.rateLabel}</span>
+                <span className="v3fn-rate-val">{s.rate != null ? `${s.rate.toFixed(2)}%` : '—'}</span>
+              </div>
             )}
+            <div className="v3fn-track">
+              <div className="v3fn-bar" style={{ width: `${w}%`, background: TEAL[i] ?? TEAL[TEAL.length - 1] }}>
+                <span className="v3fn-name">{s.label}</span>
+              </div>
+              <span className="v3fn-val">{formatValue('number', s.value)}</span>
+            </div>
           </div>
         );
       })}
@@ -186,42 +263,58 @@ function Funnel({ stages }: { stages: { label: string; value: number | null; rat
   );
 }
 
-// ---- attribution donut ------------------------------------------------------
-function Donut({ slices, centerLabel }: { slices: { label: string; value: number }[]; centerLabel: string }) {
+// ---- ss5 · attribution donut with leader-line value labels (no hover) ------
+type Slice = { label: string; value: number; color?: string };
+function Donut({ slices, total, centerLabel }: { slices: Slice[]; total?: number; centerLabel: string }) {
   const data = slices.filter(s => s.value > 0);
-  const total = slices.reduce((a, b) => a + b.value, 0);
   if (data.length === 0) return <div className="s14-empty">No data yet</div>;
+  const center = total != null ? total : data.reduce((a, b) => a + b.value, 0);
+  const renderLabel = (e: any) => {
+    const RAD = Math.PI / 180;
+    const r = e.outerRadius + 14;
+    const x = e.cx + r * Math.cos(-e.midAngle * RAD);
+    const y = e.cy + r * Math.sin(-e.midAngle * RAD);
+    const anchor = x >= e.cx ? 'start' : 'end';
+    return (
+      <text x={x} y={y} textAnchor={anchor} dominantBaseline="central">
+        <tspan x={x} dy="-0.35em" fontSize={10} fontWeight={600} fill="#94a3b8">{e.payload.label}</tspan>
+        <tspan x={x} dy="1.15em" fontSize={12.5} fontWeight={800} fill="#334155">{formatValue('currency', e.value, { compact: true })}</tspan>
+      </text>
+    );
+  };
   return (
-    <div style={{ height: 220, position: 'relative' }}>
+    <div style={{ height: 250, position: 'relative' }}>
       <ResponsiveContainer>
-        <PieChart>
-          <Pie data={data} dataKey="value" nameKey="label" innerRadius="62%" outerRadius="92%" paddingAngle={2} stroke="none" cornerRadius={4}>
-            {data.map((_, i) => <Cell key={i} fill={PIE[i % PIE.length]} />)}
+        <PieChart margin={{ top: 16, right: 66, bottom: 16, left: 66 }}>
+          <Pie data={data} dataKey="value" nameKey="label" innerRadius="58%" outerRadius="80%" paddingAngle={2}
+            stroke="none" cornerRadius={4} isAnimationActive={false}
+            label={renderLabel} labelLine={{ stroke: '#d7dde5', strokeWidth: 1 }}>
+            {data.map((s, i) => <Cell key={i} fill={s.color ?? PIE[i % PIE.length]} />)}
           </Pie>
-          <Tooltip formatter={(v: any, _n: any, e: any) => [formatValue('currency', Number(v)), e?.payload?.label]} />
         </PieChart>
       </ResponsiveContainer>
       <div className="s14-donut-center">
-        <div className="s14-donut-total">{formatValue('currency', total, { compact: true })}</div>
+        <div className="s14-donut-total">{formatValue('currency', center, { compact: true })}</div>
         <div className="s14-donut-cap">{centerLabel}</div>
       </div>
     </div>
   );
 }
 
-function LegendList({ slices }: { slices: { label: string; value: number }[] }) {
+function LegendList({ slices }: { slices: Slice[] }) {
   const total = slices.reduce((a, b) => a + b.value, 0) || 1;
   return (
     <div className="d-flex flex-column gap-2">
       {slices.map((s, i) => {
         const pct = (s.value / total) * 100;
+        const c = s.color ?? PIE[i % PIE.length];
         return (
           <div key={s.label}>
             <div className="d-flex justify-content-between align-items-center mb-1">
-              <span className="s14-bar-label"><span className="s14-dot" style={{ background: PIE[i % PIE.length] }} />{s.label}</span>
+              <span className="s14-bar-label"><span className="s14-dot" style={{ background: c }} />{s.label}</span>
               <span className="s14-bar-val">{pct.toFixed(1)}%<span className="text-muted ms-2 small">{formatValue('currency', s.value)}</span></span>
             </div>
-            <div className="s14-track"><div className="s14-fill" style={{ width: `${Math.min(100, pct)}%`, background: PIE[i % PIE.length] }} /></div>
+            <div className="s14-track"><div className="s14-fill" style={{ width: `${Math.min(100, pct)}%`, background: c }} /></div>
           </div>
         );
       })}
@@ -236,7 +329,9 @@ function initials(name: string): string {
   const parts = String(name).trim().split(/[\s_.-]+/).filter(Boolean);
   return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase() || '#';
 }
-function ProductTable({ def, rows, prevRows }: { def: SectionDefV3; rows: RowData[]; prevRows: RowData[] }) {
+function ProductTable({ def, rows, prevRows, samplesByProduct }: {
+  def: SectionDefV3; rows: RowData[]; prevRows: RowData[]; samplesByProduct?: Record<string, number | null>;
+}) {
   if (!rows || rows.length === 0) return <div className="s14-empty">No products yet</div>;
   // product_id is always a string ('' when unset), so fall back to the product
   // name with || and never key on an empty string (that would collide rows).
@@ -244,12 +339,15 @@ function ProductTable({ def, rows, prevRows }: { def: SectionDefV3; rows: RowDat
   const prevById = new Map(prevRows.filter(r => keyOf(r) !== '').map(r => [keyOf(r), r]));
   const cols = def.fields.filter(f => f.key !== 'product' && f.key !== 'product_id');
   const gmvF = def.fields.find(f => f.key === 'total_gmv');
+  const showSamples = !!samplesByProduct;
   return (
     <div className="s14-card p-0 v3-prodtable-wrap">
       <div className="table-responsive">
         <table className="table align-middle mb-0 v3-prodtable">
           <thead><tr>
+            <th style={{ width: 40 }}>#</th>
             <th>Product</th>
+            {showSamples && <th className="text-end">Samples Approved This Week</th>}
             {cols.map(f => <th key={f.key} className="text-end">{f.label}</th>)}
           </tr></thead>
           <tbody>
@@ -257,17 +355,17 @@ function ProductTable({ def, rows, prevRows }: { def: SectionDefV3; rows: RowDat
               const k = keyOf(row);
               const prev = k ? prevById.get(k) : undefined;
               const name = String(row.product ?? '').trim() || 'Product';
+              const samp = showSamples ? (samplesByProduct?.[String(row.product_id ?? '')] ?? null) : null;
               return (
                 <tr key={i}>
+                  <td><span className="v3-prod-rank">{i + 1}</span></td>
                   <td>
-                    <div className="d-flex align-items-center gap-2">
-                      <span className="v3-prod-av" style={{ background: AV_BG[i % 6], color: AV_FG[i % 6] }}>{initials(name)}</span>
-                      <div style={{ minWidth: 0 }}>
-                        <div className="v3-prod-name text-truncate">{name}</div>
-                        {row.product_id && <div className="v3-prod-id text-truncate">ID {String(row.product_id)}</div>}
-                      </div>
+                    <div style={{ minWidth: 0 }}>
+                      <div className="v3-prod-name text-truncate">{name}</div>
+                      {row.product_id && <div className="v3-prod-id text-truncate">ID {String(row.product_id)}</div>}
                     </div>
                   </td>
+                  {showSamples && <td className="text-end"><div className="v3-prod-val">{samp == null ? '—' : formatValue('number', samp)}</div></td>}
                   {cols.map(f => {
                     const cur = fieldValue(f, row);
                     const pv = prev ? fieldValue(f, prev) : null;
@@ -496,13 +594,19 @@ const SECTION_ACCENT: Record<string, string> = {
 };
 
 export default function ReportDashboardV3({
-  c, p, wow, hasPrev, commentsConfig, openSectionOnLoad, highlightCommentId,
+  c, p, wow, sampleSeries, mtd, productSamples, hasPrev, commentsConfig, openSectionOnLoad, highlightCommentId,
   approvalDecisions, approvalAction, audience = 'staff', reportMeta,
 }: {
   c: WeeklyReportContentV3;
   p: WeeklyReportContentV3 | null;
   /** week-over-week series (bars=orders, line=GMV) built by the page. Falls back to trendData GMV. */
   wow?: WowPoint[];
+  /** per-week samples/videos series for the §1 line chart (last point = current week). */
+  sampleSeries?: { label: string; samples: number | null; videos: number | null }[];
+  /** §1 month-to-date totals (1st of month → this report's week end). */
+  mtd?: { samples: number | null; videos: number | null };
+  /** §3 per-product "samples approved this week", keyed by product_id. */
+  productSamples?: Record<string, number | null>;
   trendData?: TrendPoint[];
   hasPrev: boolean;
   reportMeta?: { title: string; period: string; compare?: string };
@@ -596,8 +700,25 @@ export default function ReportDashboardV3({
     const prevRows = (p ? (p as any)[def.id] : []) as RowData[];
 
     switch (def.id) {
-      case 'sampling':
-        return <TileGrid def={def} data={data} prev={prev} col="col-6 col-lg-6" />;
+      case 'sampling': {
+        const wkS = def.fields.find(f => f.key === 'samples_approved')!;
+        const wkV = def.fields.find(f => f.key === 'new_videos_posted')!;
+        return (
+          <>
+            <div className="row g-3">
+              <div className="col-6 col-lg-3"><KpiTile f={wkS} data={data} prev={prev} /></div>
+              <div className="col-6 col-lg-3"><KpiTile f={wkV} data={data} prev={prev} /></div>
+              {mtd && (
+                <>
+                  <div className="col-6 col-lg-3"><div className="ac-kpi h-100"><div className="ac-kpi-label">Samples Approved MTD</div><div className="ac-kpi-value">{mtd.samples == null ? '—' : formatValue('number', mtd.samples)}</div><div className="ac-kpi-foot"><span className="v3-mtd-note">Month to date</span></div></div></div>
+                  <div className="col-6 col-lg-3"><div className="ac-kpi h-100"><div className="ac-kpi-label">Videos Posted MTD</div><div className="ac-kpi-value">{mtd.videos == null ? '—' : formatValue('number', mtd.videos)}</div><div className="ac-kpi-foot"><span className="v3-mtd-note">Month to date</span></div></div></div>
+                </>
+              )}
+            </div>
+            {sampleSeries && <SamplesLineChart data={sampleSeries} />}
+          </>
+        );
+      }
       case 'overall': {
         const scoreF = def.fields.find(f => f.key === 'shop_performance_score')!;
         return (
@@ -613,38 +734,44 @@ export default function ReportDashboardV3({
         );
       }
       case 'product_analytics':
-        return <ProductTable def={def} rows={rows} prevRows={prevRows} />;
+        return <ProductTable def={def} rows={rows} prevRows={prevRows} samplesByProduct={productSamples} />;
       case 'product_traffic': {
-        const slices = [
-          { label: 'Seller LIVE', value: numv(data?.seller_live_gmv) },
-          { label: 'Seller Video', value: numv(data?.seller_video_gmv) },
-          { label: 'Creator', value: numv(data?.creator_gmv) },
+        const gmv = numv(data?.gmv);
+        const attr: Slice[] = [
+          { label: 'Seller LIVE', value: numv(data?.seller_live_gmv), color: '#0d6efd' },
+          { label: 'Seller Video', value: numv(data?.seller_video_gmv), color: '#8b5cf6' },
+          { label: 'Creator', value: numv(data?.creator_gmv), color: '#10b981' },
         ];
+        const sumAttr = attr.reduce((a, b) => a + b.value, 0);
+        const other = Math.max(0, gmv - sumAttr);
+        // "Other" fills the gap so the donut sums to Total GMV (center = Total GMV).
+        const slices: Slice[] = other > 0 ? [...attr, { label: 'Other', value: other, color: '#d3d9e2' }] : attr;
         return (
-          <div className="row g-3">
-            <div className="col-lg-5"><div className="s14-card h-100"><div className="s14-kpi-label mb-2">GMV by traffic source</div><Donut slices={slices} centerLabel="Product GMV" /></div></div>
-            <div className="col-lg-7"><TileGrid def={def} data={data} prev={prev} col="col-6 col-lg-4" /></div>
+          <div className="s14-card">
+            <div className="s14-kpi-label mb-2">GMV by traffic source</div>
+            <div className="row g-3 align-items-center">
+              <div className="col-lg-7"><Donut slices={slices} total={gmv > 0 ? gmv : sumAttr} centerLabel="Total GMV" /></div>
+              <div className="col-lg-5"><LegendList slices={slices} /></div>
+            </div>
           </div>
         );
       }
       case 'traffic_analysis': {
         const impr = num(data?.impressions), clicks = num(data?.clicks), orders = num(data?.sku_orders);
-        const atc = num((c.product_traffic as any)?.atc_count);
         const rate = (a: number | null, b: number | null) => (a != null && b != null && b !== 0) ? (a / b) * 100 : null;
         const stages = [
-          { label: 'Product Impressions', value: impr },
-          { label: 'Product Clicks', value: clicks, rate: rate(clicks, impr), rateLabel: 'CTR' },
-          ...(atc != null ? [{ label: 'Add to Cart', value: atc, rate: rate(atc, clicks), rateLabel: 'ATC rate' }] : []),
-          { label: 'SKU Orders', value: orders, rate: rate(orders, atc ?? clicks), rateLabel: atc != null ? 'cart→order' : 'CVR' },
+          { label: 'Product impressions', value: impr },
+          { label: 'Product clicks', value: clicks, rate: rate(clicks, impr), rateLabel: 'CTR' },
+          { label: 'SKU orders', value: orders, rate: rate(orders, clicks), rateLabel: 'CTOR (SKU order)' },
         ];
         return <div className="s14-card"><Funnel stages={stages} /></div>;
       }
       case 'channel_analytics':
         return <ChannelPair def={def} rows={rows} prevRows={prevRows} />;
       case 'offsite': {
-        const slices = [
-          { label: 'TikTok Shop GMV', value: numv(data?.tiktok_shop_gmv) },
-          { label: 'Offsite GMV', value: numv(data?.offsite_gmv) },
+        const slices: Slice[] = [
+          { label: 'TikTok Shop GMV', value: numv(data?.tiktok_shop_gmv), color: '#0d6efd' },
+          { label: 'Offsite GMV', value: numv(data?.offsite_gmv), color: '#e8862e' },
         ];
         return (
           <div className="row g-3">
@@ -728,7 +855,7 @@ export default function ReportDashboardV3({
   );
 
   return (
-    <div className="ac-themed dash-shell">
+    <div className="ac-themed dash-shell v3-dash">
       <DashSidebar items={navItems} collapsed={navCollapsed} onToggle={toggleNav} />
       <div className={`dash-client ${navCollapsed ? 'nav-collapsed' : ''}`}>
         <Offcanvas show={!!feedbackSection} onHide={() => setFeedbackSection(null)} placement="end" style={{ width: 480 }}>

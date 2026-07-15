@@ -257,6 +257,21 @@ export default function SharedReports() {
       });
   }, [openReport, reports]);
 
+  // v3 §1 samples/videos weekly series (from report content — client-safe).
+  const sampleSeries = useMemo(() => {
+    if (!openReport) return [];
+    return reports
+      .filter(r => r.brand_id === openReport.brand_id && r.week_start <= openReport.week_start)
+      .sort((a, b) => a.week_start.localeCompare(b.week_start))
+      .slice(-8)
+      .map(t => {
+        const cn: any = t.content ?? {};
+        const s: any = cn?.sampling ?? {};
+        const toN = (v: any) => (v == null || v === '') ? null : (Number.isFinite(Number(v)) ? Number(v) : null);
+        return { label: formatWeekShort(t.week_start, t.week_end), samples: toN(s.samples_approved), videos: toN(s.new_videos_posted) };
+      });
+  }, [openReport, reports]);
+
   // Decisions are keyed by (report_type, report_id) so a weekly + monthly report
   // never accidentally share state.
   const decidedSet = useMemo(
@@ -490,6 +505,7 @@ export default function SharedReports() {
           p={prevReport ? normWeekly(prevReport.content) : null}
           trendData={trendData}
           wow={wowData}
+          sampleSeries={sampleSeries}
           hasPrev={!!prevReport}
           audience={isClientDash ? 'client' : undefined}
           reportMeta={isClientDash ? {
