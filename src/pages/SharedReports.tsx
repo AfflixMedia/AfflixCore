@@ -288,6 +288,21 @@ export default function SharedReports() {
       });
   }, [openReport, reports]);
 
+  // v3 §8 — per-week affiliate metric series for the multi-line trend.
+  const affiliateSeries = useMemo(() => {
+    if (!openReport) return [];
+    return reports
+      .filter(r => r.brand_id === openReport.brand_id && r.week_start <= openReport.week_start)
+      .sort((a, b) => a.week_start.localeCompare(b.week_start))
+      .slice(-8)
+      .map(t => {
+        const cn: any = t.content ?? {};
+        const a: any = cn?.affiliate ?? {};
+        const toN = (v: any) => (v == null || v === '') ? null : (Number.isFinite(Number(v)) ? Number(v) : null);
+        return { label: formatWeekShort(t.week_start, t.week_end), affiliate_gmv: toN(a.affiliate_gmv), live_sessions: toN(a.live_sessions), contacted_creators: toN(a.contacted_creators) };
+      });
+  }, [openReport, reports]);
+
   // Decisions are keyed by (report_type, report_id) so a weekly + monthly report
   // never accidentally share state.
   const decidedSet = useMemo(
@@ -523,6 +538,7 @@ export default function SharedReports() {
           wow={wowData}
           sampleSeries={sampleSeries}
           offsiteSeries={offsiteSeries}
+          affiliateSeries={affiliateSeries}
           hasPrev={!!prevReport}
           audience={isClientDash ? 'client' : undefined}
           reportMeta={isClientDash ? {

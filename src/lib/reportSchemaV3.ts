@@ -197,9 +197,10 @@ export const WEEKLY_SECTIONS_V3: SectionDefV3[] = [
     id: 'affiliate', num: '8', title: 'Affiliate Performance', kind: 'scalar',
     blurb: 'Creator collaboration activity and its GMV.',
     fields: [
+      // "New Videos Posted" intentionally omitted here — videos are covered by §1
+      // (Sampling & Videos); keeping it in §8 duplicated the metric.
       { key: 'collabs_in_progress', label: 'Collabs in Progress', format: 'number', comparable: true },
       { key: 'affiliate_gmv', label: 'Affiliate GMV', format: 'currency', comparable: true },
-      { key: 'new_videos_posted', label: 'New Videos Posted', format: 'number', comparable: true },
       { key: 'live_sessions', label: 'LIVE Sessions', format: 'number', comparable: true },
       { key: 'contacted_creators', label: 'No. of Contacted Creators', format: 'number', comparable: true },
     ],

@@ -231,6 +231,55 @@ function SamplesLineChart({ data }: { data: { label: string; samples: number | n
   );
 }
 
+// ---- ss8 · affiliate multi-metric trend (dual axis, direct labels) ---------
+//  One graph, one coloured line per affiliate metric over the last 8 weeks.
+//  Collabs-in-progress is excluded (per request); counts share the left axis,
+//  Affiliate GMV rides its own right axis. Every point is labelled (no hover)
+//  and the latest week carries the green blinking "live" dot.
+export type AffPoint = { label: string; affiliate_gmv: number | null; live_sessions: number | null; contacted_creators: number | null };
+const AFF_LINES: { key: keyof AffPoint; name: string; color: string; axis: 'n' | 'g'; fmt: 'currency' | 'number'; pos: 'top' | 'bottom' }[] = [
+  { key: 'affiliate_gmv', name: 'Affiliate GMV', color: '#e8862e', axis: 'g', fmt: 'currency', pos: 'top' },
+  { key: 'contacted_creators', name: 'Contacted Creators', color: '#0ea5e9', axis: 'n', fmt: 'number', pos: 'top' },
+  { key: 'live_sessions', name: 'LIVE Sessions', color: '#8b5cf6', axis: 'n', fmt: 'number', pos: 'bottom' },
+];
+function AffiliateTrend({ data }: { data: AffPoint[] }) {
+  if (data.filter(d => AFF_LINES.some(l => d[l.key] != null)).length < 2) return null;
+  const lastIdx = data.length - 1;
+  const lab = (fmt: 'currency' | 'number') => (v: any) =>
+    (v == null || v === '') ? '' : formatValue(fmt, Number(v), fmt === 'currency' ? { compact: true } : undefined);
+  return (
+    <div className="s14-card mt-3">
+      <div className="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+        <div className="s14-kpi-label">Affiliate metrics · last {data.length} weeks</div>
+        <div className="d-flex gap-3 align-items-center flex-wrap">
+          {AFF_LINES.map(l => <span key={String(l.key)} className="ac-legend-dot" style={{ '--c': l.color } as any}>{l.name}</span>)}
+          <span className="v3-live-legend"><span className="v3-live-pulse" />This week</span>
+        </div>
+      </div>
+      <div style={{ height: 300 }}>
+        <ResponsiveContainer>
+          <ComposedChart data={data} margin={{ top: 24, right: 50, bottom: 16, left: 6 }}>
+            <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#f1f5f9" />
+            <XAxis dataKey="label" tick={{ fontSize: 12, fill: '#8a93a6' }} tickLine={false} axisLine={{ stroke: '#eadfd6' }} />
+            <YAxis yAxisId="n" tick={{ fontSize: 11, fill: '#b3bac6' }} tickLine={false} axisLine={false} width={34} allowDecimals={false} />
+            <YAxis yAxisId="g" orientation="right" tick={{ fontSize: 11, fill: '#b3bac6' }} tickLine={false} axisLine={false}
+              width={50} tickFormatter={(v: number) => formatValue('currency', v, { compact: true })} />
+            <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #eef0f4', boxShadow: '0 10px 28px rgba(16,24,40,.12)', fontSize: 13 }}
+              formatter={(v: any, n: any) => { const l = AFF_LINES.find(x => x.name === n); return [formatValue(l?.fmt ?? 'number', Number(v)), n]; }} />
+            {AFF_LINES.map(l => (
+              <Line key={String(l.key)} yAxisId={l.axis} type="monotone" dataKey={l.key as string} name={l.name} stroke={l.color} strokeWidth={3}
+                dot={makeDot(lastIdx, l.color)} activeDot={{ r: 6 }} isAnimationActive={false} connectNulls>
+                <LabelList dataKey={l.key as string} position={l.pos} offset={10} formatter={lab(l.fmt)}
+                  style={{ fontSize: 10.5, fontWeight: 700, fill: l.color }} />
+              </Line>
+            ))}
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
 // ---- ss6 · horizontal conversion funnel (Traffic Analysis) -----------------
 //  Teal trapezoid stages in a light track: stage name in white on the left,
 //  value on the right; the conversion rate between two stages sits in a left
@@ -641,7 +690,7 @@ const SECTION_ACCENT: Record<string, string> = {
 };
 
 export default function ReportDashboardV3({
-  c, p, wow, sampleSeries, mtd, productSamples, offsiteSeries, hasPrev, commentsConfig, openSectionOnLoad, highlightCommentId,
+  c, p, wow, sampleSeries, mtd, productSamples, offsiteSeries, affiliateSeries, hasPrev, commentsConfig, openSectionOnLoad, highlightCommentId,
   approvalDecisions, approvalAction, audience = 'staff', reportMeta,
 }: {
   c: WeeklyReportContentV3;
@@ -656,6 +705,8 @@ export default function ReportDashboardV3({
   productSamples?: Record<string, number | null>;
   /** §7 per-week offsite metrics for the trend sparklines (last point = current week). */
   offsiteSeries?: { label: string; offsite_gmv: number | null; tiktok_shop_gmv: number | null; offsite_effect: number | null }[];
+  /** §8 per-week affiliate metrics for the multi-line trend (last point = current week). */
+  affiliateSeries?: AffPoint[];
   trendData?: TrendPoint[];
   hasPrev: boolean;
   reportMeta?: { title: string; period: string; compare?: string };
@@ -841,7 +892,12 @@ export default function ReportDashboardV3({
         );
       }
       case 'affiliate':
-        return <TileGrid def={def} data={data} prev={prev} col="col-6 col-lg" />;
+        return (
+          <>
+            <TileGrid def={def} data={data} prev={prev} col="col-6 col-lg-3" />
+            {affiliateSeries && <AffiliateTrend data={affiliateSeries} />}
+          </>
+        );
       case 'top_creators': return <TopCreators rows={rows} />;
       case 'top_videos': return <TopVideos rows={rows} />;
       case 'top_lives': return <TopLives rows={rows} />;

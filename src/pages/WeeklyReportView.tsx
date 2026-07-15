@@ -220,6 +220,12 @@ export default function WeeklyReportView() {
     const toN = (v: any) => (v == null || v === '') ? null : (Number.isFinite(Number(v)) ? Number(v) : null);
     return { label: formatWeekShort(t.week_start, t.week_end), offsite_gmv: toN(o.offsite_gmv), tiktok_shop_gmv: toN(o.tiktok_shop_gmv), offsite_effect: toN(o.offsite_effect) };
   }), [trend]);
+  // v3 §8 — per-week affiliate metric series for the multi-line trend.
+  const affiliateSeries = useMemo(() => trend.map(t => {
+    const a: any = (t.content ?? {})?.affiliate ?? {};
+    const toN = (v: any) => (v == null || v === '') ? null : (Number.isFinite(Number(v)) ? Number(v) : null);
+    return { label: formatWeekShort(t.week_start, t.week_end), affiliate_gmv: toN(a.affiliate_gmv), live_sessions: toN(a.live_sessions), contacted_creators: toN(a.contacted_creators) };
+  }), [trend]);
   // v3 §1 month-to-date + §3 per-product samples-this-week (from Sample Seeding).
   const [mtd, setMtd] = useState<{ samples: number | null; videos: number | null } | null>(null);
   const [productSamples, setProductSamples] = useState<Record<string, number | null>>({});
@@ -365,6 +371,7 @@ export default function WeeklyReportView() {
             mtd={mtd ?? undefined}
             productSamples={productSamples}
             offsiteSeries={offsiteSeries}
+            affiliateSeries={affiliateSeries}
             trendData={trendData}
             hasPrev={!!prev}
             openSectionOnLoad={openSection}
