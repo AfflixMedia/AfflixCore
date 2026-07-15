@@ -163,33 +163,12 @@ export default function SharedReports() {
         // weekly OR monthly), then the welcome popup (latest reports + any pending
         // Paid Collab payments). The welcome popup also shows on PC-only links.
         if (mode === 'brand') {
-          const decisionsList: ApprovalDecisionRow[] = data.approval_decisions ?? [];
-          const decidedKey = (rt: 'weekly' | 'monthly', rid: string) => `${rt}:${rid}`;
-          const decided = new Set<string>(decisionsList.map(d => decidedKey(d.report_type, d.report_id)));
-          const now = Date.now();
-          // Auto-popup-eligible: approval enabled, not decided yet, and (no
-          // expiry OR expiry is in the future). Expired approvals are still
-          // viewable on the dashboard — they just don't auto-prompt.
-          const isAutoPromptEligible = (r: any) => {
-            const a = r.content?.approval;
-            if (!a?.enabled) return false;
-            if (a.expires_at && new Date(a.expires_at).getTime() < now) return false;
-            return true;
-          };
-          const weeklyPending = ir
-            ? (data.reports ?? []).filter((r: any) =>
-                isAutoPromptEligible(r) && !decided.has(decidedKey('weekly', r.id))
-              ).length : 0;
-          const monthlyPending = im
-            ? (data.monthly_reports ?? []).filter((r: any) =>
-                isAutoPromptEligible(r) && !decided.has(decidedKey('monthly', r.id))
-              ).length : 0;
           const pcPaymentsPending = ipc
             ? (data.handler_creators ?? []).filter((c: any) => isPendingVisible(c)).length : 0;
-          if ((ir || im) && weeklyPending + monthlyPending > 0) {
-            setShowApprovals(true);
-            setPickerAfterApprovals(true);
-          } else if (ir || im || pcPaymentsPending > 0) {
+          // Approvals no longer auto-open on landing — the prompt appears only
+          // when the client opens the specific report that requested approval
+          // (see maybePromptApproval, driven by openId / openMonthlyId).
+          if (ir || im || pcPaymentsPending > 0) {
             setShowLatestReports(true);
           }
         }
@@ -330,6 +309,24 @@ export default function SharedReports() {
     () => new Set(decisions.map(d => `${d.report_type}:${d.report_id}`)),
     [decisions],
   );
+  // Show the approval prompt only when the client OPENS a report that requested
+  // approval (and hasn't decided yet). promptedRef stops it re-popping when the
+  // client navigates between weeks and back.
+  const promptedRef = useRef<Set<string>>(new Set());
+  const maybePromptApproval = (r: { id: string; content: any } | null, type: 'weekly' | 'monthly') => {
+    if (!r) return;
+    const a = (r.content as any)?.approval;
+    if (!a?.enabled) return;
+    if (a.expires_at && new Date(a.expires_at).getTime() < Date.now()) return;
+    const key = `${type}:${r.id}`;
+    if (decidedSet.has(key) || promptedRef.current.has(key)) return;
+    promptedRef.current.add(key);
+    setSingleApprovalId(r.id);
+    setSingleApprovalType(type);
+    setShowApprovals(true);
+  };
+  useEffect(() => { maybePromptApproval(reports.find(r => r.id === openId) ?? null, 'weekly'); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [openId]);
+  useEffect(() => { maybePromptApproval(monthlyReports.find(r => r.id === openMonthlyId) ?? null, 'monthly'); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [openMonthlyId]);
   const fmtMonth = (yyyymm: string) => {
     const [y, m] = yyyymm.split('-').map(Number);
     return new Date(y, m - 1, 1).toLocaleString(undefined, { month: 'long', year: 'numeric' });
@@ -524,6 +521,27 @@ export default function SharedReports() {
     setPcHandlerCreators(prev => prev.map(c => (c.id === creatorId ? { ...c, ...updated } : c)));
   };
 
+  // Approval prompt — reused across the landing list and the report detail views
+  // so it can pop over an opened report (a report-open triggers an early return
+  // that would otherwise skip the landing-page modal).
+  const approvalsModalEl = (
+    <ApprovalsModal
+      show={showApprovals}
+      pending={modalPending}
+      defaultName={publicName}
+      existingDecisions={existingDecisionsMap}
+      onClose={() => {
+        setShowApprovals(false);
+        setSingleApprovalId(null);
+        if (pickerAfterApprovals) {
+          setPickerAfterApprovals(false);
+          setShowLatestReports(true);
+        }
+      }}
+      onSubmit={submitApprovals}
+    />
+  );
+
   // Report detail view
   if (openReport && activeBrand) {
     // Reports for this brand are sorted desc by week_start (newest first).
@@ -629,6 +647,7 @@ export default function SharedReports() {
             <i className="bi bi-arrow-right" />
           </button>
         </div>
+        {approvalsModalEl}
       </PublicShell>
     );
   }
@@ -752,6 +771,7 @@ export default function SharedReports() {
             <i className="bi bi-arrow-right" />
           </button>
         </div>
+        {approvalsModalEl}
       </PublicShell>
     );
   }
@@ -1258,21 +1278,7 @@ export default function SharedReports() {
         </Offcanvas.Body>
       </Offcanvas>
 
-      <ApprovalsModal
-        show={showApprovals}
-        pending={modalPending}
-        defaultName={publicName}
-        existingDecisions={existingDecisionsMap}
-        onClose={() => {
-          setShowApprovals(false);
-          setSingleApprovalId(null);
-          if (pickerAfterApprovals) {
-            setPickerAfterApprovals(false);
-            setShowLatestReports(true);
-          }
-        }}
-        onSubmit={submitApprovals}
-      />
+      {approvalsModalEl}
       {/* Month picker popup disabled — replaced by inline MonthQuickPicks
           (latest 2 months + All). Kept here for later re-use.
       <MonthPickerModal

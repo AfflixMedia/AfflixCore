@@ -224,7 +224,7 @@ export default function ApprovalsModal({ show, pending, defaultName, existingDec
       </Modal.Body>
       <Modal.Footer className="ac-popup-footer">
         <Button variant="link" className="text-muted" onClick={onClose} disabled={submitting}>
-          {newCount > 0 ? 'Skip for now' : 'Close'}
+          {newCount > 0 ? 'Read Report First' : 'Close'}
         </Button>
         {newCount > 0 && (
           <Button variant="primary" onClick={submit} disabled={submitting || decided.length === 0}>

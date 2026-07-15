@@ -95,6 +95,38 @@ const STYLE_OPTIONS: { key: DividerOpts['style']; label: string }[] = [
 ];
 const SWATCHES = ['#e8862e', '#141620', '#0d6efd', '#198754', '#dc3545', '#6f42c1', '#94a3b8'];
 
+// Ready-to-insert defaults so users don't rebuild a divider every time.
+type DividerPreset = { name: string; opts: DividerOpts };
+const BUILTIN_DIVIDERS: DividerPreset[] = [
+  { name: 'Brand rule', opts: { style: 'solid', thickness: 2, color: '#e8862e', width: 100 } },
+  { name: 'Subtle dotted', opts: { style: 'dotted', thickness: 2, color: '#94a3b8', width: 60 } },
+  { name: 'Ornamental', opts: { style: 'ornament', thickness: 3, color: '#e8862e', width: 40 } },
+];
+// User-saved presets live per-browser (no DB needed for a personal shortcut list).
+const DIVIDER_LS_KEY = 'ac_divider_presets';
+function loadSavedDividers(): DividerPreset[] {
+  try { const j = localStorage.getItem(DIVIDER_LS_KEY); const a = j ? JSON.parse(j) : []; return Array.isArray(a) ? a : []; }
+  catch { return []; }
+}
+function persistSavedDividers(list: DividerPreset[]) {
+  try { localStorage.setItem(DIVIDER_LS_KEY, JSON.stringify(list)); } catch { /* ignore */ }
+}
+const WAVE_MASK = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='12' viewBox='0 0 24 12'%3E%3Cpath d='M0 6 Q 6 0 12 6 T 24 6' fill='none' stroke='black' stroke-width='2.4'/%3E%3C/svg%3E\") repeat-x center / 24px 100%";
+// Self-contained inline preview for any divider (the popover portals to <body>,
+// outside the scoped .ql-editor / .ac-rte-view selectors, so wavy/ornament
+// geometry must be inline or the preview box renders blank).
+function previewStyleFor(o: DividerOpts): React.CSSProperties {
+  const base: React.CSSProperties = { display: 'block', width: '100%', margin: 0, borderRadius: 2, border: 0 };
+  const h = Math.max(6, o.thickness * 3);
+  if (o.style === 'wavy') return { ...base, height: h, backgroundColor: o.color, WebkitMask: WAVE_MASK, mask: WAVE_MASK };
+  if (o.style === 'ornament') return {
+    ...base, height: h,
+    backgroundImage: `radial-gradient(${o.color} 38%, transparent 42%)`,
+    backgroundSize: '14px 100%', backgroundRepeat: 'repeat-x', backgroundPosition: 'center',
+  };
+  return { ...base, height: 0, borderTop: `${o.thickness}px ${o.style} ${o.color}` };
+}
+
 export default function RichTextEditor({ value, onChange, placeholder, minHeight = 180 }: {
   value: string;
   onChange: (html: string) => void;
@@ -104,6 +136,20 @@ export default function RichTextEditor({ value, onChange, placeholder, minHeight
   const quillRef = useRef<ReactQuill | null>(null);
   const [div, setDiv] = useState<DividerOpts>(DEFAULT_DIV);
   const [open, setOpen] = useState(false);
+  const [savedDividers, setSavedDividers] = useState<DividerPreset[]>(loadSavedDividers);
+
+  const saveCurrentDivider = () => {
+    const name = window.prompt('Name this divider preset:')?.trim();
+    if (!name) return;
+    const next = [...savedDividers.filter(s => s.name !== name), { name, opts: div }];
+    setSavedDividers(next);
+    persistSavedDividers(next);
+  };
+  const removeSavedDivider = (name: string) => {
+    const next = savedDividers.filter(s => s.name !== name);
+    setSavedDividers(next);
+    persistSavedDividers(next);
+  };
 
   const modules = useMemo(() => ({
     toolbar: {
@@ -132,30 +178,34 @@ export default function RichTextEditor({ value, onChange, placeholder, minHeight
     setOpen(false);
   };
 
-  // Self-contained preview styles — the popover portals to <body>, outside the
-  // scoped .ql-editor / .ac-rte-view selectors, so wavy/ornament geometry must
-  // be inline here or the preview box would render blank.
-  const WAVE_MASK = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='12' viewBox='0 0 24 12'%3E%3Cpath d='M0 6 Q 6 0 12 6 T 24 6' fill='none' stroke='black' stroke-width='2.4'/%3E%3C/svg%3E\") repeat-x center / 24px 100%";
-  const previewStyle: React.CSSProperties = (() => {
-    const base: React.CSSProperties = { width: '100%', margin: '4px 0', borderRadius: 2, border: 0 };
-    const h = Math.max(6, div.thickness * 3);
-    if (div.style === 'wavy') {
-      return { ...base, height: h, backgroundColor: div.color, WebkitMask: WAVE_MASK, mask: WAVE_MASK } as React.CSSProperties;
-    }
-    if (div.style === 'ornament') {
-      return {
-        ...base, height: h,
-        backgroundImage: `radial-gradient(${div.color} 38%, transparent 42%)`,
-        backgroundSize: '14px 100%', backgroundRepeat: 'repeat-x', backgroundPosition: 'center',
-      };
-    }
-    return { ...base, height: 0, borderTop: `${div.thickness}px ${div.style} ${div.color}` };
-  })();
+  const allPresets: (DividerPreset & { builtin: boolean })[] = [
+    ...BUILTIN_DIVIDERS.map(p => ({ ...p, builtin: true })),
+    ...savedDividers.map(p => ({ ...p, builtin: false })),
+  ];
 
   const popover = (
-    <Popover style={{ maxWidth: 320 }}>
+    <Popover style={{ maxWidth: 340 }}>
       <Popover.Header as="div" className="fw-semibold small">Insert divider</Popover.Header>
-      <Popover.Body>
+      <Popover.Body style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+        <div className="mb-3">
+          <div className="text-muted small mb-1">Presets <span className="text-muted">— click to insert</span></div>
+          <div className="d-flex flex-column gap-1">
+            {allPresets.map((pr, idx) => (
+              <div className="d-flex align-items-center gap-1" key={pr.name + idx}>
+                <button type="button" className="ac-div-preset flex-grow-1" title={`Insert "${pr.name}"`}
+                  onClick={() => insertDivider(pr.opts)}>
+                  <span className="ac-div-preset-name">{pr.name}</span>
+                  <hr className={`ac-divider ac-divider-${pr.opts.style}`} style={{ ...previewStyleFor(pr.opts), marginTop: 4 }} />
+                </button>
+                {!pr.builtin && (
+                  <button type="button" className="btn btn-sm btn-link text-muted p-0 px-1" title="Remove preset"
+                    onClick={() => removeSavedDivider(pr.name)}><i className="bi bi-x-lg" /></button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="text-muted small mb-2 fw-semibold">Or build your own</div>
         <div className="mb-2">
           <div className="text-muted small mb-1">Style</div>
           <div className="d-flex flex-wrap gap-1">
@@ -191,9 +241,12 @@ export default function RichTextEditor({ value, onChange, placeholder, minHeight
           </div>
         </div>
         <div className="px-2 py-2 mb-2 rounded" style={{ background: '#f8fafc', border: '1px solid #e5e7eb' }}>
-          <hr className={`ac-divider ac-divider-${div.style}`} style={previewStyle} />
+          <hr className={`ac-divider ac-divider-${div.style}`} style={{ ...previewStyleFor(div), margin: '4px 0' }} />
         </div>
-        <div className="d-flex justify-content-end">
+        <div className="d-flex justify-content-between align-items-center">
+          <Button size="sm" variant="outline-secondary" onClick={saveCurrentDivider} title="Save this divider as a reusable preset">
+            <i className="bi bi-bookmark-plus me-1" />Save preset
+          </Button>
           <Button size="sm" onClick={() => insertDivider(div)}>
             <i className="bi bi-plus-lg me-1" />Insert
           </Button>

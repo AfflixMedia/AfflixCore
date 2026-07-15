@@ -280,6 +280,54 @@ function AffiliateTrend({ data }: { data: AffPoint[] }) {
   );
 }
 
+// ---- §7 Offsite weekly trend — one coloured line per metric (no value cards) -
+//  GMV metrics share the left currency axis; Offsite Effect (%) rides the right
+//  axis. Direct labels (no hover) + green live dot on the latest week.
+export type OffPoint = { label: string; offsite_gmv: number | null; tiktok_shop_gmv: number | null; offsite_effect: number | null };
+const OFF_LINES: { key: keyof OffPoint; name: string; color: string; axis: 'g' | 'p'; fmt: 'currency' | 'percent'; pos: 'top' | 'bottom' }[] = [
+  { key: 'tiktok_shop_gmv', name: 'TikTok Shop GMV', color: '#0d6efd', axis: 'g', fmt: 'currency', pos: 'top' },
+  { key: 'offsite_gmv', name: 'Offsite GMV', color: '#e8862e', axis: 'g', fmt: 'currency', pos: 'bottom' },
+  { key: 'offsite_effect', name: 'Offsite Effect', color: '#16c784', axis: 'p', fmt: 'percent', pos: 'top' },
+];
+function OffsiteTrend({ data }: { data: OffPoint[] }) {
+  if (data.filter(d => OFF_LINES.some(l => d[l.key] != null)).length < 2) return null;
+  const lastIdx = data.length - 1;
+  const lab = (fmt: 'currency' | 'percent') => (v: any) =>
+    (v == null || v === '') ? '' : formatValue(fmt, Number(v), fmt === 'currency' ? { compact: true } : undefined);
+  return (
+    <div className="s14-card mt-3">
+      <div className="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+        <div className="s14-kpi-label">Weekly trend · last {data.length} weeks</div>
+        <div className="d-flex gap-3 align-items-center flex-wrap">
+          {OFF_LINES.map(l => <span key={String(l.key)} className="ac-legend-dot" style={{ '--c': l.color } as any}>{l.name}</span>)}
+          <span className="v3-live-legend"><span className="v3-live-pulse" />This week</span>
+        </div>
+      </div>
+      <div style={{ height: 300 }}>
+        <ResponsiveContainer>
+          <ComposedChart data={data} margin={{ top: 24, right: 52, bottom: 16, left: 6 }}>
+            <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#f1f5f9" />
+            <XAxis dataKey="label" tick={{ fontSize: 12, fill: '#8a93a6' }} tickLine={false} axisLine={{ stroke: '#eadfd6' }} />
+            <YAxis yAxisId="g" tick={{ fontSize: 11, fill: '#b3bac6' }} tickLine={false} axisLine={false}
+              width={50} tickFormatter={(v: number) => formatValue('currency', v, { compact: true })} />
+            <YAxis yAxisId="p" orientation="right" tick={{ fontSize: 11, fill: '#b3bac6' }} tickLine={false} axisLine={false}
+              width={44} tickFormatter={(v: number) => formatValue('percent', v)} />
+            <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #eef0f4', boxShadow: '0 10px 28px rgba(16,24,40,.12)', fontSize: 13 }}
+              formatter={(v: any, n: any) => { const l = OFF_LINES.find(x => x.name === n); return [formatValue(l?.fmt ?? 'currency', Number(v)), n]; }} />
+            {OFF_LINES.map(l => (
+              <Line key={String(l.key)} yAxisId={l.axis} type="monotone" dataKey={l.key as string} name={l.name} stroke={l.color} strokeWidth={3}
+                dot={makeDot(lastIdx, l.color)} activeDot={{ r: 6 }} isAnimationActive={false} connectNulls>
+                <LabelList dataKey={l.key as string} position={l.pos} offset={10} formatter={lab(l.fmt)}
+                  style={{ fontSize: 10.5, fontWeight: 700, fill: l.color }} />
+              </Line>
+            ))}
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
 // ---- ss6 · horizontal conversion funnel (Traffic Analysis) -----------------
 //  Teal trapezoid stages in a light track: stage name in white on the left,
 //  value on the right; the conversion rate between two stages sits in a left
@@ -491,10 +539,13 @@ function DeltaInline({ f, cur, prev }: { f: SectionField; cur: number | null; pr
 
 // ---- top creators / videos / lives -----------------------------------------
 const MEDAL = ['#f59e0b', '#94a3b8', '#cd7f32'];
-// Rank presentation: trophy for #1, a medal for #2/#3, plain number beyond.
-const RANK_ICON = ['bi-trophy-fill', 'bi-award-fill', 'bi-award-fill'];
+// Rank presentation: the numeral is primary; a small accent icon sits beside it
+// (gem for #1, star for #2/#3). Colour is gold/silver/bronze, grey for 4+.
+const RANK_ICON = ['bi-gem', 'bi-star-fill', 'bi-star-fill'];
 const rankColor = (i: number) => MEDAL[i] ?? '#cbd5e1';
-function rankInner(i: number) { return RANK_ICON[i] ? <i className={`bi ${RANK_ICON[i]}`} /> : <>{i + 1}</>; }
+function rankInner(i: number) {
+  return <><span className="tp-rank-n">{i + 1}</span>{RANK_ICON[i] && <i className={`bi ${RANK_ICON[i]} tp-rank-i`} />}</>;
+}
 function tiktokLink(h: string) { return `https://www.tiktok.com/@${encodeURIComponent(String(h).trim().replace(/^@+/, '').replace(/\s+/g, ''))}`; }
 
 function TopCreators({ rows }: { rows: RowData[] }) {
@@ -542,7 +593,7 @@ function TopVideos({ rows }: { rows: RowData[] }) {
           <div className="col-sm-6 col-lg-4" key={i}>
             <div className={`s14-card h-100 tp-video ${i === 0 ? 'tp-gold' : ''}`}>
               <a className="tp-thumb" href={url || undefined} target="_blank" rel="noreferrer" style={{ pointerEvents: url ? 'auto' : 'none' }}>
-                <span className="tp-rank-badge" style={{ background: rankColor(i) }}>{RANK_ICON[i] ? <i className={`bi ${RANK_ICON[i]}`} /> : `#${i + 1}`}</span>
+                <span className="tp-rank-badge" style={{ background: rankColor(i) }}>{rankInner(i)}</span>
                 <span className="tp-thumb-c">
                   <i className="bi bi-play-circle-fill tp-play" />
                   {url && <span className="tp-watch-center"><i className="bi bi-tiktok me-1" />Watch on TikTok</span>}
@@ -941,7 +992,6 @@ export default function ReportDashboardV3({
           { label: 'Offsite GMV', value: numv(data?.offsite_gmv), color: '#e8862e' },
         ];
         const S = offsiteSeries ?? [];
-        const serie = (k: 'offsite_gmv' | 'tiktok_shop_gmv' | 'offsite_effect') => S.map(x => ({ label: x.label, v: x[k] }));
         return (
           <>
             {/* Donut + legend — same treatment as §4 Product Traffic */}
@@ -952,15 +1002,8 @@ export default function ReportDashboardV3({
                 <div className="col-lg-5"><LegendList slices={slices} /></div>
               </div>
             </div>
-            {/* Weekly trend (increase/decrease) — separate card below the donut */}
-            <div className="s14-card mt-3">
-              <div className="s14-kpi-label mb-3">Weekly trend</div>
-              <div className="v3-offtrends">
-                <MetricTrend label="Offsite GMV" format="currency" color="#e8862e" series={serie('offsite_gmv')} current={num(data?.offsite_gmv)} />
-                <MetricTrend label="TikTok Shop GMV" format="currency" color="#0d6efd" series={serie('tiktok_shop_gmv')} current={num(data?.tiktok_shop_gmv)} />
-                <MetricTrend label="Offsite Effect" format="percent" color="#16c784" series={serie('offsite_effect')} current={num(data?.offsite_effect)} highlight />
-              </div>
-            </div>
+            {/* Weekly trend — multi-line graph below the donut (no value cards) */}
+            <OffsiteTrend data={S} />
           </>
         );
       }

@@ -70,6 +70,8 @@ export default function WeeklyReportEditV3() {
   const [productsMsg, setProductsMsg] = useState<Msg>(null);
   const [fetchingGmv, setFetchingGmv] = useState(false);
   const [gmvMsg, setGmvMsg] = useState<Msg>(null);
+  const [fetchingLive, setFetchingLive] = useState(false);
+  const [liveMsg, setLiveMsg] = useState<Msg>(null);
 
   interface PresetRow {
     id: string; name: string; payload: any;
@@ -295,6 +297,30 @@ export default function WeeklyReportEditV3() {
     setScoreMsg({ kind: 'success', text: `Set Shop Performance Score to ${avg.toFixed(1)} — the average of ${vals.length} daily SPS entr${vals.length === 1 ? 'y' : 'ies'} for ${label}. Don't forget to save.` });
   };
 
+  // ----- §8 LIVE Sessions — sum this week's daily live_sessions from Sample Seeding
+  const fetchLiveSessionsFromBrand = async () => {
+    if (!report) return;
+    setFetchingLive(true); setLiveMsg(null);
+    const label = formatRange(report.week_start, report.week_end);
+    const { data, error } = await supabase
+      .from('brand_samples_daily')
+      .select('entry_date,live_sessions')
+      .eq('brand_id', report.brand_id)
+      .gte('entry_date', report.week_start)
+      .lte('entry_date', report.week_end);
+    setFetchingLive(false);
+    if (error) { setLiveMsg({ kind: 'danger', text: error.message }); return; }
+    const rows = (data as any[]) ?? [];
+    const logged = rows.filter(d => d.live_sessions != null);
+    if (logged.length === 0) {
+      setLiveMsg({ kind: 'warning', text: `No daily LIVE sessions logged for ${label} on this brand's Sample Seeding page. Enter LIVE Sessions manually here.` });
+      return;
+    }
+    const total = logged.reduce((s, d) => s + (Number(d.live_sessions) || 0), 0);
+    setC(prev => ({ ...prev, affiliate: { ...prev.affiliate, live_sessions: total } }));
+    setLiveMsg({ kind: 'success', text: `Set LIVE Sessions to ${total} — the sum of ${logged.length} day${logged.length === 1 ? '' : 's'} logged for ${label}. Don't forget to save.` });
+  };
+
   // ----- §3 Product Analytics — load the brand's product catalogue into rows --
   const loadProductsIntoAnalytics = async () => {
     if (!report) return;
@@ -483,7 +509,6 @@ export default function WeeklyReportEditV3() {
       <div className="d-flex align-items-center gap-2">
         {extra}
         {sectionId && <StdPresetMenu sectionId={sectionId} />}
-        <AddSectionMenu onPick={(pl) => openAddSectionRelative({ type: 'standard', id: section as StandardSectionIdV3 }, pl)} />
         <FeedbackButton section={section} />
       </div>
     </div>
@@ -549,31 +574,7 @@ export default function WeeklyReportEditV3() {
         onChange={(patch) => updateCustomData(s.id, patch)}
         onEditDef={() => openEditCustom(s)}
         onRemove={() => removeCustom(s.id)}
-        onAddSection={(placement) => openAddSectionRelative({ type: 'custom', section: s }, placement)}
-        headerExtra={
-          <>
-            <Dropdown>
-              <Dropdown.Toggle size="sm" variant="outline-info" title="Add a saved preset as a new section">
-                <i className="bi bi-bookmark" />
-              </Dropdown.Toggle>
-              <Dropdown.Menu align="end" style={{ minWidth: 240 }}>
-                <Dropdown.Header>Add preset as a new section below</Dropdown.Header>
-                {customPresets.length === 0 ? (
-                  <Dropdown.ItemText className="text-muted small">No saved presets yet.</Dropdown.ItemText>
-                ) : customPresets.map(p => (
-                  <Dropdown.Item key={p.id} as="button" onClick={() => addPresetSectionBelow(s, p)}>
-                    <i className="bi bi-box-arrow-in-down me-2" />{p.name}
-                  </Dropdown.Item>
-                ))}
-              </Dropdown.Menu>
-            </Dropdown>
-            <Button size="sm" variant="outline-info" disabled={presetSavingId === s.id}
-              onClick={() => saveSectionAsPreset(s)} title="Save this section as a reusable preset">
-              <i className="bi bi-bookmark-plus" />
-            </Button>
-            <FeedbackButton section={`cs:${s.id}` as CommentSection} />
-          </>
-        }
+        headerExtra={<FeedbackButton section={`cs:${s.id}` as CommentSection} />}
       />
     ));
 
@@ -616,6 +617,15 @@ export default function WeeklyReportEditV3() {
         <>
           <AutoFetchBar label="Pull Shop Performance Score (Sample Seeding)" busy={fetchingScore}
             onClick={fetchShopScoreFromBrand} msg={scoreMsg} onClose={() => setScoreMsg(null)} />
+          <ScalarSectionBodyV3 def={def} data={(c as any)[def.id]} onField={(k, v) => setSec(def.id, k, v)} />
+        </>
+      );
+    }
+    if (def.special === 'live_sessions') {
+      return (
+        <>
+          <AutoFetchBar label="Pull LIVE Sessions (Sample Seeding)" busy={fetchingLive}
+            onClick={fetchLiveSessionsFromBrand} msg={liveMsg} onClose={() => setLiveMsg(null)} />
           <ScalarSectionBodyV3 def={def} data={(c as any)[def.id]} onField={(k, v) => setSec(def.id, k, v)} />
         </>
       );
@@ -687,35 +697,6 @@ export default function WeeklyReportEditV3() {
               <i className="bi bi-chat-left-text me-1" /> Load previous comments
             </Button>
           )}
-          <Dropdown>
-            <Dropdown.Toggle variant="outline-info" title="Insert a saved custom-section preset">
-              <i className="bi bi-bookmark me-1" /> Add from preset
-              {customPresets.length > 0 && <Badge bg="info" pill className="ms-1">{customPresets.length}</Badge>}
-            </Dropdown.Toggle>
-            <Dropdown.Menu align="end" style={{ minWidth: 280, maxHeight: 320, overflowY: 'auto' }}>
-              {customPresets.length === 0 ? (
-                <Dropdown.ItemText className="text-muted small">No saved custom-section presets yet.</Dropdown.ItemText>
-              ) : customPresets.map(p => (
-                <div key={p.id} className="d-flex align-items-center px-2 py-1" style={{ gap: 4 }}>
-                  <Dropdown.Item as="button" className="flex-grow-1 px-2 py-1" onClick={() => addCustomFromPreset(p)}>
-                    <div className="fw-semibold">{p.name}</div>
-                    <small className="text-muted">
-                      {p.payload?.is_repeater ? 'Table' : 'Long text'} · {p.payload?.fields?.length ?? 0} field{(p.payload?.fields?.length ?? 0) === 1 ? '' : 's'}
-                    </small>
-                  </Dropdown.Item>
-                  {(p.created_by === profile?.id || profile?.role === 'bob') && (
-                    <Button size="sm" variant="link" className="text-danger p-0 px-2"
-                      onClick={(e) => { e.stopPropagation(); e.preventDefault(); removePreset(p); }} title="Delete preset">
-                      <i className="bi bi-trash" />
-                    </Button>
-                  )}
-                </div>
-              ))}
-            </Dropdown.Menu>
-          </Dropdown>
-          <Button variant="outline-success" onClick={openAddCustom}>
-            <i className="bi bi-plus-square me-1" /> Add custom section
-          </Button>
           <Button variant="outline-secondary" onClick={() => nav('/reporting/weekly')}>Cancel</Button>
           <Button variant="outline-primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
           <Button variant="primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>

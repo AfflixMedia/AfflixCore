@@ -22,6 +22,7 @@ export interface DailyEntry {
   brand_id: string;
   entry_date: string;
   new_videos: number | null;
+  live_sessions: number | null;
   daily_sps: number | null;
   reason_of_drop: string | null;
   others_count: number;
@@ -243,6 +244,7 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
       ...r,
       product_counts: r.product_counts ?? {},
       dump_usernames: r.dump_usernames ?? null,
+      live_sessions: r.live_sessions ?? null,
     })) as DailyEntry[]);
     setWeekly((wRes.data ?? []) as WeeklyGmv[]);
     setEditingWeeks(new Set());
@@ -314,7 +316,7 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
       ? { ...existing, product_counts: { ...existing.product_counts } }
       : {
           brand_id: brandId, entry_date: date,
-          new_videos: null, daily_sps: null, reason_of_drop: '',
+          new_videos: null, live_sessions: null, daily_sps: null, reason_of_drop: '',
           others_count: 0, product_counts: {}, dump_usernames: null,
         });
     setDayModal(true);
@@ -330,7 +332,9 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
       brand_id: brandId,
       entry_date: dayDraft.entry_date,
       new_videos: dayDraft.new_videos,
-      // Weekend rows: only persist new_videos + reason_of_drop, force approvals to zero/null
+      // LIVE sessions are always kept (they can happen on weekends too), like new_videos
+      live_sessions: dayDraft.live_sessions,
+      // Weekend rows: only persist new_videos + live_sessions + reason_of_drop, force approvals to zero/null
       daily_sps: dayIsWeekend ? null : dayDraft.daily_sps,
       reason_of_drop: dayDraft.reason_of_drop?.trim() || null,
       others_count: dayIsWeekend ? 0 : (dayDraft.others_count ?? 0),
@@ -602,6 +606,7 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
               <tr>
                 <th>Date</th>
                 <th className="text-end">New videos</th>
+                <th className="text-end">LIVE</th>
                 <th className="text-end">Approved</th>
                 <th className="text-end">SPS</th>
                 <th>Reason of drop</th>
@@ -634,6 +639,9 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
                     </td>
                     <td className="text-end" onClick={() => canEdit && openEditDay(date)}>
                       {d?.new_videos ?? <span className="text-muted">—</span>}
+                    </td>
+                    <td className="text-end" onClick={() => canEdit && openEditDay(date)}>
+                      {d?.live_sessions ?? <span className="text-muted">—</span>}
                     </td>
                     {weekend ? (
                       <td colSpan={4} className="text-center text-muted fst-italic small"
@@ -953,21 +961,27 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
               )}
 
               <Row className="g-3">
-                <Col md={dayIsWeekend ? 12 : 4}>
+                <Col md={dayIsWeekend ? 6 : 3}>
                   <Form.Label className="small fw-semibold">New videos</Form.Label>
                   <NumberInput value={dayDraft.new_videos ?? 0}
                     placeholder="e.g. 8"
                     onChange={n => setDayDraft({ ...dayDraft, new_videos: n })} />
                 </Col>
+                <Col md={dayIsWeekend ? 6 : 3}>
+                  <Form.Label className="small fw-semibold">LIVE sessions</Form.Label>
+                  <NumberInput value={dayDraft.live_sessions ?? 0}
+                    placeholder="e.g. 2"
+                    onChange={n => setDayDraft({ ...dayDraft, live_sessions: n })} />
+                </Col>
                 {!dayIsWeekend && (
                   <>
-                    <Col md={4}>
+                    <Col md={3}>
                       <Form.Label className="small fw-semibold">Daily SPS</Form.Label>
                       <NumberInput step="0.1" value={dayDraft.daily_sps ?? 0}
                         placeholder="e.g. 4.2"
                         onChange={n => setDayDraft({ ...dayDraft, daily_sps: n })} />
                     </Col>
-                    <Col md={4}>
+                    <Col md={3}>
                       <Form.Label className="small fw-semibold">Total approved <small className="text-muted">(auto)</small></Form.Label>
                       <Form.Control disabled value={dayDraftTotal} />
                     </Col>

@@ -80,7 +80,7 @@ export interface SectionDefV3 {
    *   'gmv_max_product' -> pull per-product ad spend from GMV Max
    *   'video_paste'     -> paste-and-parse TikTok Shop video rows
    */
-  special?: 'sampling' | 'shop_score' | 'product_catalog' | 'gmv_max_product' | 'video_paste';
+  special?: 'sampling' | 'shop_score' | 'product_catalog' | 'gmv_max_product' | 'video_paste' | 'live_sessions';
 }
 
 // ---- tiny formula helpers --------------------------------------------------
@@ -194,7 +194,7 @@ export const WEEKLY_SECTIONS_V3: SectionDefV3[] = [
   },
   // 8 ──────────────────────────────────────────────────────────────────────
   {
-    id: 'affiliate', num: '8', title: 'Affiliate Performance', kind: 'scalar',
+    id: 'affiliate', num: '8', title: 'Affiliate Performance', kind: 'scalar', special: 'live_sessions',
     blurb: 'Seeding output plus creator collaboration activity and its GMV.',
     fields: [
       // "New Videos Posted" intentionally omitted here — videos are covered by §1
