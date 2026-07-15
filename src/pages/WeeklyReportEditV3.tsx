@@ -126,19 +126,39 @@ export default function WeeklyReportEditV3() {
   }, [id]);
 
   // ----- autosave: debounced, content-only (status is left untouched) --------
+  //  Writes are serialized through savingRef so a slow earlier write can never
+  //  land after a newer one (out-of-order = silent stale persistence). Reads go
+  //  through refs so the in-flight write always persists the latest content.
   const contentKey = JSON.stringify(c);
+  const latestContentRef = useRef(c);
+  latestContentRef.current = c;
+  const savingRef = useRef(false);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+
+  const runAutosave = async () => {
+    if (savingRef.current || !mountedRef.current) return;      // one write at a time
+    if (brand?.client_status === 'closed') return;
+    const snap = JSON.stringify(latestContentRef.current);
+    if (snap === lastSavedContent.current) return;             // nothing new
+    savingRef.current = true;
+    setAutoSave('saving');
+    const { error } = await supabase.from('weekly_reports').update({ content: latestContentRef.current }).eq('id', id);
+    savingRef.current = false;
+    if (!mountedRef.current) return;
+    if (error) { setAutoSave('error'); return; }
+    lastSavedContent.current = snap;
+    setAutoSave('saved');
+    // content edited while the write was in flight → save the newer content next
+    if (JSON.stringify(latestContentRef.current) !== lastSavedContent.current) void runAutosave();
+  };
+
   useEffect(() => {
     if (loading || !report || lastSavedContent.current === null) return;   // not until first load
     if (brand?.client_status === 'closed') return;                          // inactive brand
     if (contentKey === lastSavedContent.current) return;                    // nothing changed
-    setAutoSave('saving');
-    const t = setTimeout(async () => {
-      const { error } = await supabase.from('weekly_reports').update({ content: c }).eq('id', id);
-      if (error) { setAutoSave('error'); return; }
-      lastSavedContent.current = contentKey;
-      setAutoSave('saved');
-    }, 1200);
-    return () => clearTimeout(t);   // debounce: cancel on each keystroke / unmount
+    const t = setTimeout(() => void runAutosave(), 1200);
+    return () => clearTimeout(t);   // debounce: cancel the not-yet-fired timer
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contentKey]);
 

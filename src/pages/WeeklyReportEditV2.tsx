@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Card, Form, Button, Spinner, Alert, Badge, Modal, Offcanvas, Dropdown } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import { formatRange } from '../lib/dates';
+import { setReportCurrency } from '../lib/currency';
 import {
   WeeklyReportContentV2, emptyContentV2, normalizeContentV2, numOrNull,
   WEEKLY_SECTIONS, SECTION_LABELS, SectionDef, emptyRow, emptyTarget,
@@ -32,7 +33,7 @@ interface ReportRow {
   id: string; brand_id: string; week_start: string; week_end: string;
   week_number: number; status: string; content: any;
 }
-interface Brand { id: string; name: string; client: string; client_status: string | null; }
+interface Brand { id: string; name: string; client: string; client_status: string | null; currency?: string | null; }
 
 export default function WeeklyReportEdit() {
   const { id } = useParams<{ id: string }>();
@@ -87,7 +88,7 @@ export default function WeeklyReportEdit() {
       const r = data as ReportRow;
       setReport(r);
       setC(normalizeContentV2(r.content));
-      const { data: bd } = await supabase.from('brands').select('id,name,client,client_status').eq('id', r.brand_id).single();
+      const { data: bd } = await supabase.from('brands').select('id,name,client,client_status,currency').eq('id', r.brand_id).single();
       setBrand(bd as Brand);
       const { data: pcp } = await supabase.from('paid_creator_programs')
         .select('id,name,ended_at').eq('brand_id', r.brand_id)
@@ -391,6 +392,9 @@ export default function WeeklyReportEdit() {
   if (err && !report) return <Alert variant="danger">{err}</Alert>;
   if (!report || !brand) return null;
 
+  // Editor previews format money (e.g. §11 CPO auto cells) — set the brand
+  // currency so a stale value from a previously-viewed dashboard doesn't leak in.
+  setReportCurrency(brand.currency);
   const brandInactive = brand.client_status === 'closed';
   const sectionFeedbackCount = (section: CommentSection) => comments.filter(c => c.section === section).length;
 
