@@ -2817,8 +2817,19 @@ input[type="number"] {
 }
 .tp-thumb .tp-play { font-size: 2.7rem; opacity: .92; transition: transform .15s ease; }
 .tp-thumb:hover .tp-play { transform: scale(1.08); }
-.tp-rank-badge { position: absolute; top: 10px; left: 10px; color: #fff; font-weight: 800; font-size: .72rem; padding: 2px 9px; border-radius: 999px; }
+.tp-rank-badge { position: absolute; top: 10px; left: 10px; color: #fff; font-weight: 800; font-size: .78rem; padding: 3px 10px; border-radius: 999px; display: inline-flex; align-items: center; }
 .tp-video-body { padding: 14px 16px 16px; }
+/* §9 creators — items-sold value on the right */
+.tp-num { font-family: 'Sora', sans-serif; font-weight: 800; font-size: 1.25rem; color: #334155; line-height: 1.1; }
+/* §10 videos — play + "Watch on TikTok" stacked & centred on the thumbnail */
+.tp-thumb-c { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.tp-watch-center { display: inline-flex; align-items: center; color: #fff; font-weight: 700; font-size: .82rem; text-shadow: 0 1px 6px rgba(0,0,0,.45); }
+.tp-thumb:hover .tp-watch-center { text-decoration: underline; }
+/* §12 GMV Max — metric toggle (segmented control) */
+.v3-seg { display: inline-flex; background: #f1f3f7; border-radius: 999px; padding: 3px; gap: 2px; }
+.v3-seg-btn { border: none; background: transparent; color: #64748b; font-weight: 700; font-size: .78rem; padding: 5px 12px; border-radius: 999px; cursor: pointer; transition: background .15s ease, color .15s ease; white-space: nowrap; }
+.v3-seg-btn:hover { color: #1f2733; }
+.v3-seg-btn.active { background: #fff; color: var(--seg, #e8862e); box-shadow: 0 2px 8px rgba(16,24,40,.1); }
 
 /* Weekly Chronology (§2) chart — metric selector chips + WoW badge */
 .chrono-chip {
@@ -4188,6 +4199,7 @@ body.ac-pdf-capturing .dash-sidebar { display: none !important; }
 /* §11 — top live sessions */
 .v3-live-badge { display: inline-flex; align-items: center; gap: 5px; background: rgba(225,29,99,.1); color: #e11d63; font-weight: 800; font-size: .7rem; padding: 5px 10px; border-radius: 999px; text-transform: uppercase; letter-spacing: .06em; }
 .v3-live-meta { font-size: .84rem; color: #475569; }
+.v3-live-prod { display: inline-flex; align-items: center; font-weight: 600; color: #334155; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Weekly reports — "pick any month" calendar chip (jump beyond the recent 3) */
 .wr-month-pick { position: relative; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }

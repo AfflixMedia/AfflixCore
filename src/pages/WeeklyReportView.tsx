@@ -226,6 +226,19 @@ export default function WeeklyReportView() {
     const toN = (v: any) => (v == null || v === '') ? null : (Number.isFinite(Number(v)) ? Number(v) : null);
     return { label: formatWeekShort(t.week_start, t.week_end), affiliate_gmv: toN(a.affiliate_gmv), live_sessions: toN(a.live_sessions), contacted_creators: toN(a.contacted_creators) };
   }), [trend]);
+  // v3 §12 — per-week GMV Max aggregates (summed over the week's product rows).
+  const gmvMaxSeries = useMemo(() => trend.map(t => {
+    const gr: any[] = Array.isArray((t.content as any)?.gmv_max) ? (t.content as any).gmv_max : [];
+    const nv = (v: any) => Number(v) || 0;
+    const cost = gr.reduce((s, r) => s + nv(r.cost), 0);
+    const rev = gr.reduce((s, r) => s + nv(r.gross_revenue), 0);
+    const orders = gr.reduce((s, r) => s + nv(r.sku_orders), 0);
+    return {
+      label: formatWeekShort(t.week_start, t.week_end),
+      ad_spend: gr.length ? cost : null, revenue: gr.length ? rev : null,
+      roas: cost > 0 ? rev / cost : null, cpo: orders > 0 ? cost / orders : null,
+    };
+  }), [trend]);
   // v3 §1 month-to-date + §3 per-product samples-this-week (from Sample Seeding).
   const [mtd, setMtd] = useState<{ samples: number | null; videos: number | null } | null>(null);
   const [productSamples, setProductSamples] = useState<Record<string, number | null>>({});
@@ -372,6 +385,7 @@ export default function WeeklyReportView() {
             productSamples={productSamples}
             offsiteSeries={offsiteSeries}
             affiliateSeries={affiliateSeries}
+            gmvMaxSeries={gmvMaxSeries}
             trendData={trendData}
             hasPrev={!!prev}
             openSectionOnLoad={openSection}

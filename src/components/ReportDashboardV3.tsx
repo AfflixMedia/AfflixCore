@@ -419,12 +419,6 @@ function MetricTrend({ label, format, color, series, current, lowerIsBetter, hig
 }
 
 // ---- ss4 · product analytics table -----------------------------------------
-const AV_BG = ['#fff1e9', '#eef2ff', '#ecfdf5', '#fef3c7', '#fae8ff', '#e0f2fe'];
-const AV_FG = ['#c5640f', '#4f46e5', '#0f766e', '#b45309', '#a21caf', '#0369a1'];
-function initials(name: string): string {
-  const parts = String(name).trim().split(/[\s_.-]+/).filter(Boolean);
-  return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase() || '#';
-}
 function ProductTable({ def, rows, prevRows, samplesByProduct }: {
   def: SectionDefV3; rows: RowData[]; prevRows: RowData[]; samplesByProduct?: Record<string, number | null>;
 }) {
@@ -497,6 +491,10 @@ function DeltaInline({ f, cur, prev }: { f: SectionField; cur: number | null; pr
 
 // ---- top creators / videos / lives -----------------------------------------
 const MEDAL = ['#f59e0b', '#94a3b8', '#cd7f32'];
+// Rank presentation: trophy for #1, a medal for #2/#3, plain number beyond.
+const RANK_ICON = ['bi-trophy-fill', 'bi-award-fill', 'bi-award-fill'];
+const rankColor = (i: number) => MEDAL[i] ?? '#cbd5e1';
+function rankInner(i: number) { return RANK_ICON[i] ? <i className={`bi ${RANK_ICON[i]}`} /> : <>{i + 1}</>; }
 function tiktokLink(h: string) { return `https://www.tiktok.com/@${encodeURIComponent(String(h).trim().replace(/^@+/, '').replace(/\s+/g, ''))}`; }
 
 function TopCreators({ rows }: { rows: RowData[] }) {
@@ -510,16 +508,20 @@ function TopCreators({ rows }: { rows: RowData[] }) {
           <div className="col-sm-6 col-lg-4" key={i}>
             <div className={`s14-card h-100 tp-card ${i === 0 ? 'tp-gold' : ''}`}>
               <div className="d-flex align-items-center gap-2 mb-3">
-                <span className="tp-avatar" style={{ background: AV_BG[i % 6], color: AV_FG[i % 6] }}>{handle ? initials(handle) : <i className="bi bi-person" />}</span>
                 <div className="flex-grow-1" style={{ minWidth: 0 }}>
                   {handle ? <a className="tp-name" href={tiktokLink(handle)} target="_blank" rel="noreferrer">@{handle}</a> : <span className="tp-name text-muted">—</span>}
                 </div>
-                <span className="tp-rank" style={{ background: MEDAL[i] ?? '#cbd5e1' }}>{i + 1}</span>
+                <span className="tp-rank" style={{ background: rankColor(i) }}>{rankInner(i)}</span>
               </div>
-              <div className="tp-gmv">{formatValue('currency', num(c.gmv_generated))}</div>
-              <div className="tp-sub">GMV generated</div>
-              <div className="d-flex gap-3 mt-2 flex-wrap">
-                <span className="tp-stat"><strong>{formatValue('number', num(c.items_sold))}</strong> items sold</span>
+              <div className="d-flex justify-content-between align-items-end gap-2">
+                <div style={{ minWidth: 0 }}>
+                  <div className="tp-gmv">{formatValue('currency', num(c.gmv_generated))}</div>
+                  <div className="tp-sub">GMV generated</div>
+                </div>
+                <div className="text-end">
+                  <div className="tp-num">{formatValue('number', num(c.items_sold))}</div>
+                  <div className="tp-sub">Items sold</div>
+                </div>
               </div>
             </div>
           </div>
@@ -540,14 +542,17 @@ function TopVideos({ rows }: { rows: RowData[] }) {
           <div className="col-sm-6 col-lg-4" key={i}>
             <div className={`s14-card h-100 tp-video ${i === 0 ? 'tp-gold' : ''}`}>
               <a className="tp-thumb" href={url || undefined} target="_blank" rel="noreferrer" style={{ pointerEvents: url ? 'auto' : 'none' }}>
-                <span className="tp-rank-badge" style={{ background: MEDAL[i] ?? '#cbd5e1' }}>#{i + 1}</span>
-                <i className="bi bi-play-circle-fill tp-play" />
+                <span className="tp-rank-badge" style={{ background: rankColor(i) }}>{RANK_ICON[i] ? <i className={`bi ${RANK_ICON[i]}`} /> : `#${i + 1}`}</span>
+                <span className="tp-thumb-c">
+                  <i className="bi bi-play-circle-fill tp-play" />
+                  {url && <span className="tp-watch-center"><i className="bi bi-tiktok me-1" />Watch on TikTok</span>}
+                </span>
               </a>
               <div className="tp-video-body">
                 <div className="tp-product">{String(v.product_promoted ?? '').trim() || 'Product'}</div>
                 <div className="tp-gmv">{formatValue('currency', num(v.gmv))}</div>
-                <div className="tp-sub">video GMV · {formatValue('number', num(v.items_sold))} items</div>
-                {url && <a className="tp-watch mt-2 d-inline-flex align-items-center" href={url} target="_blank" rel="noreferrer"><i className="bi bi-tiktok me-1" />Watch on TikTok</a>}
+                <div className="tp-sub">Video GMV</div>
+                <div className="tp-stat mt-1"><strong>{formatValue('number', num(v.items_sold))}</strong> items sold this week</div>
               </div>
             </div>
           </div>
@@ -572,16 +577,16 @@ function TopLives({ rows }: { rows: RowData[] }) {
                 <div className="flex-grow-1 text-truncate">
                   {creator ? <a className="tp-name" href={tiktokLink(creator)} target="_blank" rel="noreferrer">@{creator}</a> : <span className="tp-name text-muted">—</span>}
                 </div>
-                <span className="tp-rank" style={{ background: MEDAL[i] ?? '#cbd5e1' }}>{i + 1}</span>
+                <span className="tp-rank" style={{ background: rankColor(i) }}>{rankInner(i)}</span>
               </div>
               <div className="tp-gmv">{formatValue('currency', num(l.gmv))}</div>
               <div className="tp-sub">LIVE GMV</div>
-              <div className="v3-live-meta mt-2">
-                {l.product_sold && <div><i className="bi bi-bag me-1 text-muted" />{String(l.product_sold)}</div>}
-                <div className="d-flex gap-3 flex-wrap mt-1">
+              <div className="v3-live-meta mt-2 d-flex justify-content-between align-items-center gap-2 flex-wrap">
+                {l.product_sold && <span className="v3-live-prod"><i className="bi bi-bag me-1 text-muted" />{String(l.product_sold)}</span>}
+                <span className="d-flex gap-2 align-items-center flex-shrink-0">
                   {l.live_duration && <span className="tp-stat"><i className="bi bi-clock me-1" />{String(l.live_duration)}</span>}
                   {l.live_id && <span className="tp-stat text-muted">{String(l.live_id)}</span>}
-                </div>
+                </span>
               </div>
             </div>
           </div>
@@ -625,33 +630,85 @@ function ChannelPair({ def, rows, prevRows }: { def: SectionDefV3; rows: RowData
 }
 
 // ---- §12 · GMV Max dashboard ------------------------------------------------
-function GmvMaxViz({ rows }: { rows: RowData[] }) {
+export type GmvMaxPoint = { label: string; ad_spend: number | null; revenue: number | null; roas: number | null; cpo: number | null };
+const GMX_METRICS: { key: keyof Omit<GmvMaxPoint, 'label'>; label: string; color: string; kind: 'currency' | 'roas' | 'cpo' }[] = [
+  { key: 'revenue', label: 'Gross Revenue', color: '#10b981', kind: 'currency' },
+  { key: 'ad_spend', label: 'Ad Spend', color: '#94a3b8', kind: 'currency' },
+  { key: 'roas', label: 'Blended ROAS', color: '#e8862e', kind: 'roas' },
+  { key: 'cpo', label: 'Blended CPO', color: '#8b5cf6', kind: 'cpo' },
+];
+function fmtGmx(kind: 'currency' | 'roas' | 'cpo', v: number | null, compact = false): string {
+  if (v == null) return '—';
+  if (kind === 'roas') return `${v.toFixed(2)}x`;
+  if (kind === 'cpo') return formatValue('currency', v);
+  return formatValue('currency', v, compact ? { compact: true } : undefined);
+}
+function GmvMaxViz({ rows, series }: { rows: RowData[]; series?: GmvMaxPoint[] }) {
+  const [metricKey, setMetricKey] = useState<keyof Omit<GmvMaxPoint, 'label'>>('revenue');
   if (!rows || rows.length === 0) return <div className="s14-empty">No GMV Max data yet</div>;
   const totCost = rows.reduce((a, r) => a + numv(r.cost), 0);
   const totRev = rows.reduce((a, r) => a + numv(r.gross_revenue), 0);
   const totOrders = rows.reduce((a, r) => a + numv(r.sku_orders), 0);
   const roas = totCost > 0 ? totRev / totCost : null;
   const cpo = totOrders > 0 ? totCost / totOrders : null;
-  const chart = rows.map(r => ({ name: String(r.product ?? '').slice(0, 14) || '—', Cost: numv(r.cost), Revenue: numv(r.gross_revenue) }));
   const tiles: { label: string; value: string }[] = [
     { label: 'Total Ad Spend', value: formatValue('currency', totCost) },
     { label: 'Gross Revenue', value: formatValue('currency', totRev) },
     { label: 'Blended ROAS', value: roas == null ? '—' : `${roas.toFixed(2)}x` },
     { label: 'Blended CPO', value: cpo == null ? '—' : formatValue('currency', cpo) },
   ];
+  // A weekly trend line needs ≥2 weeks with data; otherwise fall back to the
+  // per-product cost-vs-revenue bar chart so single-week reports still show one.
+  const S = series ?? [];
+  const hasTrend = S.filter(s => GMX_METRICS.some(m => s[m.key] != null)).length >= 2;
+  const active = GMX_METRICS.find(m => m.key === metricKey)!;
+  const lastIdx = S.length - 1;
+  const chart = rows.map(r => ({ name: String(r.product ?? '').slice(0, 14) || '—', Cost: numv(r.cost), Revenue: numv(r.gross_revenue) }));
   return (
-    <div className="row g-3">
-      <div className="col-lg-4">
-        <div className="row g-3">
-          {tiles.map(t => (
-            <div className="col-6" key={t.label}>
-              <div className="ac-kpi h-100"><div className="ac-kpi-label">{t.label}</div><div className="ac-kpi-value">{t.value}</div></div>
-            </div>
-          ))}
-        </div>
+    <>
+      {/* Full-width KPI tiles */}
+      <div className="row g-3 mb-3">
+        {tiles.map(t => (
+          <div className="col-6 col-lg-3" key={t.label}>
+            <div className="ac-kpi h-100"><div className="ac-kpi-label">{t.label}</div><div className="ac-kpi-value">{t.value}</div></div>
+          </div>
+        ))}
       </div>
-      <div className="col-lg-8">
-        <div className="s14-card h-100">
+      {hasTrend ? (
+        <div className="s14-card">
+          <div className="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+            <div className="s14-kpi-label">{active.label} · last {S.length} weeks</div>
+            <div className="d-flex align-items-center gap-3 flex-wrap">
+              <div className="v3-seg">
+                {GMX_METRICS.map(m => (
+                  <button key={String(m.key)} type="button" className={`v3-seg-btn${m.key === metricKey ? ' active' : ''}`}
+                    style={m.key === metricKey ? ({ '--seg': m.color } as any) : undefined} onClick={() => setMetricKey(m.key)}>{m.label}</button>
+                ))}
+              </div>
+              <span className="v3-live-legend"><span className="v3-live-pulse" />This week</span>
+            </div>
+          </div>
+          <div style={{ height: 280 }}>
+            <ResponsiveContainer>
+              <LineChart data={S} margin={{ top: 26, right: 18, bottom: 8, left: 6 }}>
+                <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="label" tick={{ fontSize: 12, fill: '#8a93a6' }} tickLine={false} axisLine={{ stroke: '#eadfd6' }} />
+                <YAxis tick={{ fontSize: 11, fill: '#b3bac6' }} tickLine={false} axisLine={false} width={52}
+                  tickFormatter={(v: number) => fmtGmx(active.kind, v, true)} />
+                <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #eef0f4', boxShadow: '0 10px 28px rgba(16,24,40,.12)', fontSize: 13 }}
+                  formatter={(v: any) => [fmtGmx(active.kind, Number(v)), active.label]} />
+                <Line type="monotone" dataKey={active.key as string} name={active.label} stroke={active.color} strokeWidth={3}
+                  dot={makeDot(lastIdx, active.color)} activeDot={{ r: 6 }} isAnimationActive={false} connectNulls>
+                  <LabelList dataKey={active.key as string} position="top" offset={12}
+                    formatter={(v: any) => (v == null || v === '') ? '' : fmtGmx(active.kind, Number(v), true)}
+                    style={{ fontSize: 11, fontWeight: 700, fill: active.color }} />
+                </Line>
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      ) : (
+        <div className="s14-card">
           <div className="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
             <div className="s14-kpi-label">Ad spend vs gross revenue by product</div>
             <div className="d-flex gap-3">
@@ -672,8 +729,8 @@ function GmvMaxViz({ rows }: { rows: RowData[] }) {
             </ResponsiveContainer>
           </div>
         </div>
-      </div>
-    </div>
+      )}
+    </>
   );
 }
 
@@ -690,7 +747,7 @@ const SECTION_ACCENT: Record<string, string> = {
 };
 
 export default function ReportDashboardV3({
-  c, p, wow, sampleSeries, mtd, productSamples, offsiteSeries, affiliateSeries, hasPrev, commentsConfig, openSectionOnLoad, highlightCommentId,
+  c, p, wow, sampleSeries, mtd, productSamples, offsiteSeries, affiliateSeries, gmvMaxSeries, hasPrev, commentsConfig, openSectionOnLoad, highlightCommentId,
   approvalDecisions, approvalAction, audience = 'staff', reportMeta,
 }: {
   c: WeeklyReportContentV3;
@@ -707,6 +764,8 @@ export default function ReportDashboardV3({
   offsiteSeries?: { label: string; offsite_gmv: number | null; tiktok_shop_gmv: number | null; offsite_effect: number | null }[];
   /** §8 per-week affiliate metrics for the multi-line trend (last point = current week). */
   affiliateSeries?: AffPoint[];
+  /** §12 per-week GMV Max aggregates for the metric-toggle trend (last point = current week). */
+  gmvMaxSeries?: GmvMaxPoint[];
   trendData?: TrendPoint[];
   hasPrev: boolean;
   reportMeta?: { title: string; period: string; compare?: string };
@@ -901,7 +960,7 @@ export default function ReportDashboardV3({
       case 'top_creators': return <TopCreators rows={rows} />;
       case 'top_videos': return <TopVideos rows={rows} />;
       case 'top_lives': return <TopLives rows={rows} />;
-      case 'gmv_max': return <GmvMaxViz rows={rows} />;
+      case 'gmv_max': return <GmvMaxViz rows={rows} series={gmvMaxSeries} />;
       default:
         return def.kind === 'scalar' ? <TileGrid def={def} data={data} prev={prev} /> : null;
     }

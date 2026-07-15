@@ -303,6 +303,27 @@ export default function SharedReports() {
       });
   }, [openReport, reports]);
 
+  // v3 §12 — per-week GMV Max aggregates (summed over the week's product rows).
+  const gmvMaxSeries = useMemo(() => {
+    if (!openReport) return [];
+    return reports
+      .filter(r => r.brand_id === openReport.brand_id && r.week_start <= openReport.week_start)
+      .sort((a, b) => a.week_start.localeCompare(b.week_start))
+      .slice(-8)
+      .map(t => {
+        const gr: any[] = Array.isArray((t.content as any)?.gmv_max) ? (t.content as any).gmv_max : [];
+        const nv = (v: any) => Number(v) || 0;
+        const cost = gr.reduce((s, r) => s + nv(r.cost), 0);
+        const rev = gr.reduce((s, r) => s + nv(r.gross_revenue), 0);
+        const orders = gr.reduce((s, r) => s + nv(r.sku_orders), 0);
+        return {
+          label: formatWeekShort(t.week_start, t.week_end),
+          ad_spend: gr.length ? cost : null, revenue: gr.length ? rev : null,
+          roas: cost > 0 ? rev / cost : null, cpo: orders > 0 ? cost / orders : null,
+        };
+      });
+  }, [openReport, reports]);
+
   // Decisions are keyed by (report_type, report_id) so a weekly + monthly report
   // never accidentally share state.
   const decidedSet = useMemo(
@@ -539,6 +560,7 @@ export default function SharedReports() {
           sampleSeries={sampleSeries}
           offsiteSeries={offsiteSeries}
           affiliateSeries={affiliateSeries}
+          gmvMaxSeries={gmvMaxSeries}
           hasPrev={!!prevReport}
           audience={isClientDash ? 'client' : undefined}
           reportMeta={isClientDash ? {
