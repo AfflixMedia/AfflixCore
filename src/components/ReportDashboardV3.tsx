@@ -784,7 +784,13 @@ export default function ReportDashboardV3({
   const toggleNav = () => setNavCollapsed(v => { const n = !v; try { localStorage.setItem('ac_dash_nav', n ? '1' : '0'); } catch { /* ignore */ } return n; });
 
   const wowData: WowPoint[] = wow ?? [];
-  const visibleSections = WEEKLY_SECTIONS_V3.filter(d => !(isClient && CLIENT_HIDE.has(d.id)));
+  // §1 "Sampling & Videos" is no longer a standalone section — its cards are
+  // rendered inside §8 (Affiliate Performance). It stays in the schema/editor so
+  // data entry + auto-fill keep working; it's just merged in the report view.
+  const visibleSections = WEEKLY_SECTIONS_V3.filter(d => d.id !== 'sampling' && !(isClient && CLIENT_HIDE.has(d.id)));
+  // Display numbering follows the visible order (no gap left by the removed §1).
+  const dispNum = new Map<string, number>();
+  visibleSections.forEach((d, i) => dispNum.set(d.id, i + 1));
 
   const sectionHasData = (def: SectionDefV3): boolean => {
     const data = (c as any)[def.id];
@@ -822,7 +828,9 @@ export default function ReportDashboardV3({
     if (section === 'approval') return 'Approval Needed / Action Items';
     if (section === 'insights') return 'Insights';
     const def = SECTION_BY_ID_V3[section];
-    return def ? `${def.num}. ${def.title}` : section;
+    if (!def) return section;
+    const n = dispNum.get(section);
+    return n ? `${n}. ${def.title}` : def.title;
   };
   const FeedbackIcon = ({ section }: { section: CommentSection }) => {
     if (!commentsConfig) return null;
@@ -935,24 +943,39 @@ export default function ReportDashboardV3({
         const S = offsiteSeries ?? [];
         const serie = (k: 'offsite_gmv' | 'tiktok_shop_gmv' | 'offsite_effect') => S.map(x => ({ label: x.label, v: x[k] }));
         return (
-          <div className="s14-card">
-            <div className="s14-kpi-label mb-3">Onsite vs offsite GMV</div>
-            <div className="row g-4 align-items-center">
-              <div className="col-lg-5"><Donut slices={slices} centerLabel="Total GMV" /></div>
-              <div className="col-lg-7">
-                <div className="v3-offtrends">
-                  <MetricTrend label="Offsite GMV" format="currency" color="#e8862e" series={serie('offsite_gmv')} current={num(data?.offsite_gmv)} />
-                  <MetricTrend label="TikTok Shop GMV" format="currency" color="#0d6efd" series={serie('tiktok_shop_gmv')} current={num(data?.tiktok_shop_gmv)} />
-                  <MetricTrend label="Offsite Effect" format="percent" color="#16c784" series={serie('offsite_effect')} current={num(data?.offsite_effect)} highlight />
-                </div>
+          <>
+            {/* Donut + legend — same treatment as §4 Product Traffic */}
+            <div className="s14-card">
+              <div className="s14-kpi-label mb-2">GMV by source</div>
+              <div className="row g-3 align-items-center">
+                <div className="col-lg-7"><Donut slices={slices} centerLabel="Total GMV" /></div>
+                <div className="col-lg-5"><LegendList slices={slices} /></div>
               </div>
             </div>
-          </div>
+            {/* Weekly trend (increase/decrease) — separate card below the donut */}
+            <div className="s14-card mt-3">
+              <div className="s14-kpi-label mb-3">Weekly trend</div>
+              <div className="v3-offtrends">
+                <MetricTrend label="Offsite GMV" format="currency" color="#e8862e" series={serie('offsite_gmv')} current={num(data?.offsite_gmv)} />
+                <MetricTrend label="TikTok Shop GMV" format="currency" color="#0d6efd" series={serie('tiktok_shop_gmv')} current={num(data?.tiktok_shop_gmv)} />
+                <MetricTrend label="Offsite Effect" format="percent" color="#16c784" series={serie('offsite_effect')} current={num(data?.offsite_effect)} highlight />
+              </div>
+            </div>
+          </>
         );
       }
       case 'affiliate':
         return (
           <>
+            {/* Merged from the former §1 — sampling cards + samples/videos chart */}
+            <div data-section="sampling">
+              <div className="v3-subhead">
+                <span><i className="bi bi-box-seam me-2" />Sampling &amp; videos</span>
+                <FeedbackIcon section={'sampling' as CommentSection} />
+              </div>
+              {body(SECTION_BY_ID_V3.sampling)}
+            </div>
+            <div className="v3-subhead mt-4"><span><i className="bi bi-people-fill me-2" />Affiliate activity</span></div>
             <TileGrid def={def} data={data} prev={prev} col="col-6 col-lg-3" />
             {affiliateSeries && <AffiliateTrend data={affiliateSeries} />}
           </>
@@ -985,7 +1008,7 @@ export default function ReportDashboardV3({
         {visibleSections.map(def => (
           <div key={def.id}>
             <section className="s14-section" data-section={def.id}>
-              <SectionTitle title={`${def.num}. ${def.title.replace(' — Product-Level Ad Spend & Overall', '')}`} sub={def.blurb}
+              <SectionTitle title={`${dispNum.get(def.id)}. ${def.title.replace(' — Product-Level Ad Spend & Overall', '')}`} sub={def.blurb}
                 color={SECTION_ACCENT[def.id]} fb={<FeedbackIcon section={def.id as CommentSection} />} />
               {body(def)}
             </section>

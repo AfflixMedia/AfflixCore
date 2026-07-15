@@ -195,7 +195,7 @@ export const WEEKLY_SECTIONS_V3: SectionDefV3[] = [
   // 8 ──────────────────────────────────────────────────────────────────────
   {
     id: 'affiliate', num: '8', title: 'Affiliate Performance', kind: 'scalar',
-    blurb: 'Creator collaboration activity and its GMV.',
+    blurb: 'Seeding output plus creator collaboration activity and its GMV.',
     fields: [
       // "New Videos Posted" intentionally omitted here — videos are covered by §1
       // (Sampling & Videos); keeping it in §8 duplicated the metric.
