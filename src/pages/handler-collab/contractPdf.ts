@@ -147,6 +147,12 @@ export async function downloadCreatorContract(input: ContractInput) {
   para([{ t: 'The Creator agrees to:' }], { after: 4 });
   para([{ t: 'Create and publish a total of' }, { t: `${nWords} TikTok videos`, b: true }, { t: `featuring ${brand}.` }], { indent: 22, bullet: 'dot', after: 2 });
   para([{ t: "Keep the videos publicly available on the Creator's TikTok account." }], { indent: 22, bullet: 'dot', after: 2 });
+  {
+    // Completion deadline scales with deal size: ≤4 videos → 10 days, 5+ → 14 days
+    // (skipped when the count is unknown, to keep the neutral wording clean).
+    const deadlineDays = count < 5 ? 10 : 14;
+    if (count > 0) para([{ t: 'Complete the deliverables within' }, { t: `${numWords(deadlineDays)} (${deadlineDays}) days`, b: true }, { t: 'after the sample has been delivered.' }], { indent: 22, bullet: 'dot', after: 2 });
+  }
   para([{ t: 'After all' }, { t: `${nShort} videos`, b: true }, { t: 'have been posted, provide the Brand with:' }], { indent: 22, bullet: 'dot', after: 2 });
   para([{ t: 'The links to all' }, { t: `${nShort} published TikTok videos.`, b: true }], { indent: 44, bullet: 'circle', after: 2 });
   para([{ t: 'The TikTok Spark Ad Codes (Ad Authorization Codes) for each video for 365 days.' }], { indent: 44, bullet: 'circle' });
