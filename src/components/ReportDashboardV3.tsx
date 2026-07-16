@@ -66,7 +66,7 @@ function SectionTitle({ title, sub, color = '#e8862e', fb }: { title: string; su
     <div className="s14-title">
       <span className="s14-title-accent" style={{ background: color }} />
       <div className="flex-grow-1">
-        <div className="s14-title-text">{title}</div>
+        <h2 className="s14-title-text">{title}</h2>
         {sub && <div className="s14-title-sub">{sub}</div>}
       </div>
       {fb}
@@ -1075,7 +1075,7 @@ export default function ReportDashboardV3({
         {visibleSections.map(def => (
           <div key={def.id}>
             <section className="s14-section" data-section={def.id}>
-              <SectionTitle title={`${dispNum.get(def.id)}. ${def.title.replace(' — Product-Level Ad Spend & Overall', '')}`} sub={def.blurb}
+              <SectionTitle title={`${dispNum.get(def.id)}. ${def.title.replace(' — Product-Level Ad Spend & Overall', '')}`} sub={isClient ? undefined : def.blurb}
                 color={SECTION_ACCENT[def.id]} fb={<FeedbackIcon section={def.id as CommentSection} />} />
               {body(def)}
             </section>

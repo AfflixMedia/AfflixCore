@@ -166,12 +166,12 @@ export default function ReportDashboard({
     <Card className="mb-3" data-section={def.id}>
       <Card.Header>
         <div className="d-flex justify-content-between align-items-center w-100">
-          <span className="fw-semibold"><span className="text-muted me-1">{def.num}.</span>{def.title}</span>
+          <h2 className="fw-semibold fs-6 mb-0"><span className="text-muted me-1">{def.num}.</span>{def.title}</h2>
           <FeedbackIcon section={def.id} />
         </div>
       </Card.Header>
       <Card.Body>
-        {def.blurb && <p className="text-muted small mb-3">{def.blurb}</p>}
+        {def.blurb && !isClient && <p className="text-muted small mb-3">{def.blurb}</p>}
         {children}
       </Card.Body>
     </Card>
