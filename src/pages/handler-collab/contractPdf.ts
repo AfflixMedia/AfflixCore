@@ -57,7 +57,7 @@ export async function downloadCreatorContract(input: ContractInput) {
   const username = (input.username || '').trim();
   const count = Math.max(0, Math.round(input.videosCount || 0));
   const amountTxt = `USD $${Math.round(input.amount || 0).toLocaleString()}`;
-  const method = 'PayPal/Zelle'; // always both, regardless of the deal's saved payout details
+  const method = 'PayPal / Zelle'; // always both, regardless of the deal's saved payout details
   const dateTxt = fmtContractDate(input.effectiveDate);
   const featuring = input.productNames && input.productNames.length
     ? joinNames(input.productNames)
