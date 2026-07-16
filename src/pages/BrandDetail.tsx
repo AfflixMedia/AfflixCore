@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/AuthContext';
 import BrandResourcesTab from './brand/BrandResourcesTab';
 import BrandReportingTab from './brand/BrandReportingTab';
+import BrandApprovalsTab from './brand/BrandApprovalsTab';
 import BrandGmvMaxTab from './brand/BrandGmvMaxTab';
 import BrandSamplesTab from './brand/BrandSamplesTab';
 import BrandPaidCollabTab, { isPendingAuthCode } from './brand/BrandPaidCollabTab';
@@ -21,11 +22,12 @@ interface Brand {
   client_status: string | null;
 }
 
-type TabKey = 'resources' | 'reporting' | 'gmv-max' | 'samples' | 'paid-collab' | 'products' | 'billing' | 'payments';
+type TabKey = 'resources' | 'reporting' | 'approvals' | 'gmv-max' | 'samples' | 'paid-collab' | 'products' | 'billing' | 'payments';
 
 const TABS: { key: TabKey; label: string; icon: string }[] = [
   { key: 'resources',   label: 'Resources',      icon: 'bi-folder2-open' },
   { key: 'reporting',   label: 'Reporting',      icon: 'bi-bar-chart' },
+  { key: 'approvals',   label: 'Approvals',      icon: 'bi-patch-check' },
   { key: 'gmv-max',     label: 'GMV Max',        icon: 'bi-graph-up-arrow' },
   { key: 'samples',     label: 'Sample Seeding', icon: 'bi-box-seam' },
   { key: 'products',    label: 'Products',       icon: 'bi-tags' },
@@ -78,13 +80,19 @@ export default function BrandDetail() {
   // the Paid Collab tab. Fetched on load; the tab reports live changes upward so
   // the dot clears as videos get authorised.
   const [pendingAuthCount, setPendingAuthCount] = useState(0);
+  // Reports whose client approval request is still unanswered — drives the red
+  // dot on the Approvals tab.
+  const [pendingApprovalCount, setPendingApprovalCount] = useState(0);
 
   const tabFromUrl = (params.get('tab') as TabKey) || 'resources';
 
   useEffect(() => {
     (async () => {
       setLoading(true); setErr(null);
-      const [{ data: b, error: bErr }, { data: assigns }, { data: siblings }, { data: authRows }] = await Promise.all([
+      const [
+        { data: b, error: bErr }, { data: assigns }, { data: siblings }, { data: authRows },
+        { data: wApprovals }, { data: mApprovals }, { data: decidedRows },
+      ] = await Promise.all([
         supabase.from('brands').select('id,name,client,client_id,share_enabled,client_status').eq('id', id).maybeSingle(),
         isApc
           ? supabase.from('apc_brands').select('brand_id').eq('apc_id', profile?.id ?? '').eq('brand_id', id ?? '')
@@ -99,6 +107,12 @@ export default function BrandDetail() {
         // Pending-authorisation videos for the Paid Collab tab dot. RLS returns
         // rows only to users with brand access; errors just leave the dot off.
         supabase.from('handler_collab_creators').select('video_codes').eq('brand_id', id ?? ''),
+        // Unanswered client-approval requests for the Approvals tab dot — pull
+        // just each report's approval section (not the full content jsonb) and
+        // the viewer-visible decisions, intersected below.
+        supabase.from('weekly_reports').select('id,approval:content->approval').eq('brand_id', id ?? ''),
+        supabase.from('monthly_reports').select('id,approval:content->approval').eq('brand_id', id ?? ''),
+        supabase.from('report_approval_decisions').select('report_id'),
       ]);
       if (bErr) { setErr(bErr.message); setLoading(false); return; }
       if (!b) { setErr('Brand not found.'); setLoading(false); return; }
@@ -111,6 +125,13 @@ export default function BrandDetail() {
       setAssignedToMe(((assigns as any[])?.length ?? 0) > 0);
       setPendingAuthCount(((authRows as any[]) ?? []).reduce((n, r) =>
         n + (Array.isArray(r.video_codes) ? r.video_codes.filter(isPendingAuthCode).length : 0), 0));
+      // Same rule as the Approvals tab / reporting lists: approval requested
+      // (even past expires_at) and no decision recorded yet.
+      const decidedIds = new Set(((decidedRows as any[]) ?? []).map(d => d.report_id));
+      setPendingApprovalCount(
+        [...((wApprovals as any[]) ?? []), ...((mApprovals as any[]) ?? [])]
+          .filter(r => !decidedIds.has(r.id) && !!r.approval?.enabled).length,
+      );
       setSiblings(((siblings as any[]) ?? []).map(x => ({
         id: x.id, name: x.name, status: (x.client_status ?? 'in_progress') as ClientStatus,
       })));
@@ -393,6 +414,12 @@ export default function BrandDetail() {
                       title={`${pendingAuthCount} video${pendingAuthCount === 1 ? '' : 's'} awaiting authorisation`}
                     />
                   )}
+                  {t.key === 'approvals' && pendingApprovalCount > 0 && (
+                    <span
+                      className="ac-tab-dot"
+                      title={`${pendingApprovalCount} report${pendingApprovalCount === 1 ? '' : 's'} awaiting the client's decision`}
+                    />
+                  )}
                 </Nav.Link>
               </Nav.Item>
             ))}
@@ -402,6 +429,7 @@ export default function BrandDetail() {
 
       {currentTab === 'resources'   && <BrandResourcesTab brandId={brand.id} brandName={brand.name} canEdit={canEditResources} />}
       {currentTab === 'reporting'   && <BrandReportingTab brand={brand} isBob={isBob} canEdit={canEditReporting} onShareEnabledChanged={onShareEnabledChanged} />}
+      {currentTab === 'approvals'   && <BrandApprovalsTab brandId={brand.id} brandName={brand.name} />}
       {currentTab === 'gmv-max'     && <BrandGmvMaxTab brandId={brand.id} canEdit={canEditGmvMax} />}
       {currentTab === 'samples'     && <BrandSamplesTab brandId={brand.id} canEdit={canEditSamples} />}
       {currentTab === 'products'    && <BrandProductsTab brandId={brand.id} canEdit={canEditProducts} />}

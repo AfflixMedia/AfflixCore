@@ -71,6 +71,7 @@ interface Report {
   status: string;
   created_at: string;
   review_status?: string;
+  content?: any;
 }
 
 // Small internal-review pill shown on report cards.
@@ -82,8 +83,14 @@ const REVIEW_PILL: Record<string, { bg: string; text?: string; icon: string; lab
 
 type StatusTab = 'all' | 'draft' | 'submitted' | 'unread' | 'approved';
 
-// Latest client "approved" decision on a report (for the Approved tab).
-interface ApprovedInfo { name: string; at: string; }
+// Latest client decision on a report (for the Approvals tab).
+interface ApprovalInfo { decision: 'approved' | 'changes_requested'; name: string; at: string; }
+
+// The report asked the client for approval — every request counts, even past
+// its expires_at (expiry only stops the share link's auto-prompt).
+function approvalRequested(r: { content?: any }): boolean {
+  return !!r.content?.approval?.enabled;
+}
 
 export default function WeeklyReports() {
   const { profile, user } = useAuth();
@@ -110,8 +117,8 @@ export default function WeeklyReports() {
   const [reports, setReports] = useState<Report[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  // Client approvals + comment counts (for the Approved tab + conversation icon).
-  const [approvedMap, setApprovedMap] = useState<Map<string, ApprovedInfo>>(new Map());
+  // Client approval decisions + comment counts (for the Approvals tab + conversation icon).
+  const [approvalMap, setApprovalMap] = useState<Map<string, ApprovalInfo>>(new Map());
   const [commentCounts, setCommentCounts] = useState<Map<string, number>>(new Map());
   const [convReport, setConvReport] = useState<ConvReport | null>(null);
 
@@ -164,15 +171,15 @@ export default function WeeklyReports() {
   const loadFeedbackMeta = async () => {
     const [decRes, cmtRes] = await Promise.all([
       supabase.from('report_approval_decisions')
-        .select('report_id,decided_by_name,decided_at').eq('decision', 'approved'),
+        .select('report_id,decision,decided_by_name,decided_at'),
       supabase.from('report_comments').select('report_id'),
     ]);
-    const am = new Map<string, ApprovedInfo>();
+    const am = new Map<string, ApprovalInfo>();
     (decRes.data ?? []).forEach((d: any) => {
       const cur = am.get(d.report_id);
-      if (!cur || d.decided_at > cur.at) am.set(d.report_id, { name: d.decided_by_name, at: d.decided_at });
+      if (!cur || d.decided_at > cur.at) am.set(d.report_id, { decision: d.decision, name: d.decided_by_name, at: d.decided_at });
     });
-    setApprovedMap(am);
+    setApprovalMap(am);
     const cc = new Map<string, number>();
     (cmtRes.data ?? []).forEach((c: any) => cc.set(c.report_id, (cc.get(c.report_id) ?? 0) + 1));
     setCommentCounts(cc);
@@ -199,7 +206,7 @@ export default function WeeklyReports() {
       if (statusTab === 'draft' && r.status !== 'draft') return false;
       if (statusTab === 'submitted' && r.status !== 'submitted') return false;
       if (statusTab === 'unread' && (unreadByReport.get(r.id) ?? 0) === 0) return false;
-      if (statusTab === 'approved' && !approvedMap.has(r.id)) return false;
+      if (statusTab === 'approved' && !approvalMap.has(r.id) && !approvalRequested(r)) return false;
       if (fBrand && r.brand_id !== fBrand) return false;
       if (fApc && r.created_by !== fApc) return false;
       if (fSearch) {
@@ -211,7 +218,7 @@ export default function WeeklyReports() {
       }
       return true;
     });
-  }, [reports, fMonth, statusTab, unreadByReport, approvedMap, fBrand, fApc, fSearch, brandMap, apcMap]);
+  }, [reports, fMonth, statusTab, unreadByReport, approvalMap, fBrand, fApc, fSearch, brandMap, apcMap]);
 
   // Status tab counts (for current month, ignoring search/brand/apc filters)
   const tabCounts = useMemo(() => {
@@ -219,9 +226,10 @@ export default function WeeklyReports() {
     const drafts = monthReports.filter(r => r.status === 'draft').length;
     const submitted = monthReports.filter(r => r.status === 'submitted').length;
     const unread = monthReports.filter(r => (unreadByReport.get(r.id) ?? 0) > 0).length;
-    const approved = monthReports.filter(r => approvedMap.has(r.id)).length;
-    return { all: monthReports.length, drafts, submitted, unread, approved };
-  }, [reports, fMonth, unreadByReport, approvedMap]);
+    const approvals = monthReports.filter(r => approvalMap.has(r.id) || approvalRequested(r)).length;
+    const approvalsPending = monthReports.filter(r => !approvalMap.has(r.id) && approvalRequested(r)).length;
+    return { all: monthReports.length, drafts, submitted, unread, approvals, approvalsPending };
+  }, [reports, fMonth, unreadByReport, approvalMap]);
 
   const nextWindowFor = (brandId: string): { start: string; end: string; week_number: number } | null => {
     const anchor = settings[brandId];
@@ -425,8 +433,14 @@ export default function WeeklyReports() {
           <span className="wr-tab-count">{tabCounts.unread}</span>
         </button>
         <button className={`wr-tab ${statusTab === 'approved' ? 'is-active' : ''}`} onClick={() => setStatusTab('approved')}>
-          <i className="bi bi-patch-check me-1" /> Approved
-          <span className="wr-tab-count">{tabCounts.approved}</span>
+          <i className="bi bi-patch-check me-1" /> Approvals
+          <span className="wr-tab-count">{tabCounts.approvals}</span>
+          {tabCounts.approvalsPending > 0 && (
+            <span
+              title={`${tabCounts.approvalsPending} report${tabCounts.approvalsPending === 1 ? '' : 's'} awaiting the client's decision`}
+              style={{ width: 8, height: 8, borderRadius: '50%', background: '#dc3545', display: 'inline-block', marginLeft: 6, verticalAlign: 'middle' }}
+            />
+          )}
         </button>
       </div>
 
@@ -458,7 +472,7 @@ export default function WeeklyReports() {
             const ava = avatarFor(b?.name ?? '??');
             const sb = statusBadge(r);
             const newCount = unreadByReport.get(r.id) ?? 0;
-            const approved = approvedMap.get(r.id);
+            const clientDec = approvalMap.get(r.id);
             const cmtCount = commentCounts.get(r.id) ?? 0;
             const apcName = a?.full_name || a?.email || (r.created_by === user?.id ? 'You' : '—');
             const openConv = (e: React.MouseEvent) => {
@@ -489,10 +503,22 @@ export default function WeeklyReports() {
                     </div>
                   </div>
                   <div className="wr-card-top-right">
-                    {approved && (
-                      <Badge bg="success" title={`Approved by ${approved.name}`}>
-                        <i className="bi bi-patch-check-fill me-1" />
-                        Client approved
+                    {clientDec ? (
+                      clientDec.decision === 'approved' ? (
+                        <Badge bg="success" title={`Approved by ${clientDec.name}`}>
+                          <i className="bi bi-patch-check-fill me-1" />
+                          Client approved
+                        </Badge>
+                      ) : (
+                        <Badge bg="warning" text="dark" title={`Changes requested by ${clientDec.name}`}>
+                          <i className="bi bi-arrow-repeat me-1" />
+                          Changes requested
+                        </Badge>
+                      )
+                    ) : approvalRequested(r) && (
+                      <Badge bg="danger" title="Approval requested — the client hasn't decided yet">
+                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff', display: 'inline-block', marginRight: 4, verticalAlign: 'middle' }} />
+                        Approval pending
                       </Badge>
                     )}
                     {r.review_status && REVIEW_PILL[r.review_status] && (
