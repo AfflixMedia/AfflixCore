@@ -39,6 +39,15 @@ const MAX_IMAGE_BYTES = 25 * 1024 * 1024;    // 25 MB
 const MAX_VIDEO_BYTES = 512 * 1024 * 1024;   // 512 MB
 const MAX_FILE_BYTES  = 100 * 1024 * 1024;   // 100 MB — documents/archives/etc.
 
+// Executable / script types that can't be shared (mirrors Gmail's blocklist).
+// Checked server-side on the file NAME — the authoritative gate.
+const BLOCKED_EXT = new Set([
+  'exe', 'bat', 'cmd', 'com', 'scr', 'pif', 'msi', 'msix', 'msp', 'mst',
+  'dll', 'sys', 'cpl', 'hta', 'jar', 'js', 'jse', 'vb', 'vbs', 'vbe',
+  'ps1', 'psm1', 'wsf', 'wsh', 'wsc', 'sct', 'shb', 'lnk', 'chm', 'msc',
+  'apk', 'app', 'dmg', 'ade', 'adp', 'ins', 'isp', 'lib', 'mde', 'nsh',
+]);
+
 // Access-token cache across warm invocations of this function instance.
 let cachedToken: { token: string; expiresAt: number } | null = null;
 
@@ -125,6 +134,10 @@ serve(async (req) => {
       const size = Number(body.size ?? 0);
       const origin = String(body.origin ?? '');
       const kind = mime.startsWith('image/') ? 'image' : mime.startsWith('video/') ? 'video' : 'file';
+      const ext = name.includes('.') ? name.split('.').pop()!.toLowerCase() : '';
+      if (BLOCKED_EXT.has(ext)) {
+        return json({ error: `.${ext} files can't be shared for security reasons.` }, 400);
+      }
       if (!Number.isFinite(size) || size <= 0) return json({ error: 'Invalid file size' }, 400);
       const cap = kind === 'image' ? MAX_IMAGE_BYTES : kind === 'video' ? MAX_VIDEO_BYTES : MAX_FILE_BYTES;
       if (size > cap) {
