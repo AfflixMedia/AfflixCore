@@ -325,7 +325,11 @@ export default function SharedReports() {
     if (!a?.enabled) return;
     if (a.expires_at && new Date(a.expires_at).getTime() < Date.now()) return;
     const key = `${type}:${r.id}`;
-    if (decidedSet.has(key) || promptedRef.current.has(key)) return;
+    // Don't re-prompt for a report already decided — on THIS link (decidedSet) or
+    // any other/rotated link (allDecisions, which also feeds the Approved tab).
+    const decidedAnywhere = decidedSet.has(key)
+      || allDecisions.some(d => d.report_type === type && d.report_id === r.id);
+    if (decidedAnywhere || promptedRef.current.has(key)) return;
     promptedRef.current.add(key);
     setSingleApprovalId(r.id);
     setSingleApprovalType(type);
