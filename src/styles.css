@@ -2231,8 +2231,24 @@ input[type="number"] {
 .ac-contact-row:disabled { opacity: .6; cursor: default; }
 
 /* ---- Right: chat panel ---- */
-.ac-chat-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #efeae2; }
+.ac-chat-panel { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #efeae2; }
 .ac-chat-empty { align-items: center; justify-content: center; }
+/* Drag & drop target overlay — shown while a file hovers over the panel. */
+.ac-chat-drop {
+  position: absolute; inset: 8px; z-index: 40; pointer-events: none;
+  border: 2.5px dashed var(--ac-primary); border-radius: 16px;
+  background: rgba(255, 255, 255, .82); backdrop-filter: blur(2px);
+  display: flex; align-items: center; justify-content: center;
+  animation: ac-drop-in .12s ease-out;
+}
+.ac-chat-drop-inner { text-align: center; color: var(--ac-primary); }
+.ac-chat-drop-inner .bi { font-size: 3rem; line-height: 1; }
+.ac-chat-drop-title { font-size: 1.15rem; font-weight: 700; margin-top: 6px; }
+.ac-chat-drop-sub { font-size: .85rem; color: var(--ac-text-muted); margin-top: 2px; }
+@keyframes ac-drop-in {
+  from { opacity: 0; transform: scale(.985); }
+  to   { opacity: 1; transform: scale(1); }
+}
 .ac-chat-header {
   position: relative; z-index: 6;
   display: flex; align-items: center; gap: 12px; padding: 10px 16px;

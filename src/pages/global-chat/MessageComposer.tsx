@@ -99,6 +99,8 @@ export interface MessageComposerHandle {
   insertMention: (name: string) => void;
   /** Insert a clickable product tag at the caret (from the Products popup). */
   insertProductTag: (name: string) => void;
+  /** Attach a file as if picked via the paperclip (drag & drop / paste). */
+  attachFile: (file: File) => void;
 }
 
 interface Props {
@@ -322,10 +324,12 @@ const MessageComposer = forwardRef<MessageComposerHandle, Props>(function Messag
       : `**${label}** `;
   };
 
-  // Header members dropdown → "@Name "; Products popup → clickable product tag.
+  // Header members dropdown → "@Name "; Products popup → clickable product
+  // tag; ChatPanel's drop zone → attach the dragged file.
   useImperativeHandle(ref, () => ({
     insertMention(name: string) { insertAtCaret(`@${name} `); },
     insertProductTag(name: string) { insertAtCaret(productInsert(name)); },
+    attachFile(file: File) { pickFile(file); },
   }));
 
   // Replace everything from the trigger char up to the caret with `insert`,
@@ -634,6 +638,13 @@ const MessageComposer = forwardRef<MessageComposerHandle, Props>(function Messag
           disabled={disabled}
           onChange={onChange}
           onClick={e => detectMention(e.currentTarget.value, e.currentTarget.selectionStart ?? 0)}
+          onPaste={e => {
+            // Pasting a screenshot / copied media attaches it like the 📎 pick.
+            if (!uploadFile) return;
+            const f = Array.from(e.clipboardData?.files ?? [])
+              .find(x => x.type.startsWith('image/') || x.type.startsWith('video/'));
+            if (f) { e.preventDefault(); pickFile(f); }
+          }}
           onKeyDown={e => {
             if ((e.ctrlKey || e.metaKey) && !e.altKey) {
               const k = e.key.toLowerCase();

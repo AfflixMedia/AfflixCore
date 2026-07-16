@@ -96,6 +96,39 @@ export default function ChatPanel({
 
   const convId = view?.conversation.id ?? null;
 
+  // Drag & drop a file anywhere on the panel → attach it in the composer.
+  // Depth counter survives child enter/leave churn; overlay is pointer-inert
+  // so drop always lands on the panel itself.
+  const [dragOver, setDragOver] = useState(false);
+  const dragDepth = useRef(0);
+  const dragHasFiles = (e: React.DragEvent) =>
+    Array.from(e.dataTransfer?.types ?? []).includes('Files');
+  const canDrop = !!view && canPost && !!uploadFile;
+  const onDragEnter = (e: React.DragEvent) => {
+    if (!canDrop || !dragHasFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    setDragOver(true);
+  };
+  const onDragOver = (e: React.DragEvent) => {
+    if (!canDrop || !dragHasFiles(e)) return;
+    e.preventDefault();
+  };
+  const onDragLeave = () => {
+    if (!canDrop) return;
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragOver(false);
+  };
+  const onDrop = (e: React.DragEvent) => {
+    dragDepth.current = 0;
+    setDragOver(false);
+    if (!canDrop || !dragHasFiles(e)) return;
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (file) composerRef.current?.attachFile(file);
+  };
+  useEffect(() => { dragDepth.current = 0; setDragOver(false); }, [convId]);
+
   // Members dropdown: close on outside click + when switching conversations.
   useEffect(() => { setShowMembers(false); }, [convId]);
   useEffect(() => {
@@ -229,7 +262,22 @@ export default function ChatPanel({
   const memberCount = isAnnouncement ? announcementCount : members.length;
 
   return (
-    <div className="ac-chat-panel">
+    <div
+      className="ac-chat-panel"
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
+      {dragOver && (
+        <div className="ac-chat-drop">
+          <div className="ac-chat-drop-inner">
+            <i className="bi bi-cloud-arrow-up" />
+            <div className="ac-chat-drop-title">Drop to share</div>
+            <div className="ac-chat-drop-sub">Photos and videos · sent to “{view.title}”</div>
+          </div>
+        </div>
+      )}
       <div className="ac-chat-header">
         <button type="button" className="ac-chat-back" onClick={onBack} title="Back">
           <i className="bi bi-arrow-left" />
