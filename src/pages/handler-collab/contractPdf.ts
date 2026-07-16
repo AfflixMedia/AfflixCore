@@ -12,7 +12,7 @@ export type ContractInput = {
   username: string;          // TikTok username, no leading @
   amount: number;            // deal USD
   videosCount: number;       // 0 = unknown → neutral wording
-  paymentMethod: string;     // "Zelle" / "PayPal" / "Zelle or PayPal"
+  paymentMethod?: string;    // unused — contract always states "PayPal/Zelle"
   effectiveDate?: string | null; // ISO YYYY-MM-DD (onboarding date); null = today
   productNames?: string[];   // featured product(s); [] = "<brand> products"
   productLinks?: { name?: string; url: string }[]; // featured-product page links (clickable); omitted when none set
@@ -57,7 +57,7 @@ export async function downloadCreatorContract(input: ContractInput) {
   const username = (input.username || '').trim();
   const count = Math.max(0, Math.round(input.videosCount || 0));
   const amountTxt = `USD $${Math.round(input.amount || 0).toLocaleString()}`;
-  const method = input.paymentMethod || 'Zelle';
+  const method = 'PayPal/Zelle'; // always both, regardless of the deal's saved payout details
   const dateTxt = fmtContractDate(input.effectiveDate);
   const featuring = input.productNames && input.productNames.length
     ? joinNames(input.productNames)
@@ -180,6 +180,7 @@ export async function downloadCreatorContract(input: ContractInput) {
   heading('2. Deliverables');
   para([{ t: 'The Creator agrees to:' }], { after: 4 });
   para([{ t: 'Create and publish a total of' }, { t: `${nWords} TikTok videos`, b: true }, { t: `featuring ${brand}.` }], { indent: 22, bullet: 'dot', after: 2 });
+  para([{ t: 'Creator is required to follow the content brief (guide).' }], { indent: 22, bullet: 'dot', after: 2 });
   para([{ t: "Keep the videos publicly available on the Creator's TikTok account." }], { indent: 22, bullet: 'dot', after: 2 });
   {
     // Completion deadline scales with deal size: ≤4 videos → 10 days, 5+ → 14 days

@@ -1378,7 +1378,6 @@ async function downloadContractFor(c, brandName, opts = {}) {
     username: accounts[0] ? accounts[0].handle.replace(/^@/, '') : (c.name || ''),
     amount: Number(c.amount) || 0,
     videosCount: parseInt(c.videos_count, 10) || 0,
-    paymentMethod: c.zelle && c.paypal ? 'Zelle or PayPal' : c.paypal ? 'PayPal' : 'Zelle',
     effectiveDate: c.onboarded_on || null,
     productNames: prodNames.length ? prodNames : focus.map(p => p.name).filter(Boolean),
     productLinks,
