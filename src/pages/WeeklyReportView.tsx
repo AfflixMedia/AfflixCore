@@ -411,6 +411,7 @@ export default function WeeklyReportView() {
               comments,
               currentAuthorName: profile?.full_name || profile?.email || 'User',
               onAdd: addComment,
+              canReply: profile?.role === 'bob',
             }}
           />
         ) : fmt === 'v2' ? (
@@ -430,6 +431,7 @@ export default function WeeklyReportView() {
               comments,
               currentAuthorName: profile?.full_name || profile?.email || 'User',
               onAdd: addComment,
+              canReply: profile?.role === 'bob',
             }}
           />
         ) : (
@@ -448,6 +450,7 @@ export default function WeeklyReportView() {
               comments,
               currentAuthorName: profile?.full_name || profile?.email || 'User',
               onAdd: addComment,
+              canReply: profile?.role === 'bob',
             }}
           />
         )}

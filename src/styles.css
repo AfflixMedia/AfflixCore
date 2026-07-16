@@ -43,6 +43,21 @@ h1, h2, h3, h4, h5, h6, .h1, .h2, .h3, .h4, .h5, .h6 {
   color: var(--ac-text-dark);
 }
 
+/* Themed scrollbars — everywhere. Firefox via scrollbar-width/color, WebKit
+   via ::-webkit-scrollbar. Orange pill thumb on a transparent track; the
+   transparent border + padding-box clip keeps the thumb slim inside the
+   10px gutter. Components that deliberately HIDE their scrollbar (sidebar,
+   chat filter strips, brand/TL rails) keep their more-specific rules. */
+* { scrollbar-width: thin; scrollbar-color: var(--ac-primary) transparent; }
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--ac-primary);
+  border-radius: 0;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--ac-primary-2); }
+::-webkit-scrollbar-corner { background: transparent; }
+
 /* Bootstrap primary remap */
 .btn-primary {
   background: var(--ac-primary);
@@ -1199,6 +1214,21 @@ input[type="number"] {
   overflow: hidden !important;
 }
 
+/* Global popup emphasis — every modal (Tasks, Chats, everywhere): the page
+   behind is blurred + dimmed, and the dialog floats on a deep shadow. The
+   backdrop-filter lives on Bootstrap's .modal-backdrop overlay, so it blurs
+   whatever sits underneath without touching the dialog itself. */
+.modal-backdrop.show {
+  opacity: 1;
+  background: rgba(15, 23, 42, .38);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+}
+.modal .modal-content {
+  border: none;
+  box-shadow: 0 28px 70px rgba(2, 6, 23, .35), 0 8px 24px rgba(2, 6, 23, .18);
+}
+
 /* =========================================================
    Weekly Reports page — card-based redesign
    ========================================================= */
@@ -2182,6 +2212,17 @@ input[type="number"] {
 
 /* ---- Contact lists (modals) ---- */
 .ac-contact-list { display: flex; flex-direction: column; max-height: 60vh; overflow-y: auto; }
+
+/* Group info / announcement / new-group modals: the modal BODY never scrolls —
+   only the contact list(s) inside do, killing the double scrollbar. Must come
+   after (and out-important) the global modal scroll guard's overflow-y: auto.
+   Lists take their natural height but shrink + scroll when space runs out. */
+.ac-group-modal .modal-body {
+  overflow: hidden !important;
+  display: flex !important; flex-direction: column !important;
+}
+.ac-group-modal .modal-body > * { flex: 0 0 auto; }
+.ac-group-modal .ac-contact-list { flex: 0 1 auto; min-height: 96px; max-height: none; }
 .ac-contact-row {
   display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px;
   border: none; background: transparent; border-radius: 10px; cursor: pointer; transition: background .12s;
@@ -2193,10 +2234,96 @@ input[type="number"] {
 .ac-chat-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #efeae2; }
 .ac-chat-empty { align-items: center; justify-content: center; }
 .ac-chat-header {
+  position: relative; z-index: 6;
   display: flex; align-items: center; gap: 12px; padding: 10px 16px;
-  background: #fff; border-bottom: 1px solid var(--ac-line-l);
+  background: linear-gradient(180deg, #ffffff, #fdfaf5);
+  border-bottom: 1px solid var(--ac-line-l);
+  box-shadow: 0 6px 16px rgba(2, 6, 23, .05);
 }
-.ac-chat-back { display: none; border: none; background: transparent; font-size: 1.2rem; color: var(--ac-text-dark); }
+/* Brand hairline fading out along the header's bottom edge */
+.ac-chat-header::after {
+  content: ''; position: absolute; left: 0; right: 40%; bottom: -1px; height: 2px;
+  background: linear-gradient(90deg, var(--ac-primary), var(--ac-accent), transparent);
+  opacity: .45; pointer-events: none;
+}
+/* Gradient identity ring around the header avatar */
+.ac-chat-avatar {
+  flex: none; display: inline-flex; border-radius: 50%; padding: 2px;
+  background: linear-gradient(135deg, var(--ac-primary), var(--ac-accent));
+  box-shadow: 0 2px 6px rgba(232, 134, 46, .22);
+}
+.ac-chat-title { font-size: .95rem; }
+.ac-chat-back {
+  display: none; align-items: center; justify-content: center; flex: none;
+  width: 38px; height: 38px; border-radius: 50%;
+  border: none; background: #fff; font-size: 1.2rem; color: var(--ac-text-dark);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(2, 6, 23, .08), 0 1px 2px rgba(2, 6, 23, .06);
+  transition: color .2s ease, background .2s ease, box-shadow .2s ease;
+}
+.ac-chat-back:hover {
+  color: var(--ac-primary); background: var(--ac-primary-soft);
+  box-shadow: 0 6px 16px rgba(232, 134, 46, .2), 0 2px 4px rgba(2, 6, 23, .06);
+}
+.ac-chat-back:focus-visible { outline: 2px solid var(--ac-primary); outline-offset: 2px; }
+
+/* Header members dropdown (groups): the "N members" line toggles a roster
+   popup; each row has an @ button that drops a mention into the composer. */
+.ac-chat-members-wrap { position: relative; }
+.ac-chat-members-btn {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 3px;
+  border: none; background: #fff;
+  padding: 2px 10px; border-radius: 999px;
+  font-size: .74rem; font-weight: 600; color: var(--ac-text-muted); cursor: pointer;
+  max-width: 100%; white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(2, 6, 23, .08), 0 1px 2px rgba(2, 6, 23, .06);
+  transition: background .2s ease, color .2s ease, box-shadow .2s ease;
+}
+.ac-chat-members-btn:hover {
+  background: var(--ac-primary-soft); color: var(--ac-primary);
+  box-shadow: 0 6px 16px rgba(232, 134, 46, .2), 0 2px 4px rgba(2, 6, 23, .06);
+}
+.ac-chat-members-btn:focus-visible { outline: 2px solid var(--ac-primary); outline-offset: 2px; }
+.ac-chat-members-btn i { font-size: .7rem; }
+.ac-members-pop {
+  position: absolute; top: calc(100% + 8px); left: 0; z-index: 30;
+  width: 290px; max-width: min(290px, 78vw);
+  background: #fff; border: 1px solid var(--ac-line-l); border-radius: 12px;
+  box-shadow: 0 18px 44px rgba(2, 6, 23, .22); overflow: hidden;
+}
+.ac-members-pop-head {
+  display: flex; align-items: center; gap: 4px; padding: 9px 12px 7px;
+  font-size: .72rem; font-weight: 700; letter-spacing: .4px; text-transform: uppercase;
+  color: var(--ac-text-muted); border-bottom: 1px solid var(--ac-line-l);
+}
+.ac-members-pop-n {
+  margin-left: auto; background: rgba(100, 116, 139, .14); color: var(--ac-text-muted);
+  border-radius: 999px; padding: 1px 8px; font-size: .7rem; font-weight: 700;
+}
+.ac-members-pop-list { max-height: 260px; overflow-y: auto; padding: 4px; }
+.ac-member-row { display: flex; align-items: center; gap: 4px; }
+.ac-member-row-main {
+  display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
+  border: none; background: transparent; padding: 6px 8px; border-radius: 8px;
+  cursor: pointer; text-align: left;
+}
+.ac-member-row-main:hover { background: rgba(100, 116, 139, .08); }
+.ac-member-row-name { font-size: .85rem; font-weight: 600; flex: 1; min-width: 0; }
+.ac-member-mention {
+  flex: none; width: 28px; height: 28px; margin-right: 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--ac-line-l); background: #fff; border-radius: 8px;
+  color: var(--ac-primary); font-size: .9rem; cursor: pointer;
+}
+.ac-member-mention:hover { background: var(--ac-primary); border-color: var(--ac-primary); color: #fff; }
+
+/* "Mention in chat" button on Products popup rows. */
+.ac-prod-tag-btn {
+  width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--ac-line-l); background: #fff; border-radius: 8px;
+  color: var(--ac-primary); font-size: 1rem; cursor: pointer;
+}
+.ac-prod-tag-btn:hover { background: var(--ac-primary); border-color: var(--ac-primary); color: #fff; }
 .ac-stream-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .ac-chat-stream { position: relative; flex: 1; min-height: 0; overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 2px; }
 .ac-scroll-bottom-btn {
@@ -2346,10 +2473,18 @@ input[type="number"] {
 
 /* ---- Groups / mentions / announcement ---- */
 .ac-chat-action {
-  border: 1px solid transparent; background: transparent; color: var(--ac-text-muted);
-  font-size: 1.2rem; width: 38px; height: 38px; border-radius: 50%; cursor: pointer; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: #fff; color: var(--ac-text-muted);
+  font-size: 1.1rem; width: 38px; height: 38px; border-radius: 50%; cursor: pointer; flex: none;
+  box-shadow: 0 2px 8px rgba(2, 6, 23, .08), 0 1px 2px rgba(2, 6, 23, .06);
+  transition: background .2s ease, color .2s ease, box-shadow .2s ease, transform .15s ease;
 }
-.ac-chat-action:hover { background: rgba(0,0,0,.06); color: var(--ac-primary); border-color: var(--ac-primary); }
+.ac-chat-action:hover {
+  background: var(--ac-primary-soft); color: var(--ac-primary);
+  box-shadow: 0 6px 16px rgba(232, 134, 46, .2), 0 2px 4px rgba(2, 6, 23, .06);
+}
+.ac-chat-action:active { transform: translateY(1px); box-shadow: 0 1px 3px rgba(2, 6, 23, .12); }
+.ac-chat-action:focus-visible { outline: 2px solid var(--ac-primary); outline-offset: 2px; }
 .ac-ann-filter { color: var(--ac-primary); }
 .ac-ann-filter.active, .ac-ann-filter:hover { background: var(--ac-primary); color: #fff; border-color: var(--ac-primary); }
 .ac-newgroup-icon {
@@ -2369,6 +2504,25 @@ input[type="number"] {
   text-transform: uppercase; color: var(--ac-text-muted);
 }
 .ac-slash-icon { font-size: 1.05rem; flex: none; }
+.ac-slash-empty { padding: 6px 10px 10px; font-size: .8rem; color: var(--ac-text-muted); }
+/* "/" tag popup: taller than the mention popup + a pinned kind-filter row so
+   Products / Tasks are reachable even when the bookmark list is long. */
+.ac-slash-pop { max-height: 320px; padding-top: 0; }
+.ac-slash-tabs {
+  position: sticky; top: 0; z-index: 2;
+  display: flex; gap: 4px; flex-wrap: wrap;
+  padding: 8px 8px 6px; margin: 0 -4px 2px;
+  background: #fff; border-bottom: 1px solid var(--ac-line-l);
+}
+.ac-slash-tabs button {
+  border: 1px solid var(--ac-line-l); background: #fff; border-radius: 999px;
+  padding: 2px 10px; font-size: .74rem; font-weight: 600; color: var(--ac-text-muted);
+  cursor: pointer; display: inline-flex; align-items: center;
+}
+.ac-slash-tabs button:hover { border-color: var(--ac-primary); color: var(--ac-primary); }
+.ac-slash-tabs button.on {
+  background: var(--ac-primary); border-color: var(--ac-primary); color: #fff;
+}
 
 .ac-composer-readonly {
   display: flex; align-items: center; justify-content: center;
@@ -2380,11 +2534,17 @@ input[type="number"] {
 .ac-brandbar-chat { display: flex; align-items: center; gap: 6px; flex: none; }
 .ac-brandbar-progress {
   display: inline-flex; align-items: center; gap: 8px;
-  border: 1px solid var(--ac-line-l); background: #fff; padding: 0 12px 0 2px;
+  border: none; background: #fff; padding: 0 12px 0 2px;
   border-radius: 999px; cursor: pointer; color: var(--ac-text-dark); font-size: .75rem;
   height: 38px;   /* line up with the 38px icon buttons */
+  box-shadow: 0 2px 8px rgba(2, 6, 23, .08), 0 1px 2px rgba(2, 6, 23, .06);
+  transition: background .2s ease, box-shadow .2s ease;
 }
-.ac-brandbar-progress:hover { background: rgba(0,0,0,.05); border-color: var(--ac-primary); }
+.ac-brandbar-progress:hover {
+  background: var(--ac-primary-soft);
+  box-shadow: 0 6px 16px rgba(232, 134, 46, .2), 0 2px 4px rgba(2, 6, 23, .06);
+}
+.ac-brandbar-progress:focus-visible { outline: 2px solid var(--ac-primary); outline-offset: 2px; }
 /* On hover the whole chip goes primary: icon, ring arc + centre text
    (their colors are set inline per-percentage, hence the !important). */
 .ac-brandbar-progress:hover .ac-brandbar-mi { color: var(--ac-primary) !important; }
@@ -2406,10 +2566,17 @@ input[type="number"] {
   position: relative;
   flex: none; display: inline-flex; align-items: center; justify-content: center;
   width: 38px; height: 38px;   /* matches .ac-chat-action (bookmark/settings) */
-  border: 1px solid var(--ac-line-l); background: #fff; color: var(--ac-text-dark);
+  border: none; background: #fff; color: var(--ac-text-dark);
   font-size: 1.2rem; border-radius: 50%; cursor: pointer;
+  box-shadow: 0 2px 8px rgba(2, 6, 23, .08), 0 1px 2px rgba(2, 6, 23, .06);
+  transition: background .2s ease, color .2s ease, box-shadow .2s ease, transform .15s ease;
 }
-.ac-brandbar-btn:hover { background: rgba(0,0,0,.05); color: var(--ac-primary); border-color: var(--ac-primary); }
+.ac-brandbar-btn:hover {
+  background: var(--ac-primary-soft); color: var(--ac-primary);
+  box-shadow: 0 6px 16px rgba(232, 134, 46, .2), 0 2px 4px rgba(2, 6, 23, .06);
+}
+.ac-brandbar-btn:active { transform: translateY(1px); box-shadow: 0 1px 3px rgba(2, 6, 23, .12); }
+.ac-brandbar-btn:focus-visible { outline: 2px solid var(--ac-primary); outline-offset: 2px; }
 .ac-brandbar-dot {
   position: absolute; top: 3px; right: 3px;
   width: 10px; height: 10px; border-radius: 50%;
@@ -2917,14 +3084,10 @@ input[type="number"] {
   padding: 14px;
 }
 .ac-tasks-main { flex: 1; min-width: 0; }
-/* Folder / label lists scroll once they grow past a set height */
-.ac-rail-scroll {
-  max-height: 240px; overflow-y: auto;
-  scrollbar-width: thin; scrollbar-color: var(--ac-line-l) transparent;
-}
+/* Folder / label lists scroll once they grow past a set height
+   (scrollbar styling comes from the global theme). */
+.ac-rail-scroll { max-height: 240px; overflow-y: auto; }
 .ac-rail-scroll.labels { max-height: 160px; padding-right: 2px; }
-.ac-rail-scroll::-webkit-scrollbar { width: 6px; }
-.ac-rail-scroll::-webkit-scrollbar-thumb { background: var(--ac-line-l); border-radius: 999px; }
 .ac-rail-head {
   display: flex; align-items: center; justify-content: space-between;
   font-family: var(--ac-font-heading); font-weight: 700;
@@ -3524,7 +3687,7 @@ input[type="number"] {
 /* Priority colouring on task rows (red / amber / blue): full background tint
    + the whole border in the priority colour (left edge kept thicker as the
    at-a-glance accent). Hover deepens both. */
-.ac-task { border-width: 2px; border-left-width: 5px; }
+.ac-task { border-width: 4px; border-left-width: 5px; }
 .ac-task.ac-task--high {
   background: rgba(239,68,68,.10);
   border-color: #ef4444;
@@ -4069,7 +4232,7 @@ input[type="number"] {
 /* --- Task cards: rounded accent bar + softer tint + tactile hover --- */
 .ac-tasks-main .ac-task,
 .ac-task-group.ac-task {
-  border-left-width: 1px;              /* drop the flat colour border… */
+  border-left-width: 3px;              /* drop the flat colour border… */
   border-radius: 15px;
   padding-left: 20px;                  /* room for the pseudo accent bar */
   transition: box-shadow .2s ease, transform .18s ease, border-color .18s ease;

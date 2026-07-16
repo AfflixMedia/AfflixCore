@@ -74,7 +74,7 @@ serve(async (req) => {
     }).select().single();
     if (error) return json({ error: error.message }, 500);
 
-    // Notify Bob + assigned APCs of this brand. Best-effort; don't fail the comment if this errors.
+    // Notify Bob + assigned APCs + the brand's Team Lead. Best-effort; don't fail the comment if this errors.
     try {
       const sectionLabel: Record<string, string> = {
         overall: 'Overall Performance', top_creators: 'Top Creators', top_videos: 'Top Videos',
@@ -101,14 +101,16 @@ serve(async (req) => {
         }
         return s;
       };
-      const [{ data: brand }, { data: bobs }, { data: apcRows }] = await Promise.all([
+      const [{ data: brand }, { data: bobs }, { data: apcRows }, { data: leadRows }] = await Promise.all([
         admin.from('brands').select('id,name').eq('id', report.brand_id).single(),
         admin.from('profiles').select('id').eq('role', 'bob'),
         admin.from('apc_brands').select('apc_id').eq('brand_id', report.brand_id),
+        admin.from('team_lead_brands').select('team_lead_id').eq('brand_id', report.brand_id),
       ]);
       const recipientIds = new Set<string>();
       (bobs ?? []).forEach((p: any) => recipientIds.add(p.id));
       (apcRows ?? []).forEach((r: any) => recipientIds.add(r.apc_id));
+      (leadRows ?? []).forEach((r: any) => recipientIds.add(r.team_lead_id));
 
       const title = `New comment on ${brand?.name ?? 'brand'} report`;
       const bodyText = `${cleanName} commented on ${labelFor(section)}: "${cleanBody.slice(0, 140)}${cleanBody.length > 140 ? '…' : ''}"`;

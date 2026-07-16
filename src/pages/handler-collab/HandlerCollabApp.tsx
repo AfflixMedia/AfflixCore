@@ -6,11 +6,12 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell, LabelList,
 } from 'recharts';
 import { supabase } from '../../lib/supabase';
+import { uploadSignature } from '../../lib/imageUpload';
 import * as store from './store';
 import { useAuth } from '../../auth/AuthContext';
 import { PayChip, PayoutDetail } from '../paid-collab/handlerCollabReadonly';
 import PaidCollabComments from '../../components/paidcollab/PaidCollabComments';
-import NotesBoard, { BrandNotesDrawer, AllNotesDrawer, NoteEditor } from './NotesBoard';
+import NotesBoard, { BrandNotesDrawer, CreatorNotesDrawer, AllNotesDrawer, NoteEditor } from './NotesBoard';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -24,7 +25,7 @@ const storeMode = 'supabase';
    Fully isolated from the creatorsxbrands app.
 ════════════════════════════════════════════════════════════ */
 
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const AVATAR_GRADIENTS = [
   'linear-gradient(135deg,#6366F1,#8B5CF6)',
   'linear-gradient(135deg,#EC4899,#F43F5E)',
@@ -149,7 +150,7 @@ function focusProductList(bm) {
   try {
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) return parsed.map(p => (typeof p === 'string' ? { name: '', url: p } : { name: p.name || '', url: p.url || '' })).filter(p => p.url || p.name);
-  } catch {}
+  } catch { }
   // legacy: newline-separated URLs (before product names were added)
   return raw.split(/\n+/).map(s => s.trim()).filter(Boolean).map(url => ({ name: '', url }));
 }
@@ -167,10 +168,10 @@ function tiktokAccounts(raw) {
 }
 const isValidUrl = s => !!s && (s.startsWith('http://') || s.startsWith('https://'));
 const isValidAdCode = s => !s || (s.startsWith('#') && s.endsWith('='));
-function scrollTop() { try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch {} }
+function scrollTop() { try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch { } }
 function copyText(t) {
-  try { if (navigator.clipboard?.writeText) { navigator.clipboard.writeText(t); return; } } catch {}
-  try { const ta = document.createElement('textarea'); ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); } catch {}
+  try { if (navigator.clipboard?.writeText) { navigator.clipboard.writeText(t); return; } } catch { }
+  try { const ta = document.createElement('textarea'); ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); } catch { }
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -185,7 +186,7 @@ export default function HandlerCollabApp({ initialBrandId = null, initialMonth =
     const root = document.documentElement;
     root.style.colorScheme = 'light';
     root.removeAttribute('data-theme');
-    try { document.body.style.background = '#FAFAFA'; } catch {}
+    try { document.body.style.background = '#FAFAFA'; } catch { }
   }, []);
 
   return <Dashboard initialBrandId={initialBrandId} initialMonth={initialMonth} />;
@@ -265,6 +266,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
   const [creatorEditor, setCreatorEditor] = useState(null); // { mode, brandId, creator? }
   const [notesBrand, setNotesBrand] = useState(null);     // { id, name } — quick month note drawer
   const [keepBrand, setKeepBrand] = useState(null);       // { id, name } — Keep-notes list drawer
+  const [keepCreator, setKeepCreator] = useState(null);   // { id, key, name, handle, brandId, brandName } — creator Keep-notes drawer
   const [allNotesOpen, setAllNotesOpen] = useState(false); // global notes drawer (floating button)
   const [openNote, setOpenNote] = useState(null);          // a single note opened directly (deep link)
   const [pendingNoteId, setPendingNoteId] = useState(null); // ?note=<id> waiting for notes to load
@@ -291,7 +293,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
     });
     if (!updates.length) return;
     setCreators(prev => prev.map(c => { const u = updates.find(x => x.id === c.id); return u ? { ...c, ...u.patch } : c; }));
-    for (const u of updates) { try { await store.updateCreator(u.id, u.patch); } catch {} }
+    for (const u of updates) { try { await store.updateCreator(u.id, u.patch); } catch { } }
   }, []);
 
   const reload = useCallback(async () => {
@@ -326,7 +328,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
   // notifications (in-app + browser via NotificationsContext). Runs on load + every
   // minute; reloads so badges/counts refresh when something fired.
   useEffect(() => {
-    const tick = () => { store.fireDueNoteReminders().then(c => { if (c > 0) reload(); }).catch(() => {}); };
+    const tick = () => { store.fireDueNoteReminders().then(c => { if (c > 0) reload(); }).catch(() => { }); };
     tick();
     const iv = setInterval(tick, 60000);
     return () => clearInterval(iv);
@@ -346,6 +348,31 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
     notes.forEach(n => { if (n.brand_id && !n.archived) m[n.brand_id] = (m[n.brand_id] || 0) + 1; });
     return m;
   }, [notes]);
+  // Per-creator Keep-note counts (for the journal icon next to a creator's name).
+  // A note links ONE deal row, but the icon aggregates by creator identity within
+  // the brand (store.creatorNoteKey), so notes follow the creator across months.
+  const creatorNoteKeyById = useMemo(() => {
+    const m = {};
+    creators.forEach(c => { m[c.id] = store.creatorNoteKey(c); });
+    return m;
+  }, [creators]);
+  const noteCountByCreatorKey = useMemo(() => {
+    const m = {};
+    notes.forEach(n => {
+      if (n.archived || !n.creator_id) return;
+      const k = creatorNoteKeyById[n.creator_id];
+      if (k) m[k] = (m[k] || 0) + 1;
+    });
+    return m;
+  }, [notes, creatorNoteKeyById]);
+  const creatorNoteCount = useCallback(
+    (c) => noteCountByCreatorKey[creatorNoteKeyById[c.id]] || 0,
+    [noteCountByCreatorKey, creatorNoteKeyById]);
+  const openCreatorNotes = useCallback((c) => setKeepCreator({
+    id: c.id, key: creatorNoteKeyById[c.id] || store.creatorNoteKey(c),
+    name: c.name, handle: tiktokAccounts(c.tiktok_handle)[0]?.handle || '',
+    brandId: c.brand_id, brandName: brandById[c.brand_id]?.name || '',
+  }), [creatorNoteKeyById, brandById]);
 
   // ── keep in sync with the database (teammates / other devices) ──
   const busyRef = useRef(false);
@@ -370,7 +397,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'handler_collab_brand_months' }, ping)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'handler_notes' }, ping)
       .subscribe();
-    return () => { clearTimeout(t); try { supabase.removeChannel(ch); } catch {} };
+    return () => { clearTimeout(t); try { supabase.removeChannel(ch); } catch { } };
   }, [reload]);
 
   /* brand rows for selected month */
@@ -515,7 +542,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
     for (const s of sibs) {
       const patch = {};
       Object.entries(shared).forEach(([k, v]) => { if (v && s[k] !== v) patch[k] = v; });
-      if (Object.keys(patch).length) { try { await store.updateCreator(s.id, patch); } catch {} }
+      if (Object.keys(patch).length) { try { await store.updateCreator(s.id, patch); } catch { } }
     }
   }
   async function saveCreator(mode, data) {
@@ -529,6 +556,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
           videos_count: newCount, zelle: data.zelle, paypal: data.paypal,
           phone: data.phone, email: data.email, category: data.category,
           onboarded_on: data.onboarded_on,
+          contract_url: (data.contract_url || '').trim(),
           products: Array.isArray(data.products) ? data.products : [],
         };
         // lowering the video count drops the extra video-link / ad-code rows
@@ -668,7 +696,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
   }, [reload]);
   const deleteOpenNote = useCallback(async (n) => {
     if (!window.confirm('Delete this note?')) return;
-    try { await store.deleteNote(n.id); } catch {}
+    try { await store.deleteNote(n.id); } catch { }
     setOpenNote(null); reload();
   }, [reload]);
   // notes (per brand, per month) — optimistic + persist
@@ -692,6 +720,14 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
     try { await store.updateCreator(id, { pending_visible_to_client: visible }); }
     catch (e) { alert(`Couldn't update visibility: ${e.message}`); reload(); }
   }, [patchCreatorLocal, reload]);
+  // Signed-contract link (pasted from the Contract column once the creator signs).
+  const setCreatorContractLink = useCallback(async (id, contract_url) => {
+    patchCreatorLocal(id, { contract_url });
+    try { await store.updateCreator(id, { contract_url }); }
+    catch (e) { alert(`Couldn't save contract link: ${e.message}`); reload(); }
+  }, [patchCreatorLocal, reload]);
+  // Contract template modal (representative name + signature for the PDFs)
+  const [contractTplOpen, setContractTplOpen] = useState(false);
 
   return (
     <div className="pc-app">
@@ -702,6 +738,10 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
             <span className="pc-brand-tagline">Paid Collaborations</span>
           </div>
           <div className="pc-monthnav">
+            <button className="pc-mn-arrow pc-tpl-btn" title="Contract template — your representative name & signature on contract PDFs"
+              aria-label="Contract template settings" onClick={() => setContractTplOpen(true)}>
+              <i className="bi bi-vector-pen" />
+            </button>
             <button className="pc-mn-arrow" aria-label="Previous month" onClick={() => { setMonth(addMonth(month, -1)); setDrillId(null); }}>‹</button>
             <label className="pc-monthpicker" title="Pick a month">
               <span className="pc-monthpicker-ico">📅</span>
@@ -733,7 +773,9 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
           tab === 'creators' ? (
             <CreatorsView rows={allCreatorsList}
               onEdit={(c) => setCreatorEditor({ mode: 'edit', brandId: c.brand_id, creator: c })}
-              onSetStatus={setCreatorStatus} onToggleVisible={setCreatorPendingVisible} />
+              onSetStatus={setCreatorStatus} onToggleVisible={setCreatorPendingVisible}
+              onSetContractLink={setCreatorContractLink}
+              creatorNoteCount={creatorNoteCount} onCreatorNotes={openCreatorNotes} />
           ) : tab === 'performance' ? (
             <PerformanceView brands={brands} creators={creators} brandById={brandById} month={month} reportWeeks={reportWeeks} reportAnchors={reportAnchors} onCreateWeek={createWeeklyReport} onSaveMonthly={saveCreatorMonthly} />
           ) : tab === 'reporting' ? (
@@ -741,35 +783,37 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
           ) : tab === 'discussions' ? (
             <DiscussionsView comments={comments} brandById={brandById} creators={creators} onOpen={openComments} />
           ) : tab === 'notes' ? (
-            <NotesBoard brands={brands} brandById={brandById} month={month} />
+            <NotesBoard brands={brands} brandById={brandById} creators={creators} month={month} />
           ) : (
             drillId && drillBrand
               ? <Drilldown
-                  brand={drillBrand} row={drillRow} month={month} creators={drillCreators}
-                  onBack={() => { setDrillId(null); scrollTop(); }}
-                  onAddCreator={() => setCreatorEditor({ mode: 'add', brandId: drillId })}
-                  onEditCreator={(c) => setCreatorEditor({ mode: 'edit', brandId: drillId, creator: c })}
-                  onDeleteCreator={removeCreator}
-                  onEditBudget={() => setBrandEditor({ mode: 'edit', brand: { id: drillId, name: drillBrand.name } })}
-                  onNotes={() => setNotesBrand({ id: drillId, name: drillBrand.name })}
-                  notesText={(bmByKey[`${drillId}|${month}`] || {}).notes || ''}
-                  patchCreatorLocal={patchCreatorLocal}
-                  onSetStatus={setCreatorStatus}
-                  onToggleVisible={setCreatorPendingVisible}
-                  commentCount={comments.filter(c => c.brand_id === drillId).length}
-                  onComments={() => openComments(drillId, 'brand', '')}
-                />
+                brand={drillBrand} row={drillRow} month={month} creators={drillCreators}
+                onBack={() => { setDrillId(null); scrollTop(); }}
+                onAddCreator={() => setCreatorEditor({ mode: 'add', brandId: drillId })}
+                onEditCreator={(c) => setCreatorEditor({ mode: 'edit', brandId: drillId, creator: c })}
+                onDeleteCreator={removeCreator}
+                onEditBudget={() => setBrandEditor({ mode: 'edit', brand: { id: drillId, name: drillBrand.name } })}
+                onNotes={() => setNotesBrand({ id: drillId, name: drillBrand.name })}
+                notesText={(bmByKey[`${drillId}|${month}`] || {}).notes || ''}
+                patchCreatorLocal={patchCreatorLocal}
+                onSetStatus={setCreatorStatus}
+                onToggleVisible={setCreatorPendingVisible}
+                onSetContractLink={setCreatorContractLink}
+                commentCount={comments.filter(c => c.brand_id === drillId).length}
+                onComments={() => openComments(drillId, 'brand', '')}
+                creatorNoteCount={creatorNoteCount} onCreatorNotes={openCreatorNotes}
+              />
               : <BrandLevel
-                  rows={brandRows} totals={totals} month={month}
-                  search={search} setSearch={setSearch}
-                  onOpen={(id) => { setDrillId(id); scrollTop(); }}
-                  onEditBudget={(r) => setBrandEditor({ mode: 'edit', brand: brands.find(b => b.id === r.id) || { id: r.id, name: r.brand } })}
-                  onAddBrand={() => setBrandEditor({ mode: 'add', brand: { id: null, name: '' } })}
-                  onNotes={(r) => setNotesBrand({ id: r.id, name: r.brand })}
-                  noteCounts={noteCountByBrand}
-                  onBrandNotes={(r) => setKeepBrand({ id: r.id, name: r.brand })}
-                  onReorder={reorderBrands}
-                />
+                rows={brandRows} totals={totals} month={month}
+                search={search} setSearch={setSearch}
+                onOpen={(id) => { setDrillId(id); scrollTop(); }}
+                onEditBudget={(r) => setBrandEditor({ mode: 'edit', brand: brands.find(b => b.id === r.id) || { id: r.id, name: r.brand } })}
+                onAddBrand={() => setBrandEditor({ mode: 'add', brand: { id: null, name: '' } })}
+                onNotes={(r) => setNotesBrand({ id: r.id, name: r.brand })}
+                noteCounts={noteCountByBrand}
+                onBrandNotes={(r) => setKeepBrand({ id: r.id, name: r.brand })}
+                onReorder={reorderBrands}
+              />
           )
         )}
       </div>
@@ -798,9 +842,15 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
       )}
       {keepBrand && (
         <BrandNotesDrawer brandId={keepBrand.id} brandName={keepBrand.name}
-          brands={brands} brandById={brandById} month={month}
+          brands={brands} brandById={brandById} creators={creators} month={month}
           notes={notes.filter(n => n.brand_id === keepBrand.id)}
           onClose={() => setKeepBrand(null)} onChanged={reload} />
+      )}
+      {keepCreator && (
+        <CreatorNotesDrawer creator={keepCreator}
+          brands={brands} brandById={brandById} creators={creators} month={month}
+          notes={notes.filter(n => n.creator_id && creatorNoteKeyById[n.creator_id] === keepCreator.key)}
+          onClose={() => setKeepCreator(null)} onChanged={reload} />
       )}
       {/* global notes — reachable from anywhere in the workspace */}
       <button className="pc-notesfab" onClick={() => setAllNotesOpen(true)} title="Notes" aria-label="Open notes">
@@ -808,15 +858,16 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
         {dueReminderCount > 0 && <span className="pc-notesfab-badge">{dueReminderCount}</span>}
       </button>
       {allNotesOpen && (
-        <AllNotesDrawer notes={notes} brands={brands} brandById={brandById} month={month}
+        <AllNotesDrawer notes={notes} brands={brands} brandById={brandById} creators={creators} month={month}
           onClose={() => setAllNotesOpen(false)} onChanged={reload} />
       )}
       {openNote && (
-        <NoteEditor editor={{ mode: 'edit', note: openNote }} brands={brands} brandById={brandById} month={month}
+        <NoteEditor editor={{ mode: 'edit', note: openNote }} brands={brands} brandById={brandById} creators={creators} month={month}
           overlayClass="pc-overlay-top"
           onClose={() => setOpenNote(null)} onPersist={persistOpenNote}
           onDelete={() => deleteOpenNote(openNote)} />
       )}
+      {contractTplOpen && <ContractTemplateModal onClose={() => setContractTplOpen(false)} />}
       {confirmDel && <ConfirmModal message={confirmDel.message} onYes={confirmDel.onYes} onCancel={() => setConfirmDel(null)} />}
       {undo && <UndoToast label={undo.label} onUndo={doUndo} />}
       {commentDrawer && brandById[commentDrawer.brandId] && (
@@ -867,9 +918,9 @@ function DiscussionsView({ comments, brandById, creators, onOpen }) {
 
   const targetLabel = (t) => t.tt === 'brand' ? 'Whole brand' : t.tt === 'insights' ? 'Insights'
     : t.tt === 'kpi' ? `KPI · ${CD_KPIS.find(k => k.id === t.tk)?.label ?? t.tk}`
-    : t.tt === 'program' ? `Program · ${monthLabel(t.tk)}`
-    : t.tt === 'week' ? `Week · ${rangeShort(t.tk, addDaysISO(t.tk, 6))}`
-    : `Creator · ${creators.find(c => c.id === t.tk)?.name ?? t.tk}`;
+      : t.tt === 'program' ? `Program · ${monthLabel(t.tk)}`
+        : t.tt === 'week' ? `Week · ${rangeShort(t.tk, addDaysISO(t.tk, 6))}`
+          : `Creator · ${creators.find(c => c.id === t.tk)?.name ?? t.tk}`;
 
   if (threads.length === 0) {
     return <div className="pc-card"><div className="pc-empty pc-empty-lg"><div className="pc-empty-icon">💬</div><h3>No discussions yet</h3><p>Comments from clients and your replies show up here, grouped by level. You'll get a notification when a client comments.</p></div></div>;
@@ -942,8 +993,8 @@ function CommentsDrawer({ brand, comments, creators, brandMonths, currentName, i
   const needsKey = tt === 'kpi' || tt === 'program' || tt === 'week' || tt === 'creator';
   const keyOptions = tt === 'kpi' ? CD_KPIS.map(k => ({ value: k.id, label: k.label }))
     : tt === 'program' ? months.map(m => ({ value: m, label: monthLabel(m) }))
-    : tt === 'week' ? weeks.map(w => ({ value: w, label: rangeShort(w, addDaysISO(w, 6)) }))
-    : tt === 'creator' ? brandCreators.map(c => ({ value: c.id, label: c.name })) : [];
+      : tt === 'week' ? weeks.map(w => ({ value: w, label: rangeShort(w, addDaysISO(w, 6)) }))
+        : tt === 'creator' ? brandCreators.map(c => ({ value: c.id, label: c.name })) : [];
 
   function pickType(nt) {
     setTt(nt);
@@ -955,10 +1006,10 @@ function CommentsDrawer({ brand, comments, creators, brandMonths, currentName, i
 
   const title = tt === 'brand' ? `Whole brand · ${brand.name}`
     : tt === 'insights' ? 'Insights'
-    : tt === 'kpi' ? `KPI · ${CD_KPIS.find(k => k.id === tk)?.label ?? ''}`
-    : tt === 'program' ? `Program · ${tk ? monthLabel(tk) : ''}`
-    : tt === 'week' ? `Week · ${tk ? rangeShort(tk, addDaysISO(tk, 6)) : ''}`
-    : `Creator · ${brandCreators.find(c => c.id === tk)?.name ?? ''}`;
+      : tt === 'kpi' ? `KPI · ${CD_KPIS.find(k => k.id === tk)?.label ?? ''}`
+        : tt === 'program' ? `Program · ${tk ? monthLabel(tk) : ''}`
+          : tt === 'week' ? `Week · ${tk ? rangeShort(tk, addDaysISO(tk, 6)) : ''}`
+            : `Creator · ${brandCreators.find(c => c.id === tk)?.name ?? ''}`;
 
   // Existing threads (grouped) for quick navigation.
   const threads = useMemo(() => {
@@ -968,9 +1019,9 @@ function CommentsDrawer({ brand, comments, creators, brandMonths, currentName, i
   }, [bComments]);
   const threadLabel = (t, key) => t === 'brand' ? 'Brand' : t === 'insights' ? 'Insights'
     : t === 'kpi' ? `KPI · ${CD_KPIS.find(x => x.id === key)?.label ?? key}`
-    : t === 'program' ? `Program · ${monthLabel(key)}`
-    : t === 'week' ? `Week · ${rangeShort(key, addDaysISO(key, 6))}`
-    : `Creator · ${brandCreators.find(c => c.id === key)?.name ?? key}`;
+      : t === 'program' ? `Program · ${monthLabel(key)}`
+        : t === 'week' ? `Week · ${rangeShort(key, addDaysISO(key, 6))}`
+          : `Creator · ${brandCreators.find(c => c.id === key)?.name ?? key}`;
 
   return (
     <div className="pc-drawer-overlay" onClick={onClose}>
@@ -1248,10 +1299,87 @@ function BrandRow({ r, onOpen, onEditBudget, onNotes, noteCount = 0, onBrandNote
   );
 }
 
+// Contract column actions: download the filled agreement PDF, plus the
+// signed-copy link — pasted once the creator returns the signed contract
+// (e.g. a Drive URL); afterwards the icon opens it (edit via the creator modal).
+function ContractActions({ c, onContract, onContractLink }) {
+  return (
+    <span className="pc-contract-actions">
+      {onContract && (
+        <button type="button" className="pc-contract-btn" title="Download contract (PDF)" aria-label="Download contract PDF"
+          onClick={e => { e.stopPropagation(); onContract(); }}>
+          <i className="bi bi-file-earmark-pdf" />
+        </button>
+      )}
+      {c.contract_url ? (
+        <a className="pc-contract-btn pc-clink has" href={c.contract_url} target="_blank" rel="noopener noreferrer"
+          title="Open signed contract" aria-label="Open signed contract" onClick={e => e.stopPropagation()}>
+          <i className="bi bi-link-45deg" />
+        </a>
+      ) : onContractLink ? (
+        <button type="button" className="pc-contract-btn pc-clink" title="Paste signed contract link" aria-label="Paste signed contract link"
+          onClick={e => {
+            e.stopPropagation();
+            const raw = window.prompt('Paste the link to the signed contract (e.g. Google Drive):', '');
+            if (raw === null) return;
+            const t = raw.trim();
+            if (!t) return;
+            onContractLink(/^https?:\/\//i.test(t) ? t : `https://${t}`);
+          }}>
+          <i className="bi bi-link-45deg" />
+        </button>
+      ) : null}
+    </span>
+  );
+}
+
+// Handler's contract-template settings (rep name + signature) for the PDF.
+// Fetched fresh per download — always current, no plumbing through row props.
+// Failures degrade to an unsigned contract rather than blocking the download.
+async function contractTemplatePayload() {
+  try {
+    const s = await store.getContractSettings();
+    if (!s) return {};
+    let signatureDataUrl = null;
+    if (s.signature_url) {
+      try {
+        const blob = await (await fetch(s.signature_url)).blob();
+        signatureDataUrl = await new Promise((res) => {
+          const fr = new FileReader();
+          fr.onload = () => res(fr.result);
+          fr.onerror = () => res(null);
+          fr.readAsDataURL(blob);
+        });
+      } catch { }
+    }
+    return { repName: s.rep_name || '', signatureDataUrl };
+  } catch { return {}; }
+}
+
+// Contract column — fill the standard agreement template from the deal row.
+// Featured products: the creator's own list, else the month's focus products
+// (passed by the Drilldown; the Creators tab has no brand-month in scope).
+async function downloadContractFor(c, brandName, focusNames = []) {
+  const prodNames = creatorProducts(c).map(p => p.name).filter(Boolean);
+  const accounts = tiktokAccounts(c.tiktok_handle);
+  const { downloadCreatorContract } = await import('./contractPdf');
+  await downloadCreatorContract({
+    ...(await contractTemplatePayload()),
+    brandName: brandName || 'Brand',
+    creatorName: c.name || '',
+    username: accounts[0] ? accounts[0].handle.replace(/^@/, '') : (c.name || ''),
+    amount: Number(c.amount) || 0,
+    videosCount: parseInt(c.videos_count, 10) || 0,
+    paymentMethod: c.zelle && c.paypal ? 'Zelle or PayPal' : c.paypal ? 'PayPal' : 'Zelle',
+    effectiveDate: c.onboarded_on || null,
+    productNames: prodNames.length ? prodNames : focusNames,
+  });
+}
+
 /* ════════════════════════════════════════════════════════════
    Drilldown
 ════════════════════════════════════════════════════════════ */
-function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCreator, onDeleteCreator, onEditBudget, onDeleteBrand, onNotes, notesText, patchCreatorLocal, onSetStatus, onToggleVisible, commentCount, onComments }) {
+function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCreator, onDeleteCreator, onEditBudget, onDeleteBrand, onNotes, notesText, patchCreatorLocal, onSetStatus, onToggleVisible, onSetContractLink, commentCount, onComments, creatorNoteCount, onCreatorNotes }) {
   const [openId, setOpenId] = useState(null);
   const bm = row?.bm || {};
   const products = focusProductList(bm);
@@ -1321,7 +1449,7 @@ function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCr
         <div className="pc-card pc-list">
           <div className="pc-ct-head">
             <div className="pc-num">#</div><div>Completed on</div><div>Name</div><div>TikTok</div><div className="pc-num">Amount</div>
-            <div className="pc-num">Videos</div><div>Payout</div><div>Status</div><div className="pc-num">Content</div>
+            <div className="pc-num">Videos</div><div>Payout</div><div>Status</div><div>Contract</div><div className="pc-num">Content</div>
           </div>
           {statusGroups.map(g => (
             <React.Fragment key={g.opt.value}>
@@ -1335,7 +1463,11 @@ function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCr
                 <CreatorRow key={c.id} c={c} idx={idx} open={openId === c.id}
                   onToggle={() => setOpenId(openId === c.id ? null : c.id)}
                   onEdit={() => onEditCreator(c)} onDelete={() => onDeleteCreator(c.id)}
-                  patchCreatorLocal={patchCreatorLocal} onSetStatus={onSetStatus} onToggleVisible={onToggleVisible} />
+                  patchCreatorLocal={patchCreatorLocal} onSetStatus={onSetStatus} onToggleVisible={onToggleVisible}
+                  noteCount={creatorNoteCount ? creatorNoteCount(c) : 0}
+                  onNotes={onCreatorNotes ? () => onCreatorNotes(c) : null}
+                  onContract={() => downloadContractFor(c, brand.name, products.map(p => p.name).filter(Boolean))}
+                  onContractLink={onSetContractLink ? (url) => onSetContractLink(c.id, url) : null} />
               ))}
             </React.Fragment>
           ))}
@@ -1345,13 +1477,24 @@ function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCr
   );
 }
 
-function CreatorRow({ c, idx, open, onToggle, onEdit, onDelete, patchCreatorLocal, onSetStatus, onToggleVisible }) {
+function CreatorRow({ c, idx, open, onToggle, onEdit, onDelete, patchCreatorLocal, onSetStatus, onToggleVisible, noteCount = 0, onNotes = null, onContract = null, onContractLink = null }) {
   const accounts = tiktokAccounts(c.tiktok_handle);
   const filled = Array.isArray(c.video_codes) ? c.video_codes.filter(v => v?.video).length : 0;
+  const contractBtn = (onContract || onContractLink)
+    ? <ContractActions c={c} onContract={onContract} onContractLink={onContractLink} />
+    : null;
+  const keepBtn = onNotes ? (
+    <button className={`pc-keepnote-btn pc-keepnote-mini ${noteCount > 0 ? 'has' : ''}`}
+      onClick={e => { e.stopPropagation(); onNotes(); }}
+      title={noteCount > 0 ? `${noteCount} creator note${noteCount === 1 ? '' : 's'}` : 'Creator notes'} aria-label="Creator notes">
+      <i className="bi bi-journal-text" />
+      {noteCount > 0 && <span className="pc-keepnote-count">{noteCount}</span>}
+    </button>
+  ) : null;
   const rowRef = useRef(null);
   useEffect(() => {
     if (open && rowRef.current?.scrollIntoView) {
-      try { rowRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch {}
+      try { rowRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch { }
     }
   }, [open]);
   return (
@@ -1359,7 +1502,7 @@ function CreatorRow({ c, idx, open, onToggle, onEdit, onDelete, patchCreatorLoca
       <div ref={rowRef} className={`pc-ct-row ${open ? 'open' : ''}`} onClick={onToggle} role="button" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter') onToggle(); }}>
         <div className="pc-cell pc-num pc-idxcell" data-label="#"><span className="pc-idx">#{idx}</span></div>
         <div className="pc-cell" data-label="Completed on">{c.completed_on ? fmtDate(c.completed_on) : <span className="pc-handle">—</span>}</div>
-        <div className="pc-cell" data-label="Name"><span className="pc-cname">{c.name}</span></div>
+        <div className="pc-cell" data-label="Name"><span className="pc-cname">{c.name}</span>{keepBtn}</div>
         <div className="pc-cell" data-label="TikTok">
           {accounts.length > 0
             ? <span className="pc-tiktok"><a className="pc-handle" href={accounts[0].url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>{accounts[0].handle}</a>{accounts.length > 1 && <span className="pc-more" title={accounts.slice(1).map(a => a.handle).join(', ')}>+{accounts.length - 1}</span>}</span>
@@ -1373,13 +1516,14 @@ function CreatorRow({ c, idx, open, onToggle, onEdit, onDelete, patchCreatorLoca
           <PendingVisibilityToggle c={c} onToggleVisible={onToggleVisible} />
           <ClientPaidBadge c={c} />
         </div>
+        <div className="pc-cell pc-contract-cell" data-label="Contract">{contractBtn}</div>
         <div className="pc-cell pc-num" data-label="Content"><span className="pc-content-cell">{filled > 0 ? <b>{filled}</b> : ''} {open ? '▴' : '▾'}</span></div>
 
         {/* ── purpose-built mobile card ── */}
         <div className="pc-mc">
           <div className="pc-mc-head">
             <div className="pc-mc-idblock">
-              <div className="pc-mc-name">{c.name}</div>
+              <div className="pc-mc-name">{c.name}{keepBtn}</div>
               <div className="pc-mc-subline">
                 {accounts[0]
                   ? <a className="pc-mc-handle" href={accounts[0].url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>{accounts[0].handle}</a>
@@ -1398,6 +1542,7 @@ function CreatorRow({ c, idx, open, onToggle, onEdit, onDelete, patchCreatorLoca
             <StatusDropdown value={c.payment_status} onChange={v => onSetStatus(c.id, v)} />
             <PendingVisibilityToggle c={c} onToggleVisible={onToggleVisible} />
             <ClientPaidBadge c={c} />
+            {contractBtn}
             {(c.paypal || c.zelle) && <span className="pc-mc-footmeta"><PayoutCell paypal={c.paypal} zelle={c.zelle} /></span>}
           </div>
         </div>
@@ -1420,7 +1565,7 @@ function PayoutCell({ paypal, zelle }) {
 /* ════════════════════════════════════════════════════════════
    Creators tab — every creator (per brand) for the month
 ════════════════════════════════════════════════════════════ */
-function CreatorsView({ rows, onEdit, onSetStatus, onToggleVisible }) {
+function CreatorsView({ rows, onEdit, onSetStatus, onToggleVisible, onSetContractLink, creatorNoteCount, onCreatorNotes }) {
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(() => new Set());
   const [copied, setCopied] = useState('');
@@ -1493,12 +1638,15 @@ function CreatorsView({ rows, onEdit, onSetStatus, onToggleVisible }) {
           <div className="pc-cv-head">
             <div className="pc-cv-check"><input type="checkbox" className="pc-check" checked={allSelected} onChange={toggleAll} title="Select all" /></div>
             <div className="pc-num pc-idxcell">#</div><div>Name</div><div>Category</div>
-            <div>Brand</div><div className="pc-num">Deal</div><div className="pc-num">Rate/Vid</div><div>Status</div>
+            <div>Brand</div><div className="pc-num">Deal</div><div className="pc-num">Rate/Vid</div><div>Status</div><div>Contract</div>
           </div>
           {groups.map(g => (
             <React.Fragment key={g.key}>
               <div className="pc-cv-monthhead"><span>{monthLabel(g.key)}</span><span className="pc-cv-monthcount">{g.items.length}</span></div>
-              {g.items.map((c, i) => <CreatorGlobalRow key={c.id} c={c} idx={i + 1} onEdit={() => onEdit(c)} onSetStatus={onSetStatus} onToggleVisible={onToggleVisible} selected={sel.has(c.id)} onToggleSelect={() => toggle(c.id)} />)}
+              {g.items.map((c, i) => <CreatorGlobalRow key={c.id} c={c} idx={i + 1} onEdit={() => onEdit(c)} onSetStatus={onSetStatus} onToggleVisible={onToggleVisible} selected={sel.has(c.id)} onToggleSelect={() => toggle(c.id)}
+                noteCount={creatorNoteCount ? creatorNoteCount(c) : 0} onNotes={onCreatorNotes ? () => onCreatorNotes(c) : null}
+                onContract={() => downloadContractFor(c, c._brandName)}
+                onContractLink={onSetContractLink ? (url) => onSetContractLink(c.id, url) : null} />)}
             </React.Fragment>
           ))}
         </div>
@@ -1515,8 +1663,19 @@ function CreatorsView({ rows, onEdit, onSetStatus, onToggleVisible }) {
   );
 }
 
-function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, onToggleVisible, selected, onToggleSelect }) {
+function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, onToggleVisible, selected, onToggleSelect, noteCount = 0, onNotes = null, onContract = null, onContractLink = null }) {
   const accounts = tiktokAccounts(c.tiktok_handle);
+  const contractBtn = (onContract || onContractLink)
+    ? <ContractActions c={c} onContract={onContract} onContractLink={onContractLink} />
+    : null;
+  const keepBtn = onNotes ? (
+    <button className={`pc-keepnote-btn pc-keepnote-mini ${noteCount > 0 ? 'has' : ''}`}
+      onClick={e => { e.stopPropagation(); onNotes(); }}
+      title={noteCount > 0 ? `${noteCount} creator note${noteCount === 1 ? '' : 's'}` : 'Creator notes'} aria-label="Creator notes">
+      <i className="bi bi-journal-text" />
+      {noteCount > 0 && <span className="pc-keepnote-count">{noteCount}</span>}
+    </button>
+  ) : null;
   const amount = Number(c.amount) || 0;
   const videos = parseInt(c.videos_count, 10) || 0;
   const delivered = Array.isArray(c.video_codes) ? c.video_codes.filter(v => v?.video && String(v.video).trim()).length : 0;
@@ -1527,7 +1686,7 @@ function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, onToggleVisible, select
       <div className="pc-cell pc-cv-check" data-label="" onClick={e => e.stopPropagation()}><input type="checkbox" className="pc-check" checked={selected} onChange={onToggleSelect} /></div>
       <div className="pc-cell pc-num pc-idxcell" data-label="#"><span className="pc-idx">#{idx}</span></div>
       <div className="pc-cell pc-cv-namecell" data-label="Name">
-        <span className="pc-cname">{c.name}</span>
+        <span className="pc-cname">{c.name}{keepBtn}</span>
         {accounts.length > 0 && (
           <span className="pc-tiktok pc-cv-sub">
             <a className="pc-handle" href={accounts[0].url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>{accounts[0].handle}</a>
@@ -1550,12 +1709,13 @@ function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, onToggleVisible, select
         <StatusDropdown value={c.payment_status} onChange={v => onSetStatus(c.id, v)} />
         <PendingVisibilityToggle c={c} onToggleVisible={onToggleVisible} />
       </div>
+      <div className="pc-cell pc-contract-cell" data-label="Contract">{contractBtn}</div>
 
       {/* ── purpose-built mobile card ── */}
       <div className="pc-mc">
         <div className="pc-mc-head">
           <div className="pc-mc-idblock">
-            <div className="pc-mc-name">{c.name}</div>
+            <div className="pc-mc-name">{c.name}{keepBtn}</div>
             <div className="pc-mc-subline">
               {accounts[0]
                 ? <a className="pc-mc-handle" href={accounts[0].url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>{accounts[0].handle}</a>
@@ -1577,6 +1737,7 @@ function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, onToggleVisible, select
         <div className="pc-mc-foot">
           <StatusDropdown value={c.payment_status} onChange={v => onSetStatus(c.id, v)} />
           <PendingVisibilityToggle c={c} onToggleVisible={onToggleVisible} />
+          {contractBtn}
           <div className="pc-mc-footmeta">
             {c.category ? <span className="pc-cat">{c.category}</span> : null}
             {c.onboarded_on && <span className="pc-mc-muted">{fmtDate(c.onboarded_on)}</span>}
@@ -1594,9 +1755,9 @@ function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, onToggleVisible, select
 ════════════════════════════════════════════════════════════ */
 const RD_STATUS = {
   videos_in_progress: { label: 'In progress', cls: 'prog', color: '#1259C3' },
-  follow_up:          { label: 'Follow-up',   cls: 'fup',  color: '#C62828' },
-  pending:            { label: 'Pending pay',  cls: 'pend', color: '#E8862E' },
-  paid:               { label: 'Paid',         cls: 'paid', color: '#198754' },
+  follow_up: { label: 'Follow-up', cls: 'fup', color: '#C62828' },
+  pending: { label: 'Pending pay', cls: 'pend', color: '#E8862E' },
+  paid: { label: 'Paid', cls: 'paid', color: '#198754' },
 };
 const rdDelivered = (c) => Array.isArray(c.video_codes) ? c.video_codes.filter(v => v?.video && String(v.video).trim()).length : 0;
 const rdAgreed = (c) => Number(c.videos_count) || 0;
@@ -1677,7 +1838,7 @@ function ReportingView({ brands, brandById, creators, month, comments = [], onOp
     scoped.map(c => ({ name: c.name || '—', gmv: periodGmv(c) }))
       .filter(x => x.gmv > 0).sort((a, b) => b.gmv - a.gmv).slice(0, 6)
       .map(x => ({ name: x.name.length > 16 ? x.name.slice(0, 16) + '…' : x.name, gmv: x.gmv })),
-  [scoped, month, isWeekly, activeWeek]);
+    [scoped, month, isWeekly, activeWeek]);
 
   const payMix = useMemo(() => {
     const m = { videos_in_progress: 0, follow_up: 0, pending: 0, paid: 0 };
@@ -1688,7 +1849,7 @@ function ReportingView({ brands, brandById, creators, month, comments = [], onOp
   const creatorRows = useMemo(() =>
     scoped.map(c => ({ c, del: rdDelivered(c), ag: rdAgreed(c), gmv: periodGmv(c) }))
       .sort((a, b) => b.gmv - a.gmv || b.del - a.del).slice(0, 12),
-  [scoped, month, isWeekly, activeWeek]);
+    [scoped, month, isWeekly, activeWeek]);
 
   const approvals = useMemo(() => {
     const pays = scoped.filter(c => c.payment_status === 'pending').map(c => ({ c, amount: Number(c.amount) || 0 }));
@@ -1784,11 +1945,11 @@ function ReportingView({ brands, brandById, creators, month, comments = [], onOp
 
       {/* KPI tiles */}
       <div className="pc-rd-kpis">
-        <RKpi icon="bi-people-fill"      color="#6610F2" label="Active creators"   value={fmtNum(kpis.active)}     sub={`${scoped.length} total`} />
-        <RKpi icon="bi-collection-play-fill" color="#198754" label="Videos posted" value={fmtNum(kpis.posted)}     sub="delivered" />
-        <RKpi icon="bi-hourglass-split"  color="#0DCAF0" label="In pipeline"      value={fmtNum(kpis.pipeline)}  sub="to deliver" />
-        <RKpi icon="bi-cash-stack"       color="#E8862E" label="Pending payments" value={fmt$(kpis.pendingAmt)}  sub={`${kpis.pendingCount} creator${kpis.pendingCount === 1 ? '' : 's'}`} />
-        <RKpi icon="bi-graph-up-arrow"   color="#1259C3" label="GMV generated"    value={fmt$(kpis.gmv)}        sub={kpis.ad > 0 ? `${kpis.roas.toFixed(2)}x ROAS` : (isWeekly ? (activeWeek ? rangeShort(activeWeek, addDaysISO(activeWeek, 6)) : 'all weeks') : monthLabel(month))} />
+        <RKpi icon="bi-people-fill" color="#6610F2" label="Active creators" value={fmtNum(kpis.active)} sub={`${scoped.length} total`} />
+        <RKpi icon="bi-collection-play-fill" color="#198754" label="Videos posted" value={fmtNum(kpis.posted)} sub="delivered" />
+        <RKpi icon="bi-hourglass-split" color="#0DCAF0" label="In pipeline" value={fmtNum(kpis.pipeline)} sub="to deliver" />
+        <RKpi icon="bi-cash-stack" color="#E8862E" label="Pending payments" value={fmt$(kpis.pendingAmt)} sub={`${kpis.pendingCount} creator${kpis.pendingCount === 1 ? '' : 's'}`} />
+        <RKpi icon="bi-graph-up-arrow" color="#1259C3" label="GMV generated" value={fmt$(kpis.gmv)} sub={kpis.ad > 0 ? `${kpis.roas.toFixed(2)}x ROAS` : (isWeekly ? (activeWeek ? rangeShort(activeWeek, addDaysISO(activeWeek, 6)) : 'all weeks') : monthLabel(month))} />
       </div>
 
       {/* charts */}
@@ -2722,6 +2883,7 @@ function CreatorEditor({ editor, month, directory = [], categories = [], brandPr
     amount: c.amount != null ? String(c.amount || '') : '', videos_count: c.videos_count != null ? String(c.videos_count || '') : '',
     paypal: c.paypal || '', zelle: c.zelle || '',
     onboarded_on: c.onboarded_on || defaultDateForMonth(month),
+    contract_url: c.contract_url || '',
   });
   const [tiktoks, setTiktoks] = useState(() => {
     const arr = String(c.tiktok_handle || '').split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
@@ -2773,90 +2935,262 @@ function CreatorEditor({ editor, month, directory = [], categories = [], brandPr
         <h3>{isAdd ? 'Onboard creator' : 'Edit creator'}</h3>
         <div className="pc-modal-sub">{monthLabel(monthKey(f.onboarded_on) || month)}</div>
         <div className="pc-modal-body">
-        <div className="pc-field" style={{ position: 'relative' }}>
-          <label>Name</label>
-          <input className="pc-input" placeholder="Creator name" value={f.name} autoFocus
-            onChange={e => { set('name', e.target.value); setShowSug(true); }}
-            onFocus={() => setShowSug(true)}
-            onBlur={() => setTimeout(() => setShowSug(false), 150)} />
-          {isAdd && showSug && matches.length > 0 && (
-            <div className="pc-suggest">
-              <div className="pc-suggest-head">Already worked with — tap to auto-fill</div>
-              {matches.map((d, i) => (
-                <button type="button" key={i} className="pc-suggest-item" onClick={() => pick(d)}>
-                  <span className="pc-suggest-name">{d.name}</span>
-                  <span className="pc-suggest-meta">{tiktokAccounts(d.tiktok_handle).map(a => a.handle).join(' · ') || (d.paypal || d.zelle || '—')}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="pc-field">
-          <label>TikTok account(s)</label>
-          {tiktoks.map((t, i) => (
-            <div className="pc-multirow" key={i}>
-              <input className="pc-input" placeholder="@handle or URL" value={t}
-                onChange={e => setTiktoks(prev => prev.map((x, j) => (j === i ? e.target.value : x)))} />
-              {tiktoks.length > 1 && <button type="button" className="pc-multix" title="Remove"
-                onClick={() => setTiktoks(prev => prev.filter((_, j) => j !== i))}>×</button>}
-            </div>
-          ))}
-          <button type="button" className="pc-btn pc-btn-ghost pc-btn-sm" style={{ marginTop: 2 }}
-            onClick={() => setTiktoks(prev => [...prev, ''])}>+ Add another account</button>
-        </div>
-        <div className="pc-field2">
-          <div className="pc-field"><label>Number</label><input className="pc-input" placeholder="phone" value={f.phone} onChange={e => set('phone', e.target.value)} /></div>
-          <div className="pc-field"><label>Email</label><input className="pc-input" placeholder="email" value={f.email} onChange={e => set('email', e.target.value)} /></div>
-        </div>
-        <div className="pc-field"><label>Category</label>
-          <input className="pc-input" list="pc-catlist" placeholder="e.g. Beauty · Tech · Fitness" value={f.category} onChange={e => set('category', e.target.value)} />
-          <datalist id="pc-catlist">{categories.map(cat => <option key={cat} value={cat} />)}</datalist>
-        </div>
-        <div className="pc-field">
-          <label>Promoting product{prods.length === 1 ? '' : '(s)'}</label>
-          <div className="pc-prodbox">
-            {prods.length > 0 && (
-              <div className="pc-prodchips">
-                {prods.map((p, i) => (
-                  <span className="pc-prodchip sel" key={i} title={p.url || p.name}>
-                    <span className="pc-prodchip-dot" />
-                    <span className="pc-prodchip-name">{p.name || p.url}</span>
-                    <button type="button" className="pc-prodchip-x" onClick={() => removeProd(i)} title="Remove">×</button>
-                  </span>
+          <div className="pc-field" style={{ position: 'relative' }}>
+            <label>Name</label>
+            <input className="pc-input" placeholder="Creator name" value={f.name} autoFocus
+              onChange={e => { set('name', e.target.value); setShowSug(true); }}
+              onFocus={() => setShowSug(true)}
+              onBlur={() => setTimeout(() => setShowSug(false), 150)} />
+            {isAdd && showSug && matches.length > 0 && (
+              <div className="pc-suggest">
+                <div className="pc-suggest-head">Already worked with — tap to auto-fill</div>
+                {matches.map((d, i) => (
+                  <button type="button" key={i} className="pc-suggest-item" onClick={() => pick(d)}>
+                    <span className="pc-suggest-name">{d.name}</span>
+                    <span className="pc-suggest-meta">{tiktokAccounts(d.tiktok_handle).map(a => a.handle).join(' · ') || (d.paypal || d.zelle || '—')}</span>
+                  </button>
                 ))}
               </div>
             )}
-            {pickableProducts.length > 0 && (
-              <div className="pc-prodpick">
-                <span className="pc-prodpick-l">From this brand</span>
+          </div>
+          <div className="pc-field">
+            <label>TikTok account(s)</label>
+            {tiktoks.map((t, i) => (
+              <div className="pc-multirow" key={i}>
+                <input className="pc-input" placeholder="@handle or URL" value={t}
+                  onChange={e => setTiktoks(prev => prev.map((x, j) => (j === i ? e.target.value : x)))} />
+                {tiktoks.length > 1 && <button type="button" className="pc-multix" title="Remove"
+                  onClick={() => setTiktoks(prev => prev.filter((_, j) => j !== i))}>×</button>}
+              </div>
+            ))}
+            <button type="button" className="pc-btn pc-btn-ghost pc-btn-sm" style={{ marginTop: 2 }}
+              onClick={() => setTiktoks(prev => [...prev, ''])}>+ Add another account</button>
+          </div>
+          <div className="pc-field2">
+            <div className="pc-field"><label>Number</label><input className="pc-input" placeholder="phone" value={f.phone} onChange={e => set('phone', e.target.value)} /></div>
+            <div className="pc-field"><label>Email</label><input className="pc-input" placeholder="email" value={f.email} onChange={e => set('email', e.target.value)} /></div>
+          </div>
+          <div className="pc-field"><label>Category</label>
+            <input className="pc-input" list="pc-catlist" placeholder="e.g. Beauty · Tech · Fitness" value={f.category} onChange={e => set('category', e.target.value)} />
+            <datalist id="pc-catlist">{categories.map(cat => <option key={cat} value={cat} />)}</datalist>
+          </div>
+          <div className="pc-field">
+            <label>Promoting product{prods.length === 1 ? '' : '(s)'}</label>
+            <div className="pc-prodbox">
+              {prods.length > 0 && (
                 <div className="pc-prodchips">
-                  {pickableProducts.map((p, i) => (
-                    <button type="button" className="pc-prodchip add" key={i} onClick={() => toggleProd(p)} title={p.url || p.name}>+ {p.name || p.url}</button>
+                  {prods.map((p, i) => (
+                    <span className="pc-prodchip sel" key={i} title={p.url || p.name}>
+                      <span className="pc-prodchip-dot" />
+                      <span className="pc-prodchip-name">{p.name || p.url}</span>
+                      <button type="button" className="pc-prodchip-x" onClick={() => removeProd(i)} title="Remove">×</button>
+                    </span>
                   ))}
                 </div>
+              )}
+              {pickableProducts.length > 0 && (
+                <div className="pc-prodpick">
+                  <span className="pc-prodpick-l">From this brand</span>
+                  <div className="pc-prodchips">
+                    {pickableProducts.map((p, i) => (
+                      <button type="button" className="pc-prodchip add" key={i} onClick={() => toggleProd(p)} title={p.url || p.name}>+ {p.name || p.url}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="pc-multirow">
+                <input className="pc-input" placeholder="Product name" value={prodInput}
+                  onChange={e => setProdInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCustomProd(); } }} />
+                <button type="button" className="pc-prodadd" onClick={addCustomProd} title="Add product" disabled={!prodInput.trim()}>+</button>
               </div>
-            )}
-            <div className="pc-multirow">
-              <input className="pc-input" placeholder="Product name" value={prodInput}
-                onChange={e => setProdInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCustomProd(); } }} />
-              <button type="button" className="pc-prodadd" onClick={addCustomProd} title="Add product" disabled={!prodInput.trim()}>+</button>
             </div>
           </div>
-        </div>
-        <div className="pc-field2">
-          <div className="pc-field"><label>Amount ($)</label><input className="pc-input" type="number" inputMode="numeric" placeholder="200" value={f.amount} onChange={e => set('amount', e.target.value)} /></div>
-          <div className="pc-field"><label>Videos</label><input className="pc-input" type="number" inputMode="numeric" placeholder="5" value={f.videos_count} onChange={e => set('videos_count', e.target.value)} /></div>
-        </div>
-        <div className="pc-field"><label>Onboarded on</label><input className="pc-input" type="date" value={f.onboarded_on} onChange={e => set('onboarded_on', e.target.value)} /></div>
-        <div className="pc-field2">
-          <div className="pc-field"><label>PayPal</label><input className="pc-input" placeholder="email" value={f.paypal} onChange={e => set('paypal', e.target.value)} /></div>
-          <div className="pc-field"><label>Zelle</label><input className="pc-input" placeholder="email / phone" value={f.zelle} onChange={e => set('zelle', e.target.value)} /></div>
-        </div>
+          <div className="pc-field2">
+            <div className="pc-field"><label>Amount ($)</label><input className="pc-input" type="number" inputMode="numeric" placeholder="200" value={f.amount} onChange={e => set('amount', e.target.value)} /></div>
+            <div className="pc-field"><label>Videos</label><input className="pc-input" type="number" inputMode="numeric" placeholder="5" value={f.videos_count} onChange={e => set('videos_count', e.target.value)} /></div>
+          </div>
+          <div className="pc-field"><label>Onboarded on</label><input className="pc-input" type="date" value={f.onboarded_on} onChange={e => set('onboarded_on', e.target.value)} /></div>
+          <div className="pc-field2">
+            <div className="pc-field"><label>PayPal</label><input className="pc-input" placeholder="email" value={f.paypal} onChange={e => set('paypal', e.target.value)} /></div>
+            <div className="pc-field"><label>Zelle</label><input className="pc-input" placeholder="email / phone" value={f.zelle} onChange={e => set('zelle', e.target.value)} /></div>
+          </div>
+          <div className="pc-field"><label>Signed contract link</label><input className="pc-input" placeholder="Drive link to the signed contract" value={f.contract_url} onChange={e => set('contract_url', e.target.value)} /></div>
         </div>
         <div className="pc-modal-actions">
           <button className="pc-btn pc-btn-ghost" onClick={onClose}>Cancel</button>
           <button className="pc-btn pc-btn-primary" onClick={save} disabled={!f.name.trim()}>{isAdd ? 'Add' : 'Save'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════
+   Contract template — per-handler signature block settings.
+   Only the Brand Representative name + signature are configurable;
+   the agreement wording stays code-generated (see contractPdf.ts).
+════════════════════════════════════════════════════════════ */
+// Rasterize an uploaded SVG signature to PNG (jsPDF can't embed SVG directly).
+function svgToPngDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const w = 600;
+        const ratio = img.width > 0 && img.height > 0 ? img.height / img.width : 0.3;
+        const h = Math.max(60, Math.round(w * ratio));
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/png'));
+      } catch (e) { reject(e); } finally { URL.revokeObjectURL(url); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('unreadable SVG')); };
+    img.src = url;
+  });
+}
+
+function ContractTemplateModal({ onClose }) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const [repName, setRepName] = useState('');
+  const [savedSigUrl, setSavedSigUrl] = useState('');   // already stored in the DB
+  const [pendingSig, setPendingSig] = useState(null);   // uploaded SVG → PNG data URL, not yet saved
+  const [removeSig, setRemoveSig] = useState(false);
+  const [padDirty, setPadDirty] = useState(false);      // something drawn on the pad
+  const padRef = useRef(null);
+  const drawing = useRef(false);
+
+  useEffect(() => {
+    let alive = true;
+    store.getContractSettings()
+      .then(s => { if (!alive) return; setRepName(s?.rep_name || ''); setSavedSigUrl(s?.signature_url || ''); })
+      .catch(e => { if (alive) setErr(e.message || 'Could not load settings'); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, []);
+
+  function padPos(e) {
+    const c = padRef.current, r = c.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * (c.width / r.width), y: (e.clientY - r.top) * (c.height / r.height) };
+  }
+  function padDown(e) {
+    e.preventDefault();
+    const c = padRef.current;
+    try { c.setPointerCapture(e.pointerId); } catch { }
+    const ctx = c.getContext('2d');
+    ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#1B2430';
+    const p = padPos(e);
+    ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + 0.1, p.y); ctx.stroke();
+    drawing.current = true;
+    setPadDirty(true); setPendingSig(null); setRemoveSig(false);
+  }
+  function padMove(e) {
+    if (!drawing.current) return;
+    const ctx = padRef.current.getContext('2d');
+    const p = padPos(e);
+    ctx.lineTo(p.x, p.y); ctx.stroke();
+  }
+  function padUp() { drawing.current = false; }
+  function clearPad() {
+    const c = padRef.current;
+    if (c) c.getContext('2d').clearRect(0, 0, c.width, c.height);
+    setPadDirty(false);
+  }
+
+  async function onUploadSvg(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const dataUrl = await svgToPngDataUrl(file);
+      setPendingSig(dataUrl); setRemoveSig(false); clearPad();
+    } catch (ex) { setErr(`Could not read that SVG: ${ex.message || ''}`); }
+  }
+
+  // Priority: uploaded SVG > pad drawing > existing (unless removed).
+  const previewSig = pendingSig || (!padDirty && !removeSig && savedSigUrl) || null;
+
+  async function save() {
+    setSaving(true); setErr('');
+    try {
+      let signature_url = removeSig ? '' : savedSigUrl;
+      let dataUrl = pendingSig;
+      if (!dataUrl && padDirty && padRef.current) dataUrl = padRef.current.toDataURL('image/png');
+      if (dataUrl) {
+        const blob = await (await fetch(dataUrl)).blob();
+        const { data: u } = await supabase.auth.getUser();
+        if (!u?.user?.id) throw new Error('Not signed in');
+        signature_url = await uploadSignature(u.user.id, blob);
+      }
+      await store.saveContractSettings({ rep_name: repName.trim(), signature_url });
+      onClose();
+    } catch (ex) {
+      setErr(ex.message || 'Save failed');
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="pc-overlay" onClick={onClose}>
+      <div className="pc-modal pc-modal-scroll" onClick={e => e.stopPropagation()}>
+        <h3>Contract template</h3>
+        <div className="pc-modal-sub">Signature block on every contract PDF you download</div>
+        {loading ? <div className="pc-spinner" /> : (
+          <div className="pc-modal-body">
+            <div className="pc-field">
+              <label>Representative name</label>
+              <input className="pc-input" placeholder="Who signs on behalf of the brand" value={repName} onChange={e => setRepName(e.target.value)} />
+            </div>
+            <div className="pc-field">
+              <label>Signature</label>
+              {previewSig && (
+                <div className="pc-sig-preview">
+                  <img src={previewSig} alt="Saved signature" />
+                  <span className="pc-sig-preview-l">{pendingSig ? 'New signature (not saved yet)' : 'Current signature'}</span>
+                  <button type="button" className="pc-multix" title="Remove signature"
+                    onClick={() => { setPendingSig(null); setRemoveSig(true); }}>×</button>
+                </div>
+              )}
+              <canvas ref={padRef} className="pc-sigpad" width={560} height={170}
+                onPointerDown={padDown} onPointerMove={padMove} onPointerUp={padUp} onPointerLeave={padUp} />
+              <div className="pc-sig-actions">
+                <span className="pc-sig-hint">Draw above with mouse / finger, or</span>
+                <label
+                  className="pc-btn pc-btn-ghost pc-btn-sm"
+                  style={{
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    outline: '1px solid #b2b2b2'
+                  }}
+                >
+                  Upload SVG
+                  <input type="file" accept=".svg,image/svg+xml" style={{ display: 'none' }} onChange={onUploadSvg} />
+                </label>
+
+                {padDirty && <button type="button" className="pc-btn pc-btn-ghost pc-btn-sm" onClick={clearPad}>Clear drawing</button>}
+              </div>
+            </div>
+            <div className="pc-tplprev">
+              <div className="pc-tplprev-h">Preview — Brand Representative block</div>
+              <div><b>Brand:</b> <span className="pc-handle">(brand on the deal)</span></div>
+              {repName.trim() && <div><b>Representative:</b> {repName.trim()}</div>}
+              <div className="pc-tplprev-sig"><b>Signature:</b> {padDirty
+                ? <span className="pc-handle">your drawing above</span>
+                : previewSig ? <img src={previewSig} alt="" /> : <span className="pc-handle">____________</span>}</div>
+              <div><b>Date:</b> <span className="pc-handle">auto (onboarding date)</span></div>
+            </div>
+            {err && <div className="pc-formerr">{err}</div>}
+          </div>
+        )}
+        <div className="pc-modal-actions">
+          <button className="pc-btn pc-btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="pc-btn pc-btn-primary" onClick={save} disabled={loading || saving}>{saving ? 'Saving…' : 'Save'}</button>
         </div>
       </div>
     </div>

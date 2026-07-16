@@ -21,7 +21,6 @@ const FILTERS: { key: ChatFilter; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'unread', label: 'Unread' },
   { key: 'groups', label: 'Groups' },
-  { key: 'archived', label: 'Archive' },
 ];
 
 export default function ConversationList({ views, activeId, myId, brandLeadByBrand, onSelect, onStartChat, onOpenAnnouncement }: Props) {
@@ -124,7 +123,6 @@ export default function ConversationList({ views, activeId, myId, brandLeadByBra
               >
                 {f.label}
                 {f.key === 'unread' && totalUnread > 0 && <span className="ms-1">({totalUnread})</span>}
-                {f.key === 'archived' && archivedCount > 0 && <span className="ms-1">({archivedCount})</span>}
               </button>
             ))}
             {/* Per-Team-Lead brand filters — act like tabs, isolate that lead's brand groups */}
@@ -151,6 +149,15 @@ export default function ConversationList({ views, activeId, myId, brandLeadByBra
                 <span className="ms-1">({leadChips.noneCount})</span>
               </button>
             )}
+            {/* Archive always last, after the lead chips */}
+            <button
+              type="button"
+              className={`ac-chat-filter ${filter === 'archived' ? 'active' : ''}`}
+              onClick={() => setFilter('archived')}
+            >
+              Archive
+              {archivedCount > 0 && <span className="ms-1">({archivedCount})</span>}
+            </button>
           </div>
           {canRight && (
             <button type="button" className="ac-chat-filter-arrow" aria-label="Scroll filters right"

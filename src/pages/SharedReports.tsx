@@ -72,7 +72,7 @@ export default function SharedReports() {
   const [err, setErr] = useState<string | null>(null);
 
   const [activeBrandId, setActiveBrandId] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'reporting' | 'monthly' | 'resources' | 'paid-collab' | 'new-paid-collab'>('reporting');
+  const [activeTab, setActiveTab] = useState<'reporting' | 'monthly' | 'approved' | 'resources' | 'paid-collab' | 'new-paid-collab'>('reporting');
   const [month, setMonth] = useState(currentMonth());
   const [openId, setOpenId] = useState<string | null>(null);
   const [openMonthlyId, setOpenMonthlyId] = useState<string | null>(null);
@@ -97,6 +97,9 @@ export default function SharedReports() {
   const [openProgramId, setOpenProgramId] = useState<string | null>(null);
   const [linkMode, setLinkMode] = useState<'brand' | 'general'>('brand');
   const [decisions, setDecisions] = useState<ApprovalDecisionRow[]>([]);
+  // Every link's decisions on this link's reports — feeds the "Approved"
+  // history tab so approvals made via an older/rotated link still show.
+  const [allDecisions, setAllDecisions] = useState<ApprovalDecisionRow[]>([]);
   const [showApprovals, setShowApprovals] = useState(false);
   const [singleApprovalId, setSingleApprovalId] = useState<string | null>(null);
   const [singleApprovalType, setSingleApprovalType] = useState<'weekly' | 'monthly'>('weekly');
@@ -130,6 +133,9 @@ export default function SharedReports() {
         setComments(data.comments ?? []);
         setResourceComments(data.resource_comments ?? []);
         setDecisions(data.approval_decisions ?? []);
+        // Fallback to the per-link list if the edge fn hasn't been redeployed
+        // with approval_decisions_all yet.
+        setAllDecisions(data.approval_decisions_all ?? data.approval_decisions ?? []);
         setLabel(data.label);
         const ir = data.include_reports !== false;
         const im = data.include_monthly_reports === true;
@@ -400,6 +406,41 @@ export default function SharedReports() {
     return s;
   }, [reports, monthlyReports]);
 
+  // "Approved" tab — this brand's approved-report history, newest decision
+  // first. Uses allDecisions (every link's decisions) so history survives link
+  // rotation. Each row joins the decision to its (still-shared) report so the
+  // row can open it; decisions whose report is no longer on the link are skipped.
+  const approvedForBrand = useMemo(() => {
+    const rows: {
+      decision: ApprovalDecisionRow;
+      reportType: 'weekly' | 'monthly';
+      reportId: string;
+      periodLabel: string;
+      monthKey: string;
+    }[] = [];
+    for (const d of allDecisions) {
+      if (d.decision !== 'approved') continue;
+      if (d.report_type === 'monthly') {
+        const r = monthlyReports.find(x => x.id === d.report_id);
+        if (!r || r.brand_id !== activeBrandId) continue;
+        rows.push({
+          decision: d, reportType: 'monthly', reportId: r.id,
+          periodLabel: fmtMonthLabel(r.month), monthKey: r.month,
+        });
+      } else {
+        const r = reports.find(x => x.id === d.report_id);
+        if (!r || r.brand_id !== activeBrandId) continue;
+        rows.push({
+          decision: d, reportType: 'weekly', reportId: r.id,
+          periodLabel: `Week #${r.week_number} — ${formatRange(r.week_start, r.week_end)}`,
+          monthKey: r.week_start.slice(0, 7),
+        });
+      }
+    }
+    rows.sort((a, b) => b.decision.decided_at.localeCompare(a.decision.decided_at));
+    return rows;
+  }, [allDecisions, reports, monthlyReports, activeBrandId]);
+
   const clientName = client?.name ?? 'Client';
   if (loading) return <PublicShell clientName={clientName}><div className="text-center py-5"><Spinner animation="border" /></div></PublicShell>;
   if (err) return <PublicShell clientName={clientName}><Alert variant="danger">{err}</Alert></PublicShell>;
@@ -469,6 +510,9 @@ export default function SharedReports() {
         const filtered = prev.filter(d => !(d.report_id === inserted.report_id && d.report_type === inserted.report_type));
         return [...filtered, inserted];
       });
+      // Keep the "Approved" history tab in sync (decision rows are unique by
+      // id, so a plain de-dup append is enough here).
+      setAllDecisions(prev => prev.some(d => d.id === inserted.id) ? prev : [...prev, inserted]);
       // The edge function also mirrors the decision into report_comments so the
       // approval section's offcanvas thread shows it. Push it into local state.
       const mirrorComment = (data as any).comment;
@@ -967,6 +1011,14 @@ export default function SharedReports() {
                     </Nav.Link>
                   </Nav.Item>
                 )}
+                {(includeReports || includeMonthlyReports) && (
+                  <Nav.Item>
+                    <Nav.Link eventKey="approved" className="d-flex align-items-center gap-2 px-3">
+                      <i className="bi bi-check2-circle" /> Approved
+                      <Badge bg="success">{approvedForBrand.length}</Badge>
+                    </Nav.Link>
+                  </Nav.Item>
+                )}
                 {includeResources && (
                   <Nav.Item>
                     <Nav.Link eventKey="resources" className="d-flex align-items-center gap-2 px-3">
@@ -1166,6 +1218,92 @@ export default function SharedReports() {
                   })()}
                 </Tab.Pane>
 
+                <Tab.Pane eventKey="approved">
+                  <div className="mb-3">
+                    <h5 className="mb-0">{activeBrand.name} — Approved Reports</h5>
+                    <small className="text-muted">
+                      {approvedForBrand.length} approved report{approvedForBrand.length !== 1 ? 's' : ''} — click a row to open the report
+                    </small>
+                  </div>
+                  {approvedForBrand.length === 0 ? (
+                    <div className="text-center py-5 text-muted">
+                      <i className="bi bi-clipboard-check" style={{ fontSize: '2rem' }} /><br />
+                      Nothing approved yet. Reports you approve will show up here.
+                    </div>
+                  ) : (
+                    <div className="d-flex flex-column gap-2">
+                      {approvedForBrand.map(({ decision: d, reportType, reportId, periodLabel, monthKey }) => (
+                        <div
+                          key={d.id}
+                          role="button"
+                          tabIndex={0}
+                          title="Open this report"
+                          className="d-flex align-items-center gap-3 p-3 rounded"
+                          style={{
+                            background: 'white', border: '1px solid #e5e7eb',
+                            borderLeft: '4px solid #198754', cursor: 'pointer',
+                            transition: 'transform .15s, box-shadow .15s',
+                          }}
+                          onClick={() => {
+                            setMonth(monthKey);
+                            if (reportType === 'monthly') { setOpenMonthlyId(reportId); setOpenId(null); }
+                            else { setOpenId(reportId); setOpenMonthlyId(null); }
+                            window.scrollTo({ top: 0 });
+                          }}
+                          onKeyDown={e => { if (e.key === 'Enter') (e.currentTarget as HTMLElement).click(); }}
+                          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)'; (e.currentTarget as HTMLElement).style.boxShadow = '0 8px 24px rgba(0,0,0,.08)'; }}
+                          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.transform = ''; (e.currentTarget as HTMLElement).style.boxShadow = ''; }}
+                        >
+                          <div style={{
+                            width: 44, height: 44, borderRadius: 10, background: '#19875415',
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                          }}>
+                            <i className="bi bi-check-circle-fill" style={{ color: '#198754', fontSize: '1.3rem' }} />
+                          </div>
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div className="d-flex align-items-center gap-2 flex-wrap">
+                              <span className="fw-semibold">{periodLabel}</span>
+                              <Badge bg={reportType === 'weekly' ? 'primary' : 'info'} pill>
+                                {reportType === 'weekly' ? 'Weekly' : 'Monthly'}
+                              </Badge>
+                            </div>
+                            <small className="text-muted d-block mt-1">
+                              <i className="bi bi-person-check me-1" />
+                              Approved by {d.decided_by_name} · {fmtDecidedAt(d.decided_at)}
+                            </small>
+                            {d.comment && (
+                              <small className="text-muted d-block mt-1 text-truncate fst-italic">
+                                “{d.comment}”
+                              </small>
+                            )}
+                          </div>
+                          {(() => {
+                            const threadCount = approvalThreadCount(reportId, reportType);
+                            return (
+                              <Button
+                                size="sm"
+                                variant="outline-success"
+                                title="View the conversation for this report"
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  setThreadFor({
+                                    reportId, reportType,
+                                    brandName: activeBrand.name, periodLabel,
+                                  });
+                                }}
+                              >
+                                <i className="bi bi-chat-left-text me-1" /> Conversation
+                                {threadCount > 0 && <Badge bg="success" pill className="ms-1">{threadCount}</Badge>}
+                              </Button>
+                            );
+                          })()}
+                          <i className="bi bi-chevron-right text-muted" />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Tab.Pane>
+
                 <Tab.Pane eventKey="resources">
                   <div className="d-flex justify-content-between align-items-end mb-3">
                     <div>
@@ -1362,6 +1500,13 @@ export default function SharedReports() {
 function fmtMonthLabel(yyyymm: string): string {
   const [y, m] = yyyymm.split('-').map(Number);
   return new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+}
+
+// Approval timestamps carry a time-of-day, so show date + time.
+function fmtDecidedAt(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 // Inline quick-pick for the 3 most-recent months — replaces the "Change month"

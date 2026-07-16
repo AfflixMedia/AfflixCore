@@ -192,6 +192,7 @@ export default function MonthlyReportDashboard({
               currentAuthorName={commentsConfig.currentAuthorName}
               defaultPublicName={commentsConfig.defaultPublicName}
               onAdd={(b, n, parentId) => commentsConfig.onAdd(feedbackSection, b, n, parentId)}
+              canReply={commentsConfig.canReply}
               highlightCommentId={highlightCommentId ?? undefined}
             />
           )}

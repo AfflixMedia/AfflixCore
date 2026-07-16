@@ -225,7 +225,7 @@ export default function BrandPaidCollabTab({ brandId, brandName, canEdit, onPend
           {groups.map(g => (
             <Fragment key={g.key}>
               <div className="pc-cv-monthhead"><span>{monthLabel(g.key)}</span><span className="pc-cv-monthcount">{g.items.length}</span></div>
-              {g.items.map((c, i) => <CreatorRowRO key={c.id} c={c} idx={i + 1}
+              {g.items.map((c, i) => <CreatorRowRO key={c.id} c={c} idx={i + 1} staffView
                 onToggleAuth={(vi, a) => handleToggleAuth(c.id, vi, a)} />)}
             </Fragment>
           ))}

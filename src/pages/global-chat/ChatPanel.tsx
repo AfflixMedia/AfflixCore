@@ -4,12 +4,13 @@
 // composer. Data + realtime live in the GlobalChat page.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Badge, Spinner } from 'react-bootstrap';
+import { supabase } from '../../lib/supabase';
 import Avatar from '../../components/Avatar';
 import MessageBubble from './MessageBubble';
-import MessageComposer from './MessageComposer';
+import MessageComposer, { MessageComposerHandle } from './MessageComposer';
 import MessageInfoModal from './MessageInfoModal';
 import BrandChatBar from './BrandChatBar';
-import type { ChatBookmark, ChatContact, ChatMessage, ChatEvent, ChatReaction, ConversationView, Participant } from './types';
+import type { ChatBookmark, ChatContact, ChatMessage, ChatEvent, ChatReaction, ChatTagProduct, ChatTagTask, ConversationView, Participant } from './types';
 import { dayLabel, roleLabel, roleBadge, contactName, eventText, messageReceipts, rollupReceipt } from './types';
 
 interface Props {
@@ -29,6 +30,7 @@ interface Props {
   canPost: boolean;                // false → announcement read-only for non-admins
   reactionsByMsg: Map<string, ChatReaction[]>;
   resources: ChatBookmark[];       // conversation bookmarks → "/" resource tags
+  composerRef: React.RefObject<MessageComposerHandle>;  // insertMention from header/modals
   onReact: (messageId: string, emoji: string) => void;
   onOpenContact: (userId: string) => void;  // clicked a @mention → contact card
   onOpenGroup: () => void;         // open the group manage modal
@@ -49,13 +51,40 @@ type Item =
 export default function ChatPanel({
   view, messages, events, loading, hasMoreOlder, loadingOlder, onLoadOlder,
   myId, directory, unreadAnchorId, participantsByUser, members, announcementCount,
-  canPost, reactionsByMsg, resources, onReact, onOpenContact, onOpenGroup,
+  canPost, reactionsByMsg, resources, composerRef, onReact, onOpenContact, onOpenGroup,
   onOpenSettings, onOpenBookmarks,
   replyTo, onReply, onForward, onDelete, onSend, onBack,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [infoMsg, setInfoMsg] = useState<ChatMessage | null>(null);
+  // Header members dropdown (groups/announcement): roster + per-member @ button.
+  const [showMembers, setShowMembers] = useState(false);
+  const membersWrapRef = useRef<HTMLDivElement>(null);
+  // Brand groups: the brand's products + open tasks feed the composer's "@" /
+  // "/" tag popups. Fetched HERE off the same view.conversation.brand_id that
+  // renders BrandChatBar's (working) Products popup, so the ids can't diverge.
+  const brandId = view?.conversation.brand_id ?? null;
+  const [products, setProducts] = useState<ChatTagProduct[]>([]);
+  const [tasks, setTasks] = useState<ChatTagTask[]>([]);
+  useEffect(() => {
+    if (!brandId) { setProducts([]); setTasks([]); return; }
+    let on = true;
+    (async () => {
+      const { data: prod, error: pErr } = await supabase
+        .from('brand_products').select('id,name,standard_commission')
+        .eq('brand_id', brandId).order('name');
+      if (pErr) console.warn('[chat] brand products fetch failed:', pErr.message);
+      if (on) setProducts((prod ?? []) as ChatTagProduct[]);
+      const { data: tk, error: tErr } = await supabase
+        .from('tasks').select('id,title,status')
+        .eq('brand_id', brandId).neq('status', 'done')
+        .order('created_at', { ascending: false }).limit(30);
+      if (tErr) console.warn('[chat] brand tasks fetch failed:', tErr.message);
+      if (on) setTasks((tk ?? []) as ChatTagTask[]);
+    })();
+    return () => { on = false; };
+  }, [brandId]);
   const positionedConvRef = useRef<string | null>(null);
   const prevCountRef = useRef(0);
   // Pre-prepend scrollHeight, captured when an older page is requested so the
@@ -63,6 +92,17 @@ export default function ChatPanel({
   const prependRestoreRef = useRef<number | null>(null);
 
   const convId = view?.conversation.id ?? null;
+
+  // Members dropdown: close on outside click + when switching conversations.
+  useEffect(() => { setShowMembers(false); }, [convId]);
+  useEffect(() => {
+    if (!showMembers) return;
+    const onDoc = (e: MouseEvent) => {
+      if (membersWrapRef.current && !membersWrapRef.current.contains(e.target as Node)) setShowMembers(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [showMembers]);
 
   // Map id -> message for resolving reply quotes.
   const msgById = useMemo(() => {
@@ -191,15 +231,17 @@ export default function ChatPanel({
         <button type="button" className="ac-chat-back" onClick={onBack} title="Back">
           <i className="bi bi-arrow-left" />
         </button>
-        <Avatar
-          name={view.title}
-          src={isGroup || isAnnouncement ? undefined : view.otherUser?.avatar_url}
-          variant={isGroup || isAnnouncement ? 'dark' : 'brand'}
-        />
+        <span className="ac-chat-avatar">
+          <Avatar
+            name={view.title}
+            src={isGroup || isAnnouncement ? undefined : view.otherUser?.avatar_url}
+            variant={isGroup || isAnnouncement ? 'dark' : 'brand'}
+          />
+        </span>
         <div className="min-w-0 flex-grow-1">
           <div className="d-flex align-items-center gap-2">
             {isAnnouncement && <i className="bi bi-megaphone-fill text-warning" />}
-            <span className="fw-semibold text-truncate">{view.title}</span>
+            <span className="ac-chat-title fw-semibold text-truncate">{view.title}</span>
             {!isGroup && !isAnnouncement && view.otherUser && (
               <Badge bg={roleBadge(view.otherUser.role)} className="ac-role-badge">
                 {roleLabel(view.otherUser.role, view.otherUser.is_superbob)}
@@ -210,14 +252,62 @@ export default function ChatPanel({
             <div className="text-muted small text-truncate">{view.otherUser.email}</div>
           )}
           {(isGroup || isAnnouncement) && (
-            <div className="text-muted small text-truncate">
-              {memberCount} member{memberCount === 1 ? '' : 's'}
-              {isAnnouncement && ' · announcement'}
+            <div className="ac-chat-members-wrap" ref={membersWrapRef}>
+              <button type="button" className="ac-chat-members-btn"
+                aria-expanded={showMembers} title="Show members"
+                onClick={() => setShowMembers(s => !s)}>
+                <i className="bi bi-people-fill" />
+                {memberCount} member{memberCount === 1 ? '' : 's'}
+                {isAnnouncement && ' · announcement'}
+                <i className={`bi bi-chevron-${showMembers ? 'up' : 'down'}`} />
+              </button>
+              {showMembers && (
+                <div className="ac-members-pop">
+                  <div className="ac-members-pop-head">
+                    <i className="bi bi-people-fill me-1" />Members
+                    <span className="ac-members-pop-n">{memberCount}</span>
+                  </div>
+                  <div className="ac-members-pop-list">
+                    {[...members]
+                      .sort((a, b) => (a.id === myId ? -1 : b.id === myId ? 1 : contactName(a).localeCompare(contactName(b))))
+                      .map(c => {
+                        const self = c.id === myId;
+                        return (
+                          <div key={c.id} className="ac-member-row">
+                            <button type="button" className="ac-member-row-main"
+                              title={self ? undefined : 'View contact'}
+                              onClick={() => { if (!self) { setShowMembers(false); onOpenContact(c.id); } }}>
+                              <Avatar name={contactName(c)} src={c.avatar_url} size="sm" />
+                              <span className="ac-member-row-name text-truncate">
+                                {self ? 'You' : contactName(c)}
+                              </span>
+                              <Badge bg={roleBadge(c.role)} className="ac-role-badge">
+                                {roleLabel(c.role, c.is_superbob)}
+                              </Badge>
+                            </button>
+                            {!self && canPost && (
+                              <button type="button" className="ac-member-mention"
+                                title={`Mention ${contactName(c)} in the chat`}
+                                aria-label={`Mention ${contactName(c)}`}
+                                onClick={() => {
+                                  composerRef.current?.insertMention(contactName(c));
+                                  setShowMembers(false);
+                                }}>
+                                <i className="bi bi-at" />
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
         {view.conversation.brand_id && (
-          <BrandChatBar brandId={view.conversation.brand_id} brandName={view.title} />
+          <BrandChatBar brandId={view.conversation.brand_id} brandName={view.title}
+            onTagProduct={canPost ? (name) => composerRef.current?.insertProductTag(name) : undefined} />
         )}
         <button type="button" className="ac-chat-action" title="Bookmarks" onClick={onOpenBookmarks}>
           <i className="bi bi-bookmark-star" />
@@ -308,6 +398,7 @@ export default function ChatPanel({
 
       <MessageComposer
         key={view.conversation.id}
+        ref={composerRef}
         readOnly={!canPost}
         readOnlyNote={
           view.archived ? 'You’re no longer a member of this group — read only.'
@@ -316,6 +407,9 @@ export default function ChatPanel({
         readOnlyIcon={view.archived ? 'bi-archive' : 'bi-megaphone'}
         mentionables={mentionables}
         resources={resources}
+        products={products}
+        tasks={tasks}
+        brandId={view.conversation.brand_id}
         replyTo={replyTo}
         replyToSender={replyTo?.sender_id ? directory.get(replyTo.sender_id) ?? null : null}
         onCancelReply={() => onReply(null)}

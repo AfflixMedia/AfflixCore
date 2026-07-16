@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/AuthContext';
 import { useNotifications } from '../notifications/NotificationsContext';
 import TemplatePicker from '../components/canvas/TemplatePicker';
+import ReportConversationOffcanvas, { ConvReport } from '../components/ReportConversationOffcanvas';
 
 function thisMonth() {
   const d = new Date();
@@ -75,7 +76,10 @@ const REVIEW_PILL: Record<string, { bg: string; text?: string; icon: string; lab
   rejected:  { bg: 'danger',  icon: 'bi-arrow-counterclockwise', label: 'Changes requested' },
 };
 
-type StatusTab = 'all' | 'draft' | 'submitted' | 'unread';
+type StatusTab = 'all' | 'draft' | 'submitted' | 'unread' | 'approved';
+
+// Latest client "approved" decision on a report (for the Approved tab).
+interface ApprovedInfo { name: string; at: string; }
 
 export default function MonthlyReports() {
   const { profile, user } = useAuth();
@@ -102,6 +106,10 @@ export default function MonthlyReports() {
   const [reports, setReports] = useState<MonthlyReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  // Client approvals + comment counts (for the Approved tab + conversation icon).
+  const [approvedMap, setApprovedMap] = useState<Map<string, ApprovedInfo>>(new Map());
+  const [commentCounts, setCommentCounts] = useState<Map<string, number>>(new Map());
+  const [convReport, setConvReport] = useState<ConvReport | null>(null);
 
   // header state
   const [fMonth, setFMonth] = useState(thisMonth());
@@ -135,6 +143,27 @@ export default function MonthlyReports() {
     setApcs(((aRes as any).data ?? []) as ApcLite[]);
     setReports((rRes.data as MonthlyReport[]) ?? []);
     setLoading(false);
+    loadFeedbackMeta();
+  };
+
+  // Client approvals + comment counts — RLS scopes both to the viewer's brands
+  // (bob/team_lead/apc all have read policies). Report ids are globally unique,
+  // so filtering by report_type isn't needed to look them up per card.
+  const loadFeedbackMeta = async () => {
+    const [decRes, cmtRes] = await Promise.all([
+      supabase.from('report_approval_decisions')
+        .select('report_id,decided_by_name,decided_at').eq('decision', 'approved'),
+      supabase.from('report_comments').select('report_id'),
+    ]);
+    const am = new Map<string, ApprovedInfo>();
+    (decRes.data ?? []).forEach((d: any) => {
+      const cur = am.get(d.report_id);
+      if (!cur || d.decided_at > cur.at) am.set(d.report_id, { name: d.decided_by_name, at: d.decided_at });
+    });
+    setApprovedMap(am);
+    const cc = new Map<string, number>();
+    (cmtRes.data ?? []).forEach((c: any) => cc.set(c.report_id, (cc.get(c.report_id) ?? 0) + 1));
+    setCommentCounts(cc);
   };
 
   useEffect(() => { load(); }, [isBob]);
@@ -165,6 +194,7 @@ export default function MonthlyReports() {
       if (statusTab === 'draft' && r.status !== 'draft') return false;
       if (statusTab === 'submitted' && r.status !== 'submitted') return false;
       if (statusTab === 'unread' && (unreadByReport.get(r.id) ?? 0) === 0) return false;
+      if (statusTab === 'approved' && !approvedMap.has(r.id)) return false;
       if (fBrand && r.brand_id !== fBrand) return false;
       if (fApc && r.created_by !== fApc) return false;
       if (fSearch) {
@@ -176,15 +206,16 @@ export default function MonthlyReports() {
       }
       return true;
     });
-  }, [reports, fMonth, statusTab, unreadByReport, fBrand, fApc, fSearch, brandMap, apcMap]);
+  }, [reports, fMonth, statusTab, unreadByReport, approvedMap, fBrand, fApc, fSearch, brandMap, apcMap]);
 
   const tabCounts = useMemo(() => {
     const monthReports = reports.filter(r => r.month === fMonth);
     const drafts = monthReports.filter(r => r.status === 'draft').length;
     const submitted = monthReports.filter(r => r.status === 'submitted').length;
     const unread = monthReports.filter(r => (unreadByReport.get(r.id) ?? 0) > 0).length;
-    return { all: monthReports.length, drafts, submitted, unread };
-  }, [reports, fMonth, unreadByReport]);
+    const approved = monthReports.filter(r => approvedMap.has(r.id)).length;
+    return { all: monthReports.length, drafts, submitted, unread, approved };
+  }, [reports, fMonth, unreadByReport, approvedMap]);
 
   const openCreate = (b: Brand) => {
     if (b.client_status === 'closed') {
@@ -337,6 +368,10 @@ export default function MonthlyReports() {
           <i className="bi bi-chat-left-dots me-1" /> New replies
           <span className="wr-tab-count">{tabCounts.unread}</span>
         </button>
+        <button className={`wr-tab ${statusTab === 'approved' ? 'is-active' : ''}`} onClick={() => setStatusTab('approved')}>
+          <i className="bi bi-patch-check me-1" /> Approved
+          <span className="wr-tab-count">{tabCounts.approved}</span>
+        </button>
       </div>
 
       {/* Grid */}
@@ -367,7 +402,15 @@ export default function MonthlyReports() {
             const ava = avatarFor(b?.name ?? '??');
             const sb = statusBadge(r);
             const newCount = unreadByReport.get(r.id) ?? 0;
+            const approved = approvedMap.get(r.id);
+            const cmtCount = commentCounts.get(r.id) ?? 0;
             const apcName = a?.full_name || a?.email || (r.created_by === user?.id ? 'You' : '—');
+            const openConv = (e: React.MouseEvent) => {
+              e.stopPropagation();
+              setConvReport({
+                id: r.id, type: 'monthly', title: b?.name ?? 'Report', subtitle: fmtMonth(r.month),
+              });
+            };
             return (
               <div
                 key={r.id}
@@ -389,6 +432,12 @@ export default function MonthlyReports() {
                     </div>
                   </div>
                   <div className="wr-card-top-right">
+                    {approved && (
+                      <Badge bg="success" title={`Approved by ${approved.name}`}>
+                        <i className="bi bi-patch-check-fill me-1" />
+                        Client approved
+                      </Badge>
+                    )}
                     {r.review_status && REVIEW_PILL[r.review_status] && (
                       <Badge bg={REVIEW_PILL[r.review_status].bg} text={REVIEW_PILL[r.review_status].text as any}>
                         <i className={`bi ${REVIEW_PILL[r.review_status].icon} me-1`} />
@@ -416,6 +465,16 @@ export default function MonthlyReports() {
                     <span className="wr-unread-pill">
                       <i className="bi bi-chat-left-text me-1" />{newCount} new
                     </span>
+                  )}
+                  {cmtCount > 0 && (
+                    <Button
+                      size="sm" variant="outline-secondary" className="ms-auto"
+                      onClick={openConv}
+                      title="View the client conversation for this report"
+                    >
+                      <i className="bi bi-chat-left-text me-1" />
+                      Conversation
+                    </Button>
                   )}
                   {isBob && (
                     <Button
@@ -520,6 +579,13 @@ export default function MonthlyReports() {
           </Modal.Footer>
         </Form>
       </Modal>
+
+      <ReportConversationOffcanvas
+        report={convReport}
+        canReply={isBob}
+        currentAuthorName={profile?.full_name || profile?.email || 'User'}
+        onClose={() => setConvReport(null)}
+      />
     </div>
   );
 }

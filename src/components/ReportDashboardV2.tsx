@@ -27,6 +27,8 @@ export interface CommentsConfig {
   currentAuthorName?: string;
   defaultPublicName?: string;
   onAdd: (section: CommentSection, body: string, authorName: string, parentId?: string) => Promise<void>;
+  /** Gate who may reply to client feedback (e.g. Bob-only). Defaults to true. */
+  canReply?: boolean;
 }
 
 export interface ApprovalDecisionView {
@@ -382,6 +384,7 @@ export default function ReportDashboard({
               currentAuthorName={commentsConfig.currentAuthorName} defaultPublicName={commentsConfig.defaultPublicName}
               onAdd={(b, n, parentId) => commentsConfig.onAdd(feedbackSection, b, n, parentId)}
               highlightCommentId={highlightCommentId ?? undefined}
+              canReply={commentsConfig.canReply}
             />
           )}
         </Offcanvas.Body>

@@ -102,15 +102,17 @@ serve(async (req) => {
       mirrorComment = cm;
     }
 
-    // Notify Bob + assigned APCs (best-effort)
+    // Notify Bob + assigned APCs + the brand's Team Lead (best-effort)
     try {
-      const [{ data: bobs }, { data: apcRows }] = await Promise.all([
+      const [{ data: bobs }, { data: apcRows }, { data: leadRows }] = await Promise.all([
         admin.from('profiles').select('id').eq('role', 'bob'),
         admin.from('apc_brands').select('apc_id').eq('brand_id', report.brand_id),
+        admin.from('team_lead_brands').select('team_lead_id').eq('brand_id', report.brand_id),
       ]);
       const recipientIds = new Set<string>();
       (bobs ?? []).forEach((p: any) => recipientIds.add(p.id));
       (apcRows ?? []).forEach((r: any) => recipientIds.add(r.apc_id));
+      (leadRows ?? []).forEach((r: any) => recipientIds.add(r.team_lead_id));
 
       const verb = decision === 'approved' ? 'approved' : 'requested changes on';
       const periodLabel = report_type === 'monthly'

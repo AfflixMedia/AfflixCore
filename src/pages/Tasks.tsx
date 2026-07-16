@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, FormEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Button, Card, Modal, Form, Spinner, Alert, Badge } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/AuthContext';
@@ -100,6 +101,7 @@ export default function Tasks() {
   // below naturally comes back empty; no Remind / Repeat, like an APC).
   const isAdsManager = profile?.role === 'ads_manager';
   const isApc = profile?.role === 'apc' || isAdsManager;
+  const isTeamLead = profile?.role === 'team_lead';
   const isBob = profile?.role === 'bob';
   const isSuperBob = isBob && !!profile?.is_superbob;
   // Internal handlers assign to the APCs of their brands, and upward to their
@@ -153,6 +155,19 @@ export default function Tasks() {
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null); // editing a whole multi-assignee group
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [detailId, setDetailId] = useState<string | null>(null); // task open in detail popup
+  // Deep link: /tasks?t=<id> (chat task tags) opens that task's detail popup.
+  // Consumed once — the param is stripped so refresh/back isn't sticky. The
+  // popup appears once the task list has loaded (detailTask lookup); a task
+  // the viewer can't see (RLS) simply never resolves.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const tid = searchParams.get('t');
+    if (!tid) return;
+    setDetailId(tid);
+    const next = new URLSearchParams(searchParams);
+    next.delete('t');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
   // Right-rail person whose task list popup is open (null = closed).
   const [railPerson, setRailPerson] = useState<PersonLite | null>(null);
   const brandBarRef = useRef<HTMLDivElement>(null);
@@ -189,10 +204,15 @@ export default function Tasks() {
     const [tRes, brRes, apcRes, tlRes, hRes, fRes, lRes, abRes, tlbRes, recRes, remRes, runRes, bobRes, myLeadRes, amRes] = await Promise.all([
       supabase.from('tasks').select('*').order('status').order('due_date', { nullsFirst: false }).order('created_at', { ascending: false }),
       canCreate ? supabase.from('brands').select('id,name').order('name') : Promise.resolve({ data: [], error: null }),
-      canAssign ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('role', 'apc').order('full_name') : Promise.resolve({ data: [], error: null }),
+      // A Team Lead's picker/rail only shows THEIR team (an unassigned APC
+      // would fail the manages_apc insert gate anyway); Bob sees every APC.
+      canAssign ? (isTeamLead
+        ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('role', 'apc').eq('team_lead_id', myId ?? '').order('full_name')
+        : supabase.from('profiles').select('id,full_name,email,avatar_url').eq('role', 'apc').order('full_name')) : Promise.resolve({ data: [], error: null }),
       // Internal handlers also load Team Leads — RLS scopes them to the leads
       // of the handler's own brands (assignable upward + shown as brand owners).
-      (isBob || isInternalHandler) ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('role', 'team_lead').order('full_name') : Promise.resolve({ data: [], error: null }),
+      // A Team Lead loads the OTHER leads (assignable peer-to-peer).
+      (isBob || isInternalHandler || isTeamLead) ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('role', 'team_lead').neq('id', myId ?? '').order('full_name') : Promise.resolve({ data: [], error: null }),
       isBob ? supabase.from('profiles').select('id,full_name,email,avatar_url').eq('role', 'paid_collab_handler').eq('is_internal_handler', true).order('full_name') : Promise.resolve({ data: [], error: null }),
       supabase.from('task_folders').select('id,name,color,owner_id').order('name'),
       supabase.from('task_labels').select('id,name,color,owner_id').order('name'),
@@ -461,12 +481,13 @@ export default function Tasks() {
   };
 
   // Click a brand chip → New Task with the brand + its owner pre-filled.
-  // APC owns the brand (apc_brands); Bob also falls back to the brand's Team Lead.
+  // APC owns the brand (apc_brands); Bob also falls back to the brand's Team
+  // Lead. An APC assigns upward, so their prefill is their own Team Lead.
   const openAddForBrand = (brandId: string) => {
     setEditingId(null); setEditingGroupId(null); setRepeatOpen(false);
     const apc = brandApc.get(brandId);
     const lead = brandLead.get(brandId);
-    const owner = apc ?? (isBob ? lead : undefined);
+    const owner = isApc ? (profile?.team_lead_id ?? undefined) : (apc ?? (isBob ? lead : undefined));
     setForm({
       assignee_ids: owner ? [owner] : [],
       brand_id: brandId, title: '', description: '', due_date: '',
@@ -1045,8 +1066,9 @@ export default function Tasks() {
 
       {/* Brand quick-assign — collapsed to one calm row by default; expanding
           shows the brand chips (click one to start a task with its APC / Team
-          Lead auto-filled). Team Leads see only their brands. */}
-      {canAssign && brands.length > 0 && (
+          Lead auto-filled). Team Leads / APCs see only their brands; an APC's
+          chip pre-fills their own Team Lead (they assign upward). */}
+      {canCreate && brands.length > 0 && (
         <div className={`ac-brandbar-wrap ${brandBarOpen ? 'open' : ''}`}>
           <button type="button" className="ac-brandbar-toggle" aria-expanded={brandBarOpen}
             onClick={toggleBrandBar}>
@@ -1237,7 +1259,9 @@ export default function Tasks() {
                         : viewFilter === 'byme' ? "You haven't assigned any active tasks"
                         : 'No active tasks'}</h5>
                       <p>{canAssign
-                        ? 'Create a task and assign it to one of your APCs.'
+                        ? (isTeamLead
+                          ? 'Create a task and assign it to one of your APCs or another Team Lead.'
+                          : 'Create a task and assign it to one of your APCs.')
                         : isApc
                           ? 'Tasks assigned to you appear here — and you can assign a task to your Team Lead or Bob.'
                           : 'Tasks your Team Lead assigns will appear here.'}</p>
@@ -1269,11 +1293,13 @@ export default function Tasks() {
 
           {/* Right rail: click an avatar to see that person's open tasks (and
               assign more from there) — or, when they have none, to start a new
-              task straight away. Bob sees everyone; an internal handler sees
-              the Bobs / Team Leads / APCs of their brands (their upward + APC
-              targets — the other groups come back empty). Native scrollbar
-              hidden; up/down arrows appear on overflow. */}
-          {(isBob || isInternalHandler) && (teamLeads.length > 0 || myApcs.length > 0 || handlers.length > 0 || adsManagers.length > 0 || otherBobs.length > 0) && (
+              task straight away. Every role that can create tasks gets it —
+              each group only holds the people that role may assign to (Bob:
+              everyone; Team Lead: their APCs + the other leads; APC: their
+              lead + the Bobs; internal handler: their brands' people — the
+              other groups come back empty). Native scrollbar hidden; up/down
+              arrows appear on overflow. */}
+          {canCreate && (teamLeads.length > 0 || myApcs.length > 0 || handlers.length > 0 || adsManagers.length > 0 || otherBobs.length > 0) && (
             <aside className="ac-tl-rail" aria-label="Assign a task to a Bob, Team Lead, APC, Ads Manager, or Handler">
               {tlOverflow && (
                 <button type="button" className="ac-tl-arrow" aria-label="Scroll up"
@@ -1282,7 +1308,7 @@ export default function Tasks() {
               <div className="ac-tl-track" ref={tlRailRef}>
                 {otherBobs.length > 0 && <div className="ac-tl-rail-head">Bobs</div>}
                 {otherBobs.map(b => <RailBtn key={b.id} p={b} variant="dark" />)}
-                {teamLeads.length > 0 && <div className={`ac-tl-rail-head ${otherBobs.length > 0 ? 'mt-2' : ''}`}>Team Leads</div>}
+                {teamLeads.length > 0 && <div className={`ac-tl-rail-head ${otherBobs.length > 0 ? 'mt-2' : ''}`}>{isApc ? 'My Team Lead' : 'Team Leads'}</div>}
                 {teamLeads.map(tl => <RailBtn key={tl.id} p={tl} variant="dark" />)}
                 {myApcs.length > 0 && <div className="ac-tl-rail-head mt-2">APCs</div>}
                 {myApcs.map(apc => <RailBtn key={apc.id} p={apc} />)}
@@ -1802,8 +1828,9 @@ export default function Tasks() {
 }
 
 // ---- Searchable (multi-)select for task assignees ----
-// Bob picks from the other Bobs + Team Leads + APCs + internal Handlers, a Team
-// Lead or internal Handler from APCs, and an APC assigns UP: their own Team
+// Bob picks from the other Bobs + Team Leads + APCs + internal Handlers, a
+// Team Lead from their APCs + the OTHER Team Leads, an internal Handler from
+// their brands' APCs/leads, and an APC assigns UP: their own Team
 // Lead + the Bobs. APC rows show the brands under that APC. In `multiple`
 // mode (new task) selecting fans the task out to everyone chosen; on edit it acts
 // as a single-select since a task row has one assignee.
@@ -1911,7 +1938,7 @@ function AssigneePicker({ apcs, leads, handlers = [], adsManagers = [], bobs = [
                   <i className="bi bi-people me-1" />Select all APCs{needle ? ' (filtered)' : ''} ({fApcs.length})
                 </button>
               )}
-              {isBob && fLeads.length > 0 && (
+              {!isApc && fLeads.length > 0 && (
                 <button type="button" onClick={() => addAll(fLeads)}>
                   <i className="bi bi-people me-1" />Select all Team Leads{needle ? ' (filtered)' : ''} ({fLeads.length})
                 </button>
@@ -1933,7 +1960,7 @@ function AssigneePicker({ apcs, leads, handlers = [], adsManagers = [], bobs = [
                 {fBobs.map(p => Row(p))}
               </>
             )}
-            {(isBob || isApc || isInternalHandler) && fLeads.length > 0 && (
+            {fLeads.length > 0 && (
               <>
                 <div className="ac-assignee-group">{isApc ? 'My Team Lead' : 'Team Leads'}</div>
                 {fLeads.map(p => Row(p))}
@@ -1941,7 +1968,7 @@ function AssigneePicker({ apcs, leads, handlers = [], adsManagers = [], bobs = [
             )}
             {fApcs.length > 0 && (
               <>
-                {(isBob || isInternalHandler) && (fLeads.length > 0 || fHandlers.length > 0 || fAdsManagers.length > 0 || fBobs.length > 0) && <div className="ac-assignee-group">APCs</div>}
+                {(fLeads.length > 0 || fHandlers.length > 0 || fAdsManagers.length > 0 || fBobs.length > 0) && <div className="ac-assignee-group">APCs</div>}
                 {fApcs.map(p => Row(p, brandsByApc?.get(p.id)))}
               </>
             )}

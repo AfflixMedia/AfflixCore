@@ -48,3 +48,19 @@ export async function uploadAvatar(userId: string, file: File): Promise<string> 
   if (!data?.publicUrl) throw new Error('Could not resolve public URL for uploaded avatar');
   return data.publicUrl;
 }
+
+// Contract signature images (handler contract template) share the avatars
+// bucket — same per-uid folder write RLS, public read. Always PNG (drawn on
+// canvas, or an uploaded SVG rasterized client-side before calling this).
+export async function uploadSignature(userId: string, blob: Blob): Promise<string> {
+  const path = `${userId}/signature-${Date.now()}.png`;
+  const { error } = await supabase.storage.from(AVATAR_BUCKET).upload(path, blob, {
+    cacheControl: '3600',
+    upsert: true,
+    contentType: 'image/png',
+  });
+  if (error) throw error;
+  const { data } = supabase.storage.from(AVATAR_BUCKET).getPublicUrl(path);
+  if (!data?.publicUrl) throw new Error('Could not resolve public URL for uploaded signature');
+  return data.publicUrl;
+}

@@ -34,9 +34,23 @@ export function brandDetailId(pathname: string): string | null {
   return m ? m[1] : null;
 }
 
+// True once the window has been scrolled — the floating fabs stay hidden at
+// the top of the page and fade in on scroll (shared with BrandChatFab).
+export function usePageScrolled(threshold = 8): boolean {
+  const [scrolled, setScrolled] = useState(() => window.scrollY > threshold);
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > threshold);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [threshold]);
+  return scrolled;
+}
+
 export default function AdsNotesFab() {
   const { profile } = useAuth();
   const location = useLocation();
+  const scrolled = usePageScrolled();
   const isAdsManager = profile?.role === 'ads_manager';
 
   const brandId = brandDetailId(location.pathname);
@@ -152,7 +166,7 @@ export default function AdsNotesFab() {
   // without painting the full-screen .pc-app background box.
   return (
     <div className="pc-app" style={{ display: 'contents' }}>
-      <button className="pc-notesfab" onClick={() => setOpen(true)}
+      <button className={`pc-notesfab${scrolled ? '' : ' pc-fab-hidden'}`} onClick={() => setOpen(true)}
         title={isBossView ? 'Ads Manager notes' : 'Notes'} aria-label="Open notes">
         <i className="bi bi-journal-text" />
         {due > 0 && <span className="pc-notesfab-badge">{due}</span>}

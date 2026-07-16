@@ -68,6 +68,9 @@ export interface HandlerCreator {
   client_paid_confirmed_name?: string | null;
   onboarded_on: string | null;
   completed_on: string | null;
+  // Link to the signed contract (e.g. Google Drive), pasted by the handler
+  // after the creator returns the signed agreement PDF.
+  contract_url?: string | null;
   // Last time the posted-video count increased (drives the 1-week follow-up rule).
   video_count_updated_at?: string | null;
   video_codes: VideoCode[];
@@ -222,6 +225,7 @@ export async function addCreator(data: Record<string, any>) {
     category: data.category || '',
     payment_status: data.payment_status || 'videos_in_progress',
     onboarded_on: data.onboarded_on || null,
+    contract_url: (data.contract_url || '').trim(),
     video_codes: Array.isArray(data.video_codes) ? data.video_codes : [],
     monthly: data.monthly && typeof data.monthly === 'object' ? data.monthly : {},
     products: Array.isArray(data.products) ? data.products : [],
@@ -239,6 +243,35 @@ export async function updateCreator(id: string, patch: Record<string, any>) {
 
 export async function deleteCreator(id: string) {
   const { error } = await supabase.from('handler_collab_creators').delete().eq('id', id);
+  if (error) throw error;
+}
+
+/* ── contract template (signature block) settings — one row per handler ── */
+export interface ContractSettings {
+  rep_name: string;
+  signature_url: string;
+}
+
+export async function getContractSettings(): Promise<ContractSettings | null> {
+  const { data: u } = await supabase.auth.getUser();
+  const uid = u?.user?.id;
+  if (!uid) return null;
+  const { data, error } = await supabase
+    .from('handler_contract_settings')
+    .select('rep_name, signature_url')
+    .eq('owner_id', uid)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as ContractSettings) || null;
+}
+
+export async function saveContractSettings(patch: ContractSettings) {
+  const { data: u } = await supabase.auth.getUser();
+  const uid = u?.user?.id;
+  if (!uid) throw new Error('Not signed in');
+  const { error } = await supabase
+    .from('handler_contract_settings')
+    .upsert({ owner_id: uid, ...patch, updated_at: new Date().toISOString() });
   if (error) throw error;
 }
 
@@ -372,6 +405,7 @@ export interface HandlerNote {
   id: string;
   owner_id: string;
   brand_id: string | null;
+  creator_id: string | null;   // optional "creator-wise" link → handler_collab_creators
   month: string | null;
   title: string;
   body: string;
@@ -389,6 +423,18 @@ export interface HandlerNote {
 }
 
 export type NotePatch = Partial<Omit<HandlerNote, 'id' | 'owner_id' | 'created_at' | 'updated_at'>>;
+
+/* A note's creator_id points at ONE handler_collab_creators row (a deal), but
+   the UI groups creator notes by "the same creator" across months WITHIN a
+   brand — the repo-wide identity convention (handle, else name; mirrors
+   creatorIdentityKey in lib/paidCollabSchema). */
+export function creatorNoteKey(c: { brand_id?: string | null; tiktok_handle?: string | null; name?: string | null }): string {
+  const first = String(c.tiktok_handle || '').split(/[\n,]+/).map(s => s.trim()).filter(Boolean)[0] || '';
+  const handle = (first.startsWith('http') ? (first.replace(/\/+$/, '').split('/').pop() || '') : first)
+    .replace(/^@+/, '').toLowerCase().trim();
+  const ident = handle ? `h:${handle}` : `n:${String(c.name || '').toLowerCase().trim()}`;
+  return `${c.brand_id || ''}|${ident}`;
+}
 
 // ownerId: restrict to one owner's notes — needed for Bob, whose read-all RLS
 // would otherwise pull every user's notes onto his personal board.

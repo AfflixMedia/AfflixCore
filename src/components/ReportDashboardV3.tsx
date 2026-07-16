@@ -1134,7 +1134,8 @@ export default function ReportDashboardV3({
                 comments={commentsConfig.comments} mode={commentsConfig.mode}
                 currentAuthorName={commentsConfig.currentAuthorName} defaultPublicName={commentsConfig.defaultPublicName}
                 onAdd={(b, n, parentId) => commentsConfig.onAdd(feedbackSection, b, n, parentId)}
-                highlightCommentId={highlightCommentId ?? undefined} />
+                highlightCommentId={highlightCommentId ?? undefined}
+                canReply={commentsConfig.canReply} />
             )}
           </Offcanvas.Body>
         </Offcanvas>

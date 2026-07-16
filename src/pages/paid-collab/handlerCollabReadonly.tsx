@@ -27,11 +27,18 @@ export const STATUS = {
   paid: { label: 'Payment Sent', cls: 'sent' },
 } as Record<string, { label: string; cls: string }>;
 
-// Client-facing status: the handler keeps "Payment Pending" hidden until they flip
-// the per-creator toggle on, so all read views (share link, client portal, Bob's
-// brand tab) mask a not-yet-shared pending status back to "Videos in Progress".
-export const clientStatus = (c: HandlerCreator) =>
-  (c.payment_status === 'pending' && !c.pending_visible_to_client) ? 'videos_in_progress' : c.payment_status;
+// Status as shown outside the handler workspace. All read views mask a
+// "Payment Pending" the handler hasn't shared yet (per-creator toggle) back to
+// "Videos in Progress". Additionally, the internal "Follow-up Required" nudge is
+// staff-only: client-facing views (client portal + share link, staff=false) only
+// ever see three states — Videos in Progress / Payment Pending / Payment Sent —
+// while staff views (Bob/APC brand tab) keep it.
+export const clientStatus = (c: HandlerCreator, staff = false) => {
+  let s = c.payment_status;
+  if (s === 'pending' && !c.pending_visible_to_client) s = 'videos_in_progress';
+  if (!staff && s === 'follow_up') s = 'videos_in_progress';
+  return s;
+};
 // True when this creator's payment-pending status is visible to the client.
 export const isPendingVisible = (c: HandlerCreator) => clientStatus(c) === 'pending';
 
@@ -146,13 +153,16 @@ function PayoutRO({ paypal, zelle }: { paypal?: string | null; zelle?: string | 
   );
 }
 
-export function CreatorRowRO({ c, idx, onToggleAuth, onConfirmPaid }: {
+export function CreatorRowRO({ c, idx, onToggleAuth, onConfirmPaid, staffView }: {
   c: HandlerCreator; idx: number;
   // When provided, the "Authorised" cell becomes a clickable checkbox (APC/Bob).
   onToggleAuth?: (videoIndex: number, auth: boolean) => void;
   // When provided (client share view) and the creator is payment-pending, the
   // expanded panel shows a "process payment & mark as paid" toggle for the client.
   onConfirmPaid?: (confirmed: boolean) => Promise<void> | void;
+  // Staff surfaces (Bob/APC brand tab) keep the internal "Follow-up Required"
+  // status; client/share views mask it (see clientStatus).
+  staffView?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [paidBusy, setPaidBusy] = useState(false);
@@ -175,7 +185,7 @@ export function CreatorRowRO({ c, idx, onToggleAuth, onConfirmPaid }: {
   const adCount = codes.filter(v => (v.adCode || '').trim()).length;
   const authCount = codes.filter(v => v.auth).length;
   const allAuth = adCount > 0 && authCount === adCount;
-  const st = STATUS[clientStatus(c)] || STATUS.videos_in_progress;
+  const st = STATUS[clientStatus(c, staffView)] || STATUS.videos_in_progress;
   const prodList = creatorProducts(c);
   const initials = (c.name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?';
 
@@ -346,20 +356,21 @@ export function CreatorListHeadRO() {
 }
 
 const STATUS_GROUP_ORDER = ['pending', 'follow_up', 'videos_in_progress', 'paid'];
-const statusGroupKey = (c: HandlerCreator) => { const s = clientStatus(c); return STATUS[s] ? s : 'videos_in_progress'; };
+const statusGroupKey = (c: HandlerCreator, staff?: boolean) => { const s = clientStatus(c, staff); return STATUS[s] ? s : 'videos_in_progress'; };
 
 // Read-only creator list grouped by payment status (Payment Pending → Videos in
 // Progress → Payment Sent), each introduced by a labelled divider — mirrors the
 // handler Workspace drilldown. `creators` should be pre-sorted; order is preserved
 // within each group and the # index runs continuously top-to-bottom.
-export function CreatorStatusGroupsRO({ creators, onToggleAuth, onConfirmPaid }: {
+export function CreatorStatusGroupsRO({ creators, onToggleAuth, onConfirmPaid, staffView }: {
   creators: HandlerCreator[];
   onToggleAuth?: (creatorId: string, videoIndex: number, auth: boolean) => void;
   onConfirmPaid?: (creatorId: string, confirmed: boolean) => Promise<void> | void;
+  staffView?: boolean;
 }) {
   let n = 0;
   const groups = STATUS_GROUP_ORDER
-    .map(val => ({ val, st: STATUS[val], items: creators.filter(c => statusGroupKey(c) === val) }))
+    .map(val => ({ val, st: STATUS[val], items: creators.filter(c => statusGroupKey(c, staffView) === val) }))
     .filter(g => g.items.length > 0);
   return (
     <>
@@ -371,7 +382,7 @@ export function CreatorStatusGroupsRO({ creators, onToggleAuth, onConfirmPaid }:
               <span className="pc-ct-group-count">{g.items.length}</span>
             </span>
           </div>
-          {g.items.map(c => { n += 1; return <CreatorRowRO key={c.id} c={c} idx={n} onToggleAuth={onToggleAuth ? (i, a) => onToggleAuth(c.id, i, a) : undefined} onConfirmPaid={onConfirmPaid ? (v) => onConfirmPaid(c.id, v) : undefined} />; })}
+          {g.items.map(c => { n += 1; return <CreatorRowRO key={c.id} c={c} idx={n} staffView={staffView} onToggleAuth={onToggleAuth ? (i, a) => onToggleAuth(c.id, i, a) : undefined} onConfirmPaid={onConfirmPaid ? (v) => onConfirmPaid(c.id, v) : undefined} />; })}
         </Fragment>
       ))}
     </>
@@ -389,7 +400,6 @@ export interface PerfBrand { id: string; name: string; client: string | null }
 
 const PR_STATUS: Record<string, { label: string; cls: string; color: string }> = {
   videos_in_progress: { label: 'In progress', cls: 'prog', color: '#1259C3' },
-  follow_up:          { label: 'Follow-up',   cls: 'fup',  color: '#C62828' },
   pending:            { label: 'Pending',     cls: 'pend', color: '#E8862E' },
   paid:               { label: 'Paid',        cls: 'paid', color: '#198754' },
 };
@@ -453,7 +463,7 @@ export function PerformanceReport({ brand, creators, onDiscuss }: {
   }, [creators, isWeekly, weekKeys]);
 
   const payMix = useMemo(() => {
-    const m: any = { videos_in_progress: 0, follow_up: 0, pending: 0, paid: 0 };
+    const m: any = { videos_in_progress: 0, pending: 0, paid: 0 };
     creators.forEach(c => { const s = clientStatus(c); m[s] = (m[s] || 0) + 1; });
     return Object.keys(PR_STATUS).map(k => ({ name: PR_STATUS[k].label, value: m[k] || 0, color: PR_STATUS[k].color })).filter(x => x.value > 0);
   }, [creators]);

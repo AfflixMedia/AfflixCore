@@ -188,7 +188,7 @@
      shift the body out of line with the headings. */
   grid-template-columns:
     minmax(0,0.42fr) minmax(0,0.9fr) minmax(0,1.2fr) minmax(0,1.05fr) minmax(0,.7fr)
-    minmax(0,.55fr) minmax(0,1.4fr) minmax(0,1.45fr) minmax(0,.5fr);
+    minmax(0,.55fr) minmax(0,1.3fr) minmax(0,1.35fr) minmax(0,.75fr) minmax(0,.5fr);
   align-items:center; gap:14px;
 }
 .pc-idx{ display:inline-flex; align-items:center; justify-content:center; min-width:33px; height:24px; padding:0 8px; border-radius:8px; background:var(--pc-accent-light); color:var(--pc-accent); font-size:12px; font-weight:800; font-variant-numeric:tabular-nums; }
@@ -206,6 +206,36 @@
 .pc-ct-row > .pc-cell{ overflow:hidden; }
 .pc-ct-row .pc-cname, .pc-ct-row .pc-handle{ display:inline-block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:middle; }
 .pc-tiktok{ max-width:100%; min-width:0; }
+/* Contract column — filled agreement PDF + signed-copy link for the deal */
+.pc-contract-cell{ text-align:center; }
+.pc-contract-actions{ display:inline-flex; align-items:center; gap:6px; }
+.pc-contract-btn{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:30px; height:30px; border:1px solid var(--pc-divider); border-radius:9px;
+  background:var(--pc-card); color:var(--pc-error-fg); font-size:15px; cursor:pointer;
+  transition:background .15s, border-color .15s, transform .1s;
+}
+.pc-contract-btn:hover{ background:var(--pc-error-bg); border-color:#F1B9B3; }
+.pc-contract-btn:active{ transform:scale(.93); }
+/* signed-contract link: dashed/muted until a link is pasted, then accent + opens it */
+.pc-contract-btn.pc-clink{ color:var(--pc-text-2); border-style:dashed; font-size:17px; }
+.pc-contract-btn.pc-clink:hover{ background:var(--pc-card-2); border-color:#CFCFCF; }
+.pc-contract-btn.pc-clink.has{ color:var(--pc-accent); border-style:solid; border-color:#C4D6F0; background:var(--pc-accent-light); text-decoration:none; }
+.pc-contract-btn.pc-clink.has:hover{ background:#DCE9F9; border-color:#A9C4E8; }
+
+/* contract template modal — representative name + signature pad */
+.pc-tpl-btn{ font-size:16px; color:var(--pc-accent); }
+.pc-sigpad{ width:100%; height:150px; border:1.5px dashed var(--pc-divider); border-radius:12px; background:#FFF; touch-action:none; cursor:crosshair; display:block; margin-top:8px; }
+.pc-sig-preview{ display:flex; align-items:center; gap:10px; padding:8px 12px; border:1px solid var(--pc-divider); border-radius:12px; background:var(--pc-card-2); }
+.pc-sig-preview img{ height:42px; max-width:200px; object-fit:contain; }
+.pc-sig-preview-l{ flex:1; font-size:12px; color:var(--pc-text-2); }
+.pc-sig-actions{ display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap; }
+.pc-sig-hint{ font-size:12px; color:var(--pc-text-2); }
+.pc-tplprev{ border:1px solid var(--pc-divider); border-radius:12px; padding:12px 14px; background:var(--pc-card-2); font-size:13px; display:flex; flex-direction:column; gap:5px; }
+.pc-tplprev-h{ font-size:11.5px; font-weight:800; letter-spacing:.4px; text-transform:uppercase; color:var(--pc-text-2); margin-bottom:2px; }
+.pc-tplprev-sig{ display:flex; align-items:center; gap:8px; }
+.pc-tplprev-sig img{ height:34px; max-width:160px; object-fit:contain; }
+.pc-formerr{ background:var(--pc-error-bg); color:var(--pc-error-fg); border-radius:10px; padding:8px 12px; font-size:12.5px; font-weight:600; }
 
 /* status group separators inside the creator drilldown table
    (Payment Pending → Videos in Progress → Payment Sent — label centered on the divider) */
@@ -436,8 +466,8 @@
 /* ── Creators tab table (compact, month-grouped) ── */
 /* horizontal scroll instead of squishing/clipping when the viewport is narrow or content grows */
 .pc-cv-list{ overflow-x:auto; }
-.pc-cv-head, .pc-cv-row, .pc-cv-monthhead{ min-width:760px; }
-.pc-cv-head, .pc-cv-row{ display:grid; grid-template-columns:34px 30px 1.5fr .9fr 1fr .7fr .6fr 1.05fr; align-items:center; gap:14px; text-align:left; }
+.pc-cv-head, .pc-cv-row, .pc-cv-monthhead{ min-width:850px; }
+.pc-cv-head, .pc-cv-row{ display:grid; grid-template-columns:34px 30px 1.5fr .9fr 1fr .7fr .6fr 1.05fr 82px; align-items:center; gap:14px; text-align:left; }
 .pc-cv-namecell{ display:flex; flex-direction:column; align-items:flex-start; gap:1px; }
 .pc-cv-dealcell{ display:flex; flex-direction:column; align-items:flex-end; gap:1px; }
 .pc-cv-head > div, .pc-cv-row > .pc-cell{ min-width:0; }
@@ -1100,10 +1130,11 @@ a.pc-vx-prod:hover{ text-decoration:none; filter:brightness(.97); }
 .pc-nchip-rem{ background:var(--pc-info-bg); color:var(--pc-info-fg); cursor:pointer; }
 .pc-nchip-rem.due{ background:var(--pc-warn-bg); color:var(--pc-warn-fg); }
 .pc-nchip-brand{ background:var(--pc-accent-light); color:var(--pc-accent); }
+.pc-nchip-creator{ background:var(--pc-warn-bg); color:var(--pc-warn-fg); }
 .pc-nchip-prog{ background:var(--pc-info-bg); color:var(--pc-info-fg); }
 /* label chips (rail tone = purple) */
 .pc-nchip .bi-tag{ color:#7C3AED; }
-.pc-nchip-brand .bi-shop, .pc-nchip-prog .bi-calendar3{ color:inherit; }
+.pc-nchip-brand .bi-shop, .pc-nchip-prog .bi-calendar3, .pc-nchip-creator .bi-person{ color:inherit; }
 
 .pc-ncard-actions{ display:flex; gap:2px; justify-content:flex-end; margin-top:10px; opacity:0; transition:opacity .15s; }
 .pc-ncard:hover .pc-ncard-actions{ opacity:1; }
@@ -1154,9 +1185,14 @@ a.pc-vx-prod:hover{ text-decoration:none; filter:brightness(.97); }
 .pc-keepnote-count{ font-size:12px; font-weight:800; line-height:1; }
 /* group the two note buttons together at the right (keep takes the free space) */
 .pc-keepnote-btn + .pc-note-btn{ margin-left:0; }
+/* smaller inline variant — journal icon next to a creator's name */
+.pc-keepnote-btn.pc-keepnote-mini{ height:22px; min-width:22px; padding:0 5px; margin-left:7px; border-radius:7px; font-size:11px; gap:4px; vertical-align:middle; }
+.pc-keepnote-btn.pc-keepnote-mini .pc-keepnote-count{ font-size:11px; }
 
 /* floating notes button — global access from any tab */
-.pc-notesfab{ position:fixed; right:26px; bottom:26px; z-index:1500; width:56px; height:56px; border-radius:50%; border:0; background:var(--pc-accent); color:#fff; font-size:22px; display:flex; align-items:center; justify-content:center; box-shadow:0 8px 28px rgba(18,89,195,.36); cursor:pointer; transition:transform .15s var(--pc-ease), box-shadow .2s; }
+.pc-notesfab{ position:fixed; right:26px; bottom:26px; z-index:1500; width:56px; height:56px; border-radius:50%; border:0; background:var(--pc-accent); color:#fff; font-size:22px; display:flex; align-items:center; justify-content:center; box-shadow:0 8px 28px rgba(18,89,195,.36); cursor:pointer; transition:transform .15s var(--pc-ease), box-shadow .2s, opacity .2s, bottom .2s var(--pc-ease); }
+/* hidden until the page scrolls (usePageScrolled in AdsNotesFab) */
+.pc-notesfab.pc-fab-hidden{ opacity:0; pointer-events:none; transform:translateY(14px); }
 .pc-notesfab:hover{ transform:translateY(-2px); box-shadow:0 12px 34px rgba(18,89,195,.46); }
 .pc-notesfab:active{ transform:scale(.93); }
 .pc-notesfab-badge{ position:absolute; top:-2px; right:-2px; min-width:20px; height:20px; padding:0 5px; border-radius:999px; background:var(--pc-warn-fg); color:#fff; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center; border:2px solid var(--pc-bg); }

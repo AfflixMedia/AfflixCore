@@ -1,14 +1,17 @@
 // Bottom composer: reply preview, formatting bar, emoji picker, @-mention
-// autocomplete, "/" resource-tag autocomplete (conversation bookmarks → inserted
-// as clickable links), growing textarea, send button. Enter sends; Shift+Enter
-// makes a new line. List mode keeps adding bullets until turned off.
-// Announcement channels render read-only for non-admins. Resets per
-// conversation (re-keyed).
-import { useEffect, useMemo, useRef, useState } from 'react';
+// autocomplete, "/" tag autocomplete (conversation bookmarks → clickable
+// links; brand groups also tag the brand's Products + Tasks as clickable
+// links to the Products page / the task's detail popup), growing textarea,
+// send button. Enter sends; Shift+Enter makes a new
+// line. List mode keeps adding bullets until turned off. Announcement
+// channels render read-only for non-admins. Resets per conversation
+// (re-keyed). ChatPanel holds a ref to insert @mentions from the header's
+// members dropdown (insertMention).
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Badge } from 'react-bootstrap';
 import Avatar from '../../components/Avatar';
 import EmojiPicker from './EmojiPicker';
-import type { ChatBookmark, ChatContact, ChatMessage } from './types';
+import type { ChatBookmark, ChatContact, ChatMessage, ChatTagProduct, ChatTagTask } from './types';
 import { contactName, roleLabel, roleBadge } from './types';
 import { toPlainText } from './messageFormat';
 import { resourceIcon } from '../../lib/resourceIcon';
@@ -29,6 +32,75 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// One "/" popup entry: a bookmark link, a brand product, or a brand task.
+type TagKind = 'resource' | 'product' | 'task';
+type SlashItem =
+  | { kind: 'resource'; key: string; r: ChatBookmark }
+  | { kind: 'product'; key: string; p: ChatTagProduct }
+  | { kind: 'task'; key: string; t: ChatTagTask };
+const SLASH_HEAD: Record<TagKind, { icon: string; label: string }> = {
+  resource: { icon: 'bi-link-45deg', label: 'Tag a resource' },
+  product: { icon: 'bi-box-seam', label: 'Tag a product' },
+  task: { icon: 'bi-check2-square', label: 'Tag a task' },
+};
+// Shown when an icon-opened popup has nothing to list (or the query filters
+// everything out) — so the button always gives visible feedback.
+const SLASH_EMPTY: Record<TagKind, string> = {
+  resource: 'No bookmarks in this chat yet.',
+  product: 'No products in this brand’s catalog yet.',
+  task: 'No open tasks for this brand (you only see tasks you’re on).',
+};
+
+// One taggable row (bookmark / product / task) — shared by the "@" and "/"
+// popups so both triggers offer the same items.
+function TagRow({ it, onPick }: { it: SlashItem; onPick: (it: SlashItem) => void }) {
+  if (it.kind === 'resource') {
+    const ic = resourceIcon(it.r.url);
+    return (
+      <button type="button" className="ac-mention-item" onClick={() => onPick(it)}>
+        <i className={`bi ${ic.icon} ac-slash-icon`} style={{ color: ic.color }} />
+        <span className="min-w-0 flex-grow-1">
+          <span className="fw-semibold text-truncate d-block">{it.r.title}</span>
+          <span className="text-muted text-truncate d-block" style={{ fontSize: '.72rem' }}>{it.r.url}</span>
+        </span>
+      </button>
+    );
+  }
+  if (it.kind === 'product') {
+    return (
+      <button type="button" className="ac-mention-item" onClick={() => onPick(it)}>
+        <i className="bi bi-box-seam ac-slash-icon" style={{ color: '#e8862e' }} />
+        <span className="min-w-0 flex-grow-1">
+          <span className="fw-semibold text-truncate d-block">{it.p.name}</span>
+          {it.p.standard_commission != null && (
+            <span className="text-muted text-truncate d-block" style={{ fontSize: '.72rem' }}>
+              {Number(it.p.standard_commission)}% commission
+            </span>
+          )}
+        </span>
+      </button>
+    );
+  }
+  return (
+    <button type="button" className="ac-mention-item" onClick={() => onPick(it)}>
+      <i className="bi bi-check2-square ac-slash-icon" style={{ color: '#3b82f6' }} />
+      <span className="min-w-0 flex-grow-1">
+        <span className="fw-semibold text-truncate d-block">{it.t.title}</span>
+        <span className="text-muted text-truncate d-block" style={{ fontSize: '.72rem' }}>
+          {it.t.status === 'in_progress' ? 'In progress' : it.t.status === 'in_review' ? 'In review' : 'Not started'}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+export interface MessageComposerHandle {
+  /** Insert "@Name " at the caret (used by the header members dropdown). */
+  insertMention: (name: string) => void;
+  /** Insert a clickable product tag at the caret (from the Products popup). */
+  insertProductTag: (name: string) => void;
+}
+
 interface Props {
   disabled?: boolean;
   readOnly?: boolean;
@@ -36,21 +108,29 @@ interface Props {
   readOnlyIcon?: string;          // bootstrap-icon class for the read-only banner
   mentionables?: ChatContact[];   // members that can be @-mentioned (groups)
   resources?: ChatBookmark[];     // conversation bookmarks, taggable via "/"
+  products?: ChatTagProduct[];    // brand groups: the brand's products, taggable via "/"
+  tasks?: ChatTagTask[];          // brand groups: the brand's open tasks, taggable via "/"
+  brandId?: string | null;        // brand group → show tag buttons + link products to the brand
   replyTo: ChatMessage | null;
   replyToSender: ChatContact | null;
   onCancelReply: () => void;
   onSend: (body: string, mentions: string[]) => void | Promise<void>;
 }
 
-export default function MessageComposer({
-  disabled, readOnly, readOnlyNote, readOnlyIcon, mentionables = [], resources = [],
+const MessageComposer = forwardRef<MessageComposerHandle, Props>(function MessageComposer({
+  disabled, readOnly, readOnlyNote, readOnlyIcon,
+  mentionables = [], resources = [], products = [], tasks = [], brandId,
   replyTo, replyToSender, onCancelReply, onSend,
-}: Props) {
+}: Props, ref) {
+  const brandGroup = !!brandId;
   const [text, setText] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
   const [listMode, setListMode] = useState<ListMode>(null);
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
   const [slash, setSlash] = useState<{ start: number; query: string } | null>(null);
+  // Set when the popup was opened from an icon button — narrows the "/" list
+  // to that kind. Cleared with the popup.
+  const [slashKind, setSlashKind] = useState<TagKind | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const emojiWrapRef = useRef<HTMLDivElement>(null);
 
@@ -72,6 +152,8 @@ export default function MessageComposer({
     return () => document.removeEventListener('mousedown', onDoc);
   }, [showEmoji]);
 
+  const closeSlash = () => { setSlash(null); setSlashKind(null); };
+
   // Mention suggestions for the active "@query".
   const suggestions = useMemo(() => {
     if (!mention || mentionables.length === 0) return [];
@@ -81,26 +163,76 @@ export default function MessageComposer({
       .slice(0, 6);
   }, [mention, mentionables]);
 
-  // Resource ("/query") suggestions — the conversation's bookmarks.
-  const slashSuggestions = useMemo(() => {
-    if (!slash || resources.length === 0) return [];
-    const q = slash.query.toLowerCase();
-    return resources
-      .filter(r => r.title.toLowerCase().includes(q) || r.url.toLowerCase().includes(q))
-      .slice(0, 6);
-  }, [slash, resources]);
+  // The "@" popup also offers the brand's products + tasks (people first) —
+  // "mention a product" is the natural gesture, so both triggers work.
+  const mentionTags = useMemo<SlashItem[]>(() => {
+    if (!mention) return [];
+    const q = mention.query.toLowerCase();
+    const out: SlashItem[] = [];
+    products
+      .filter(p => p.name.toLowerCase().includes(q))
+      .slice(0, 4)
+      .forEach(p => out.push({ kind: 'product', key: `p-${p.id}`, p }));
+    tasks
+      .filter(t => t.title.toLowerCase().includes(q))
+      .slice(0, 4)
+      .forEach(t => out.push({ kind: 'task', key: `t-${t.id}`, t }));
+    return out;
+  }, [mention, products, tasks]);
 
-  // Detect an "@query" (mention) or "/query" (resource) immediately before the caret.
+  // "/query" suggestions — bookmarks + (brand groups) products + tasks,
+  // grouped per kind. Products and tasks come FIRST (brand groups always have
+  // a long synced-bookmarks list that would otherwise push them below the
+  // fold). An icon-opened popup / a filter chip narrows to one kind.
+  const slashSuggestions = useMemo<SlashItem[]>(() => {
+    if (!slash) return [];
+    const q = slash.query.toLowerCase();
+    const cap = slashKind ? 12 : 4;
+    const out: SlashItem[] = [];
+    if (!slashKind || slashKind === 'product') {
+      products
+        .filter(p => p.name.toLowerCase().includes(q))
+        .slice(0, cap)
+        .forEach(p => out.push({ kind: 'product', key: `p-${p.id}`, p }));
+    }
+    if (!slashKind || slashKind === 'task') {
+      tasks
+        .filter(t => t.title.toLowerCase().includes(q))
+        .slice(0, cap)
+        .forEach(t => out.push({ kind: 'task', key: `t-${t.id}`, t }));
+    }
+    if (!slashKind || slashKind === 'resource') {
+      resources
+        .filter(r => r.title.toLowerCase().includes(q) || r.url.toLowerCase().includes(q))
+        .slice(0, cap)
+        .forEach(r => out.push({ kind: 'resource', key: `r-${r.id}`, r }));
+    }
+    return out;
+  }, [slash, slashKind, resources, products, tasks]);
+
+  // Which kinds the "/" popup can offer at all — drives the filter chips.
+  const slashKinds = useMemo<TagKind[]>(() => {
+    const ks: TagKind[] = [];
+    if (brandGroup || products.length > 0) ks.push('product');
+    if (brandGroup || tasks.length > 0) ks.push('task');
+    if (resources.length > 0) ks.push('resource');
+    return ks;
+  }, [brandGroup, products.length, tasks.length, resources.length]);
+
+  const taggables = resources.length + products.length + tasks.length;
+
+  // Detect an "@query" (mention) or "/query" (tag) immediately before the caret.
   const detectMention = (value: string, caret: number) => {
     const before = value.slice(0, caret);
     if (mentionables.length > 0) {
       const m = /(?:^|\s)@([\p{L}\p{N} ]{0,25})$/u.exec(before);
       setMention(m ? { start: caret - m[1].length - 1, query: m[1] } : null);
     } else setMention(null);
-    if (resources.length > 0) {
+    if (taggables > 0) {
       const s = /(?:^|\s)\/([\p{L}\p{N} \-_.]{0,30})$/u.exec(before);
-      setSlash(s ? { start: caret - s[1].length - 1, query: s[1] } : null);
-    } else setSlash(null);
+      if (s) setSlash({ start: caret - s[1].length - 1, query: s[1] });
+      else closeSlash();
+    } else closeSlash();
   };
 
   const onChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -108,35 +240,76 @@ export default function MessageComposer({
     detectMention(e.target.value, e.target.selectionStart ?? e.target.value.length);
   };
 
-  const pickMention = (c: ChatContact) => {
-    if (!mention) return;
+  // Insert `raw` at the caret (space-padded when needed), close both popups,
+  // and place the caret after it. Shared by the ref methods below.
+  const insertAtCaret = (raw: string) => {
     const ta = taRef.current;
     const caret = ta?.selectionStart ?? text.length;
-    const insert = `@${contactName(c)} `;
-    const next = text.slice(0, mention.start) + insert + text.slice(caret);
-    setText(next);
-    setMention(null);
+    const before = text.slice(0, caret);
+    const needsSpace = before.length > 0 && !/\s$/.test(before);
+    const insert = (needsSpace ? ' ' : '') + raw;
+    setText(before + insert + text.slice(caret));
+    setMention(null); closeSlash();
     requestAnimationFrame(() => {
       ta?.focus();
-      const pos = mention.start + insert.length;
+      const pos = caret + insert.length;
       ta?.setSelectionRange(pos, pos);
     });
   };
 
-  // Insert a tagged resource as a markdown link (renders as a clickable link).
-  const pickResource = (r: ChatBookmark) => {
-    if (!slash) return;
+  // A product tag: a clickable markdown link to the brand's Products page when
+  // we know the brand, else a plain bold chip. (Link labels can't contain the
+  // markdown bracket chars, so strip them from the name.)
+  const productInsert = (name: string): string => {
+    const label = `📦 ${name.replace(/[[\]]/g, '')}`;
+    return brandId
+      ? `[${label}](${window.location.origin}/brands/${brandId}?tab=products) `
+      : `**${label}** `;
+  };
+
+  // Header members dropdown → "@Name "; Products popup → clickable product tag.
+  useImperativeHandle(ref, () => ({
+    insertMention(name: string) { insertAtCaret(`@${name} `); },
+    insertProductTag(name: string) { insertAtCaret(productInsert(name)); },
+  }));
+
+  // Replace everything from the trigger char up to the caret with `insert`,
+  // close both popups, and put the caret after the inserted text.
+  const replaceTrigger = (start: number, insert: string) => {
     const ta = taRef.current;
     const caret = ta?.selectionStart ?? text.length;
-    const insert = `[${r.title}](${r.url}) `;
-    const next = text.slice(0, slash.start) + insert + text.slice(caret);
-    setText(next);
-    setSlash(null);
+    setText(text.slice(0, start) + insert + text.slice(caret));
+    setMention(null);
+    closeSlash();
     requestAnimationFrame(() => {
       ta?.focus();
-      const pos = slash.start + insert.length;
+      const pos = start + insert.length;
       ta?.setSelectionRange(pos, pos);
     });
+  };
+
+  // A task tag: a clickable markdown link that opens that exact task's detail
+  // popup on the Tasks page (/tasks?t=<id>, consumed there).
+  const taskInsert = (t: ChatTagTask): string =>
+    `[✅ ${t.title.replace(/[[\]]/g, '')}](${window.location.origin}/tasks?t=${t.id}) `;
+
+  // What a picked tag inserts: bookmark / product / task all become clickable
+  // links (product → the brand's Products page, task → its detail popup).
+  const tagInsertText = (it: SlashItem): string =>
+    it.kind === 'resource'
+      ? `[${it.r.title}](${it.r.url}) `
+      : it.kind === 'product'
+        ? productInsert(it.p.name)
+        : taskInsert(it.t);
+
+  const pickMention = (c: ChatContact) => {
+    if (mention) replaceTrigger(mention.start, `@${contactName(c)} `);
+  };
+  const pickMentionTag = (it: SlashItem) => {
+    if (mention) replaceTrigger(mention.start, tagInsertText(it));
+  };
+  const pickSlash = (it: SlashItem) => {
+    if (slash) replaceTrigger(slash.start, tagInsertText(it));
   };
 
   // Resolve which mentionables were actually @-tagged in the final text.
@@ -155,7 +328,7 @@ export default function MessageComposer({
     const mentions = collectMentions(body);
     setShowEmoji(false);
     setMention(null);
-    setSlash(null);
+    closeSlash();
     const marker = listMode === 'ol' ? '1. ' : listMode === 'ul' ? BULLET : '';
     setText(marker);
     if (listMode) {
@@ -257,8 +430,11 @@ export default function MessageComposer({
       </div>
 
       <div className="ac-composer-row">
-        {suggestions.length > 0 && (
+        {mention && (suggestions.length > 0 || mentionTags.length > 0) && (
           <div className="ac-mention-pop">
+            {suggestions.length > 0 && mentionTags.length > 0 && (
+              <div className="ac-slash-head"><i className="bi bi-people me-1" />People</div>
+            )}
             {suggestions.map(c => (
               <button key={c.id} type="button" className="ac-mention-item" onClick={() => pickMention(c)}>
                 <Avatar name={contactName(c)} src={c.avatar_url} size="sm" />
@@ -266,24 +442,65 @@ export default function MessageComposer({
                 <Badge bg={roleBadge(c.role)} className="ac-role-badge">{roleLabel(c.role, c.is_superbob)}</Badge>
               </button>
             ))}
+            {mentionTags.map((it, i) => {
+              const firstOfKind = i === 0 || mentionTags[i - 1].kind !== it.kind;
+              return (
+                <div key={it.key}>
+                  {firstOfKind && (
+                    <div className="ac-slash-head">
+                      <i className={`bi ${SLASH_HEAD[it.kind].icon} me-1`} />{SLASH_HEAD[it.kind].label}
+                    </div>
+                  )}
+                  <TagRow it={it} onPick={pickMentionTag} />
+                </div>
+              );
+            })}
           </div>
         )}
 
-        {slashSuggestions.length > 0 && (
-          <div className="ac-mention-pop">
-            <div className="ac-slash-head">
-              <i className="bi bi-link-45deg me-1" />Tag a resource
-            </div>
-            {slashSuggestions.map(r => {
-              const ic = resourceIcon(r.url);
-              return (
-                <button key={r.id} type="button" className="ac-mention-item" onClick={() => pickResource(r)}>
-                  <i className={`bi ${ic.icon} ac-slash-icon`} style={{ color: ic.color }} />
-                  <span className="min-w-0 flex-grow-1">
-                    <span className="fw-semibold text-truncate d-block">{r.title}</span>
-                    <span className="text-muted text-truncate d-block" style={{ fontSize: '.72rem' }}>{r.url}</span>
-                  </span>
+        {slash && slashKinds.length > 0 && (
+          <div className="ac-mention-pop ac-slash-pop">
+            {/* Kind filter chips — pinned so products/tasks are one click away
+                even when the bookmark list is long. */}
+            {slashKinds.length > 1 && (
+              <div className="ac-slash-tabs">
+                <button type="button" className={!slashKind ? 'on' : ''}
+                  onMouseDown={e => e.preventDefault()} onClick={() => setSlashKind(null)}>
+                  All
                 </button>
+                {slashKinds.map(k => (
+                  <button key={k} type="button" className={slashKind === k ? 'on' : ''}
+                    onMouseDown={e => e.preventDefault()} onClick={() => setSlashKind(k)}>
+                    <i className={`bi ${SLASH_HEAD[k].icon} me-1`} />
+                    {k === 'resource' ? 'Resources' : k === 'product' ? 'Products' : 'Tasks'}
+                  </button>
+                ))}
+              </div>
+            )}
+            {slashSuggestions.length === 0 && (
+              slashKind ? (
+                <>
+                  <div className="ac-slash-head">
+                    <i className={`bi ${SLASH_HEAD[slashKind].icon} me-1`} />{SLASH_HEAD[slashKind].label}
+                  </div>
+                  <div className="ac-slash-empty">{slash.query ? 'No matches.' : SLASH_EMPTY[slashKind]}</div>
+                </>
+              ) : (
+                <div className="ac-slash-empty">No matches.</div>
+              )
+            )}
+            {slashSuggestions.map((it, i) => {
+              const firstOfKind = i === 0 || slashSuggestions[i - 1].kind !== it.kind;
+              const head = SLASH_HEAD[it.kind];
+              return (
+                <div key={it.key}>
+                  {firstOfKind && (
+                    <div className="ac-slash-head">
+                      <i className={`bi ${head.icon} me-1`} />{head.label}
+                    </div>
+                  )}
+                  <TagRow it={it} onPick={pickSlash} />
+                </div>
               );
             })}
           </div>
@@ -295,7 +512,6 @@ export default function MessageComposer({
           </button>
           {showEmoji && <div className="ac-emoji-pop"><EmojiPicker onPick={insertEmoji} /></div>}
         </div>
-
         <textarea
           ref={taRef}
           className="ac-composer-input"
@@ -311,10 +527,14 @@ export default function MessageComposer({
               if (k === 'b') { e.preventDefault(); surround('**'); return; }
               if (k === 'i') { e.preventDefault(); surround('_'); return; }
             }
-            if (e.key === 'Escape' && (mention || slash)) { setMention(null); setSlash(null); return; }
+            if (e.key === 'Escape' && (mention || slash)) { setMention(null); closeSlash(); return; }
             if (e.key === 'Enter' && !e.shiftKey) {
-              if (mention && suggestions.length > 0) { e.preventDefault(); pickMention(suggestions[0]); return; }
-              if (slash && slashSuggestions.length > 0) { e.preventDefault(); pickResource(slashSuggestions[0]); return; }
+              if (mention && (suggestions.length > 0 || mentionTags.length > 0)) {
+                e.preventDefault();
+                if (suggestions.length > 0) pickMention(suggestions[0]); else pickMentionTag(mentionTags[0]);
+                return;
+              }
+              if (slash && slashSuggestions.length > 0) { e.preventDefault(); pickSlash(slashSuggestions[0]); return; }
               e.preventDefault();
               if (listMode) {
                 const ta = e.currentTarget;
@@ -344,4 +564,6 @@ export default function MessageComposer({
       </div>
     </div>
   );
-}
+});
+
+export default MessageComposer;

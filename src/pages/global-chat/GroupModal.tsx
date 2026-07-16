@@ -28,6 +28,7 @@ interface Props {
   onRemove: (userId: string) => Promise<void>;
   onSetAdmin: (userId: string, isAdmin: boolean) => Promise<void>;
   onLeave: () => Promise<void>;
+  onMention?: (contact: ChatContact) => void;  // @ button on member rows → composer
   onClose: () => void;
 }
 
@@ -62,7 +63,7 @@ export default function GroupModal(p: Props) {
       return !needle || `${contactName(c)} ${c.email} ${roleLabel(c.role, c.is_superbob)}`.toLowerCase().includes(needle);
     });
     return (
-      <Modal show={p.show} onHide={p.onClose} centered>
+      <Modal show={p.show} onHide={p.onClose} centered dialogClassName="ac-group-modal">
         <Modal.Header closeButton>
           <Modal.Title><i className="bi bi-megaphone-fill me-2 text-warning" />Announcement settings</Modal.Title>
         </Modal.Header>
@@ -89,6 +90,12 @@ export default function GroupModal(p: Props) {
                   </div>
                   <div className="text-muted small text-truncate">{c.email}</div>
                 </div>
+                {p.onMention && c.id !== p.myId && (
+                  <button type="button" className="ac-member-mention" title={`Mention ${contactName(c)} in the chat`}
+                    aria-label={`Mention ${contactName(c)}`} onClick={() => p.onMention!(c)}>
+                    <i className="bi bi-at" />
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -103,7 +110,7 @@ export default function GroupModal(p: Props) {
       setPicked(a => a.includes(id) ? a.filter(x => x !== id) : [...a, id]);
     const create = () => run(async () => { await p.onCreate(title, picked); });
     return (
-      <Modal show={p.show} onHide={p.onClose} centered>
+      <Modal show={p.show} onHide={p.onClose} centered dialogClassName="ac-group-modal">
         <Modal.Header closeButton><Modal.Title><i className="bi bi-people-fill me-2" />New group</Modal.Title></Modal.Header>
         <Modal.Body>
           <Form.Group className="mb-3">
@@ -145,7 +152,7 @@ export default function GroupModal(p: Props) {
   // follows brand access (Boss / Team Lead / APC) — no manual membership edits.
   const isBrandGroup = !!p.conversation?.brand_id;
   return (
-    <Modal show={p.show} onHide={p.onClose} centered>
+    <Modal show={p.show} onHide={p.onClose} centered dialogClassName="ac-group-modal">
       <Modal.Header closeButton>
         <Modal.Title>
           {isBrandGroup ? <><i className="bi bi-shop me-2 text-primary" />Brand group</> : <><i className="bi bi-gear me-2" />Group info</>}
@@ -187,6 +194,12 @@ export default function GroupModal(p: Props) {
                       : isAdmin ? <Badge bg="warning" text="dark" className="ac-role-badge">Admin</Badge> : null}
                   </div>
                 </div>
+                {p.onMention && c.id !== p.myId && (
+                  <button type="button" className="ac-member-mention" title={`Mention ${contactName(c)} in the chat`}
+                    aria-label={`Mention ${contactName(c)}`} onClick={() => p.onMention!(c)}>
+                    <i className="bi bi-at" />
+                  </button>
+                )}
                 {p.canManage && !isBrandGroup && !isCreatorRow && c.id !== p.myId && (
                   <div className="d-flex gap-1" onClick={e => e.stopPropagation()}>
                     {p.isCreator && (

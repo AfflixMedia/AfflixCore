@@ -10,10 +10,11 @@ interface Props {
   contact: ChatContact | null;   // null = hidden
   isSelf: boolean;               // my own card → no "Message" button
   onMessage: (contact: ChatContact) => void;
+  onMention?: (contact: ChatContact) => void;  // set in groups → "Mention" drops @Name into the composer
   onClose: () => void;
 }
 
-export default function ContactModal({ contact, isSelf, onMessage, onClose }: Props) {
+export default function ContactModal({ contact, isSelf, onMessage, onMention, onClose }: Props) {
   return (
     <Modal show={!!contact} onHide={onClose} centered size="sm">
       {contact && (
@@ -37,6 +38,11 @@ export default function ContactModal({ contact, isSelf, onMessage, onClose }: Pr
             {!isSelf && (
               <Button onClick={() => onMessage(contact)}>
                 <i className="bi bi-chat-dots me-1" /> Message
+              </Button>
+            )}
+            {!isSelf && onMention && (
+              <Button variant="outline-primary" onClick={() => onMention(contact)}>
+                <i className="bi bi-at" /> Mention
               </Button>
             )}
             <Button variant="outline-secondary" onClick={onClose}>Close</Button>

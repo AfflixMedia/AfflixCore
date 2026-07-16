@@ -1029,6 +1029,7 @@ export default function MonthlyReportEdit() {
               mode="authed"
               currentAuthorName={profile?.full_name || profile?.email || 'User'}
               onAdd={(b, n, parentId) => addComment(feedbackSection, b, n, parentId)}
+              canReply={profile?.role === 'bob'}
             />
           )}
         </Offcanvas.Body>
