@@ -7,8 +7,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Emoji, EmojiStyle } from 'emoji-picker-react';
 import EmojiPicker from './EmojiPicker';
-import type { ChatContact, ChatMessage, ChatReaction, Receipt } from './types';
-import { messageTime, contactName, ACK_REACTIONS, ackMeaning, ackUnified } from './types';
+import type { ChatAttachment, ChatContact, ChatMessage, ChatReaction, Receipt } from './types';
+import {
+  messageTime, contactName, ACK_REACTIONS, ackMeaning, ackUnified,
+  attachmentLabel, fmtBytes,
+} from './types';
 import { renderMessageHtml, toPlainText, MentionRef } from './messageFormat';
 
 // Apple-style ack glyph; falls back to the raw emoji char if not in the ack set.
@@ -33,12 +36,92 @@ interface Props {
   myReaction: string | null;           // my current emoji on this message
   reactorName: (id: string) => string; // resolve a reactor's display name
   receipt: Receipt | null;             // tick state for my own messages (else null)
+  attachmentSrc: string | null;        // signed streaming URL for the attachment (null while minting)
   onReact: (emoji: string) => void;
   onReply: (m: ChatMessage) => void;
   onForward: (m: ChatMessage) => void;
   onDelete: (m: ChatMessage) => void;
   onInfo: (m: ChatMessage) => void;
   onMentionClick: (userId: string) => void;  // tap a @mention → open that person
+}
+
+// A private Drive attachment inside the bubble, Discord-style. `src` is the
+// short-lived signed streaming URL minted per conversation (null while it's
+// being fetched → placeholder). Images render inline (click → in-app
+// lightbox); videos are a native <video> player; broken loads or unknown
+// kinds fall back to a file chip.
+function AttachmentView({ a, src }: { a: ChatAttachment; src: string | null }) {
+  const [broken, setBroken] = useState(false);
+  const [lightbox, setLightbox] = useState(false);
+
+  // Esc closes the lightbox.
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setLightbox(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [lightbox]);
+
+  // Signed URL still being minted → sized placeholder, no layout jump.
+  if (!src && !broken && (a.kind === 'image' || a.kind === 'video')) {
+    return (
+      <div className="ac-msg-attach ac-msg-attach-loading">
+        <i className={`bi ${a.kind === 'video' ? 'bi-camera-video' : 'bi-image'}`} />
+      </div>
+    );
+  }
+
+  if (a.kind === 'image' && src && !broken) {
+    return (
+      <>
+        <button
+          type="button"
+          className="ac-msg-attach ac-msg-attach-img"
+          title={a.name}
+          onClick={() => setLightbox(true)}
+        >
+          <img src={src} alt={a.name} loading="lazy" onError={() => setBroken(true)} />
+        </button>
+        {lightbox && (
+          <div className="ac-attach-lightbox" onClick={() => setLightbox(false)}>
+            <img src={src} alt={a.name} onClick={e => e.stopPropagation()} />
+            <div className="ac-attach-lightbox-bar" onClick={e => e.stopPropagation()}>
+              <span className="text-truncate">{a.name}</span>
+            </div>
+            <button type="button" className="ac-attach-lightbox-close" title="Close"
+              onClick={() => setLightbox(false)}>
+              <i className="bi bi-x-lg" />
+            </button>
+          </div>
+        )}
+      </>
+    );
+  }
+  if (a.kind === 'video' && src && !broken) {
+    return (
+      <div className="ac-msg-attach ac-msg-attach-video">
+        <video
+          controls
+          preload="metadata"
+          playsInline
+          src={src}
+          title={a.name}
+          onError={() => setBroken(true)}
+        />
+      </div>
+    );
+  }
+  // Fallback chip: unknown kind or a failed load. Uses the signed URL when we
+  // have one (downloads through the site); the raw Drive url is private and
+  // only useful to the account owner.
+  return (
+    <a className="ac-msg-attach ac-msg-attach-file" href={src ?? a.url} target="_blank"
+       rel="noopener noreferrer">
+      <i className="bi bi-file-earmark me-2" />
+      <span className="text-truncate">{a.name}</span>
+      {a.size > 0 && <span className="ms-2 text-muted">{fmtBytes(a.size)}</span>}
+    </a>
+  );
 }
 
 // Single tick (sent) vs double tick (delivered/read); blue when read.
@@ -53,7 +136,7 @@ function Ticks({ receipt }: { receipt: Receipt }) {
 
 export default function MessageBubble({
   message, mine, isGroup, sender, mentions, replyTo, replyToSender,
-  canReply, ackMode, reactions, myReaction, reactorName, receipt,
+  canReply, ackMode, reactions, myReaction, reactorName, receipt, attachmentSrc,
   onReact, onReply, onForward, onDelete, onInfo, onMentionClick,
 }: Props) {
   const [showPicker, setShowPicker] = useState(false);
@@ -145,19 +228,27 @@ export default function MessageBubble({
               {replyTo ? contactName(replyToSender) : 'Reply'}
             </div>
             <div className="ac-msg-quote-body text-truncate">
-              {replyTo ? (replyTo.deleted_at ? 'Deleted message' : toPlainText(replyTo.body)) : 'Original message'}
+              {replyTo
+                ? (replyTo.deleted_at
+                    ? 'Deleted message'
+                    : toPlainText(replyTo.body) || attachmentLabel(replyTo.attachment))
+                : 'Original message'}
             </div>
           </div>
         )}
 
-        <div
-          className="ac-msg-text"
-          onClick={e => {
-            const uid = (e.target as HTMLElement).closest('.ac-mention')?.getAttribute('data-uid');
-            if (uid) onMentionClick(uid);
-          }}
-          dangerouslySetInnerHTML={{ __html: renderMessageHtml(message.body, mentions) }}
-        />
+        {message.attachment && <AttachmentView a={message.attachment} src={attachmentSrc} />}
+
+        {message.body !== '' && (
+          <div
+            className="ac-msg-text"
+            onClick={e => {
+              const uid = (e.target as HTMLElement).closest('.ac-mention')?.getAttribute('data-uid');
+              if (uid) onMentionClick(uid);
+            }}
+            dangerouslySetInnerHTML={{ __html: renderMessageHtml(message.body, mentions) }}
+          />
+        )}
         <div className="ac-msg-meta">
           {messageTime(message.created_at)}
           {mine && receipt && <Ticks receipt={receipt} />}

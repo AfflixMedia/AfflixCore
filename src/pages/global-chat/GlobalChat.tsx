@@ -25,9 +25,10 @@ import {
   fetchReactions, setReaction, clearReaction,
   fetchBookmarks, addBookmark, updateBookmark, deleteBookmark, setBookmarkAccess,
 } from './chatApi';
+import { uploadChatFile, signAttachmentUrls } from './driveUpload';
 import type {
-  ChatContact, Conversation, Participant, ChatMessage, ConversationOverview, ConversationView,
-  ChatEvent, ChatReaction, ChatBookmark, Receipt,
+  ChatAttachment, ChatContact, Conversation, Participant, ChatMessage, ConversationOverview,
+  ConversationView, ChatEvent, ChatReaction, ChatBookmark, Receipt,
 } from './types';
 import { contactName, messageReceipts, rollupReceipt } from './types';
 
@@ -444,8 +445,8 @@ export default function GlobalChat() {
     }
   };
 
-  const handleSend = async (body: string, mentions: string[]) => {
-    if (!activeId || !myId) return;
+  const handleSend = async (body: string, mentions: string[], attachment?: ChatAttachment | null) => {
+    if (!activeId || !myId || (!body && !attachment)) return;
     const reply = replyTo;
     setReplyTo(null);
     try {
@@ -455,6 +456,7 @@ export default function GlobalChat() {
         body,
         replyToId: reply?.id ?? null,
         mentions,
+        attachment: attachment ?? null,
       });
       setMessages(prev => prev.some(x => x.id === saved.id) ? prev : [...prev, saved]);
       refreshOverview();
@@ -462,6 +464,43 @@ export default function GlobalChat() {
       setErr((e as Error).message);
     }
   };
+
+  // ---- Private media: signed streaming URLs --------------------------------
+  // Attachments are PRIVATE on Drive; the server signs short-lived streaming
+  // URLs only for members of the conversation. Minted in batches as messages
+  // load/arrive; accumulated across the session (keyed by drive id).
+  const [attachUrls, setAttachUrls] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    if (!activeId) return;
+    const missing = Array.from(new Set(
+      messages
+        .filter(m => m.attachment && !m.deleted_at && !attachUrls.has(m.attachment.drive_id))
+        .map(m => m.attachment!.drive_id),
+    ));
+    if (missing.length === 0) return;
+    let on = true;
+    signAttachmentUrls(activeId, missing)
+      .then(urls => {
+        if (!on || Object.keys(urls).length === 0) return;
+        setAttachUrls(prev => {
+          const next = new Map(prev);
+          for (const [id, u] of Object.entries(urls)) next.set(id, u);
+          return next;
+        });
+      })
+      .catch(e => console.warn('[chat] media sign failed:', (e as Error).message));
+    return () => { on = false; };
+  }, [messages, activeId, attachUrls]);
+
+  // Upload a picked image/video to the Google Drive chat folder (edge fn
+  // brokers the session; bytes go browser → Drive directly).
+  const handleUploadFile = useCallback(
+    (file: File, onProgress: (pct: number) => void): Promise<ChatAttachment> => {
+      if (!activeId) return Promise.reject(new Error('No active conversation'));
+      return uploadChatFile(activeId, file, onProgress);
+    },
+    [activeId],
+  );
 
   // ---- Acknowledgement reactions ----
   const handleReact = async (messageId: string, emoji: string) => {
@@ -579,6 +618,7 @@ export default function GlobalChat() {
         body: msg.body,
         isForwarded: true,
         forwardedFromId: msg.id,
+        attachment: msg.attachment ?? null,   // media forwards with the message
       });
       await reloadConversations();
       await refreshOverview();
@@ -625,6 +665,7 @@ export default function GlobalChat() {
           directory={directory}
           unreadAnchorId={unreadAnchorId}
           participantsByUser={activeParticipantsByUser}
+          attachmentUrls={attachUrls}
           // The announcement roster is role-based (all internal staff), not the
           // lazily-created participant rows — so @-mentions can target anyone.
           members={isAnnouncementActive ? allStaff : (activeView?.members ?? [])}
@@ -646,6 +687,7 @@ export default function GlobalChat() {
           onForward={(m) => setForwardMsg(m)}
           onDelete={(m) => setDeleteMsg(m)}
           onSend={handleSend}
+          uploadFile={handleUploadFile}
           onBack={clearActive}
         />
       </div>

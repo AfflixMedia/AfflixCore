@@ -10,7 +10,7 @@ import MessageBubble from './MessageBubble';
 import MessageComposer, { MessageComposerHandle } from './MessageComposer';
 import MessageInfoModal from './MessageInfoModal';
 import BrandChatBar from './BrandChatBar';
-import type { ChatBookmark, ChatContact, ChatMessage, ChatEvent, ChatReaction, ChatTagProduct, ChatTagTask, ConversationView, Participant } from './types';
+import type { ChatAttachment, ChatBookmark, ChatContact, ChatMessage, ChatEvent, ChatReaction, ChatTagProduct, ChatTagTask, ConversationView, Participant } from './types';
 import { dayLabel, roleLabel, roleBadge, contactName, eventText, messageReceipts, rollupReceipt } from './types';
 
 interface Props {
@@ -25,6 +25,7 @@ interface Props {
   directory: Map<string, ChatContact>;
   unreadAnchorId: string | null;   // first unread message id at open time
   participantsByUser: Map<string, Participant>;  // active conv: userId → read/delivery state
+  attachmentUrls: Map<string, string>;  // driveId → signed streaming URL (private media)
   members: ChatContact[];          // group/announcement members (for @mentions)
   announcementCount: number;       // total internal staff (announcement header)
   canPost: boolean;                // false → announcement read-only for non-admins
@@ -40,7 +41,9 @@ interface Props {
   onReply: (m: ChatMessage | null) => void;
   onForward: (m: ChatMessage) => void;
   onDelete: (m: ChatMessage) => void;
-  onSend: (body: string, mentions: string[]) => void | Promise<void>;
+  onSend: (body: string, mentions: string[], attachment?: ChatAttachment | null) => void | Promise<void>;
+  /** Upload a picked image/video to Google Drive (from GlobalChat). */
+  uploadFile?: (file: File, onProgress: (pct: number) => void) => Promise<ChatAttachment>;
   onBack: () => void;        // mobile: back to list
 }
 
@@ -50,10 +53,10 @@ type Item =
 
 export default function ChatPanel({
   view, messages, events, loading, hasMoreOlder, loadingOlder, onLoadOlder,
-  myId, directory, unreadAnchorId, participantsByUser, members, announcementCount,
+  myId, directory, unreadAnchorId, participantsByUser, attachmentUrls, members, announcementCount,
   canPost, reactionsByMsg, resources, composerRef, onReact, onOpenContact, onOpenGroup,
   onOpenSettings, onOpenBookmarks,
-  replyTo, onReply, onForward, onDelete, onSend, onBack,
+  replyTo, onReply, onForward, onDelete, onSend, uploadFile, onBack,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
@@ -370,6 +373,7 @@ export default function ChatPanel({
                     myReaction={mine}
                     reactorName={nameOf}
                     receipt={receipt}
+                    attachmentSrc={m.attachment ? attachmentUrls.get(m.attachment.drive_id) ?? null : null}
                     onReact={(emoji) => onReact(m.id, emoji)}
                     onReply={onReply}
                     onForward={onForward}
@@ -414,6 +418,7 @@ export default function ChatPanel({
         replyToSender={replyTo?.sender_id ? directory.get(replyTo.sender_id) ?? null : null}
         onCancelReply={() => onReply(null)}
         onSend={onSend}
+        uploadFile={uploadFile}
       />
 
       <MessageInfoModal

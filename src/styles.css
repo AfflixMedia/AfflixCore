@@ -2464,6 +2464,86 @@ input[type="number"] {
 .ac-emoji-wrap { position: relative; flex: none; }
 .ac-emoji-pop { position: absolute; bottom: 48px; left: 0; z-index: 20; }
 
+/* ---- Chat attachments (images/videos on Google Drive) ---- */
+/* Composer: the picked file being uploaded / ready to send. */
+.ac-attach-preview {
+  display: flex; align-items: center; gap: 10px; background: #fff;
+  border-radius: 8px; padding: 6px 10px; margin-bottom: 6px;
+}
+.ac-attach-thumb {
+  width: 44px; height: 44px; border-radius: 8px; object-fit: cover; flex: none;
+  background: #eef1f4;
+}
+.ac-attach-thumb-icon {
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ac-text-muted); font-size: 1.2rem;
+}
+.ac-attach-name { font-size: .82rem; font-weight: 600; color: var(--ac-text-dark); }
+.ac-attach-status { font-size: .74rem; color: var(--ac-text-muted); }
+.ac-attach-status .bi-check-circle-fill { color: #22a06b; }
+.ac-attach-bar {
+  height: 4px; border-radius: 3px; background: rgba(0,0,0,.08);
+  overflow: hidden; margin-top: 3px;
+}
+.ac-attach-bar span {
+  display: block; height: 100%; background: var(--ac-primary);
+  border-radius: 3px; transition: width .2s ease;
+}
+/* Bubble: rendered media (Discord-style inline preview + lightbox). */
+.ac-msg-attach { display: block; margin: 2px 0 4px; }
+.ac-msg-attach-loading {
+  width: min(400px, 100%); height: 200px; border-radius: 10px;
+  background: rgba(0, 0, 0, .06); color: var(--ac-text-muted);
+  display: flex; align-items: center; justify-content: center; font-size: 1.6rem;
+  animation: ac-attach-pulse 1.4s ease-in-out infinite;
+}
+@keyframes ac-attach-pulse {
+  0%, 100% { opacity: .55; }
+  50% { opacity: 1; }
+}
+.ac-msg-attach-img {
+  border: none; background: transparent; padding: 0; cursor: zoom-in;
+  text-align: left; max-width: 100%;
+}
+.ac-msg-attach-img img {
+  display: block; max-width: min(400px, 100%); max-height: 360px;
+  border-radius: 10px; object-fit: cover; background: #eef1f4;
+  transition: filter .12s ease;
+}
+.ac-msg-attach-img:hover img { filter: brightness(.92); }
+.ac-attach-lightbox {
+  position: fixed; inset: 0; z-index: 2000; background: rgba(0, 0, 0, .88);
+  display: flex; align-items: center; justify-content: center; cursor: zoom-out;
+}
+.ac-attach-lightbox > img {
+  max-width: 92vw; max-height: 86vh; border-radius: 8px; cursor: default;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
+}
+.ac-attach-lightbox-bar {
+  position: absolute; left: 0; right: 0; bottom: 0; cursor: default;
+  display: flex; align-items: center; justify-content: center; gap: 16px;
+  padding: 12px 20px; color: #e8e8e8; font-size: .85rem;
+  background: linear-gradient(transparent, rgba(0, 0, 0, .65));
+}
+.ac-attach-lightbox-bar a { color: #9ec5ff; text-decoration: none; white-space: nowrap; }
+.ac-attach-lightbox-bar a:hover { text-decoration: underline; }
+.ac-attach-lightbox-close {
+  position: absolute; top: 14px; right: 16px; border: none; border-radius: 50%;
+  width: 38px; height: 38px; background: rgba(255, 255, 255, .12); color: #fff;
+  font-size: 1.05rem; cursor: pointer;
+}
+.ac-attach-lightbox-close:hover { background: rgba(255, 255, 255, .24); }
+.ac-msg-attach-video video {
+  display: block; width: min(400px, 100%); max-height: 400px;
+  border-radius: 10px; background: #000; outline: none;
+}
+.ac-msg-attach-file {
+  display: inline-flex; align-items: center; max-width: 100%;
+  background: rgba(0,0,0,.05); border-radius: 8px; padding: 8px 12px;
+  font-size: .85rem; color: var(--ac-text-dark); text-decoration: none;
+}
+.ac-msg-attach-file:hover { background: rgba(0,0,0,.09); color: var(--ac-text-dark); }
+
 /* ---- Emoji picker (emoji-picker-react, Apple style) ---- */
 .ac-emoji-picker { border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.18); }
 .ac-emoji-picker .EmojiPickerReact { border-radius: 12px; }

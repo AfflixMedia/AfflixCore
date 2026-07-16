@@ -33,6 +33,17 @@ export interface Participant {
   history_from: string | null;  // null = full history; set = visible from this time on
 }
 
+/** A shared image/video. The bytes live in a Google Drive folder (uploaded
+ *  via the chat-drive-upload edge fn) — the message only stores the link. */
+export interface ChatAttachment {
+  kind: 'image' | 'video' | 'file';
+  drive_id: string;   // Google Drive file id
+  name: string;
+  mime: string;
+  size: number;       // bytes
+  url: string;        // Drive webViewLink (opens in a new tab)
+}
+
 export interface ChatMessage {
   id: string;
   conversation_id: string;
@@ -42,10 +53,26 @@ export interface ChatMessage {
   forwarded_from_id: string | null;
   is_forwarded: boolean;
   mentions: string[] | null;
+  attachment: ChatAttachment | null;
   created_at: string;
   edited_at: string | null;
   deleted_at: string | null;
 }
+
+/** Short preview label for an attachment ("📷 Photo") — mirrors the SQL
+ *  chat_attachment_label() used by notifications + chat_overview. */
+export const attachmentLabel = (a: ChatAttachment | null | undefined): string =>
+  !a ? '' : a.kind === 'image' ? '📷 Photo' : a.kind === 'video' ? '🎥 Video' : `📎 ${a.name || 'File'}`;
+
+// NB: attachments are PRIVATE on Drive. Media renders through short-lived
+// signed URLs minted per conversation (`signAttachmentUrls` in driveUpload.ts,
+// streamed by the chat-drive-media edge fn) — there is no public Drive URL.
+
+export const fmtBytes = (n: number): string => {
+  if (!Number.isFinite(n) || n <= 0) return '';
+  if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
+  return `${(n / 1024 / 1024).toFixed(n < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+};
 
 /** A membership activity-log row, rendered inline as a system line. */
 export interface ChatEvent {

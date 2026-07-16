@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Modal, Button, Spinner } from 'react-bootstrap';
 import type { ChatMessage } from './types';
+import { attachmentLabel } from './types';
 import { toPlainText } from './messageFormat';
 
 interface Props {
@@ -22,7 +23,8 @@ export default function DeleteMessageModal({ message, canDeleteForEveryone, onFo
     try { await fn(); } finally { setBusy(null); }
   };
 
-  const preview = toPlainText(message.body) || (message.deleted_at ? 'This message was deleted' : '');
+  const preview = toPlainText(message.body) || attachmentLabel(message.attachment)
+    || (message.deleted_at ? 'This message was deleted' : '');
 
   return (
     <Modal show onHide={onClose} centered size="sm">

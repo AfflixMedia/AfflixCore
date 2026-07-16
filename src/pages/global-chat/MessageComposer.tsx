@@ -11,8 +11,8 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import { Badge } from 'react-bootstrap';
 import Avatar from '../../components/Avatar';
 import EmojiPicker from './EmojiPicker';
-import type { ChatBookmark, ChatContact, ChatMessage, ChatTagProduct, ChatTagTask } from './types';
-import { contactName, roleLabel, roleBadge } from './types';
+import type { ChatAttachment, ChatBookmark, ChatContact, ChatMessage, ChatTagProduct, ChatTagTask } from './types';
+import { contactName, roleLabel, roleBadge, attachmentLabel, fmtBytes } from './types';
 import { toPlainText } from './messageFormat';
 import { resourceIcon } from '../../lib/resourceIcon';
 
@@ -114,16 +114,33 @@ interface Props {
   replyTo: ChatMessage | null;
   replyToSender: ChatContact | null;
   onCancelReply: () => void;
-  onSend: (body: string, mentions: string[]) => void | Promise<void>;
+  onSend: (body: string, mentions: string[], attachment?: ChatAttachment | null) => void | Promise<void>;
+  /** Upload a picked image/video to Google Drive (provided by GlobalChat);
+   *  absent → no attach button. */
+  uploadFile?: (file: File, onProgress: (pct: number) => void) => Promise<ChatAttachment>;
+}
+
+// One picked image/video being uploaded to Drive (or ready to send).
+interface PendingAttachment {
+  file: File;
+  previewUrl: string | null;   // object URL for image thumbnails
+  progress: number;            // 0–100 while PUTting to Drive
+  attachment: ChatAttachment | null;  // set once finalized → ready to send
+  error: string | null;
 }
 
 const MessageComposer = forwardRef<MessageComposerHandle, Props>(function MessageComposer({
   disabled, readOnly, readOnlyNote, readOnlyIcon,
   mentionables = [], resources = [], products = [], tasks = [], brandId,
-  replyTo, replyToSender, onCancelReply, onSend,
+  replyTo, replyToSender, onCancelReply, onSend, uploadFile,
 }: Props, ref) {
   const brandGroup = !!brandId;
   const [text, setText] = useState('');
+  const [pending, setPending] = useState<PendingAttachment | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  // Skip stale async upload results after the pending chip was dismissed
+  // (or replaced by another pick).
+  const pendingSeqRef = useRef(0);
   const [showEmoji, setShowEmoji] = useState(false);
   const [listMode, setListMode] = useState<ListMode>(null);
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
@@ -153,6 +170,44 @@ const MessageComposer = forwardRef<MessageComposerHandle, Props>(function Messag
   }, [showEmoji]);
 
   const closeSlash = () => { setSlash(null); setSlashKind(null); };
+
+  // ---- Image/video attachment (uploaded to Google Drive on pick) ----------
+  const dropPending = () => {
+    pendingSeqRef.current += 1;                 // ignore in-flight results
+    setPending(prev => {
+      if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+      return null;
+    });
+    if (fileRef.current) fileRef.current.value = '';
+  };
+
+  const pickFile = async (file: File) => {
+    if (!uploadFile) return;
+    dropPending();
+    const isImage = file.type.startsWith('image/');
+    const isVideo = file.type.startsWith('video/');
+    if (!isImage && !isVideo) {
+      setPending({ file, previewUrl: null, progress: 0, attachment: null,
+        error: 'Only images and videos can be shared.' });
+      return;
+    }
+    const seq = ++pendingSeqRef.current;
+    const previewUrl = isImage ? URL.createObjectURL(file) : null;
+    setPending({ file, previewUrl, progress: 0, attachment: null, error: null });
+    try {
+      const attachment = await uploadFile(file, pct => {
+        if (pendingSeqRef.current !== seq) return;
+        setPending(p => (p ? { ...p, progress: pct } : p));
+      });
+      if (pendingSeqRef.current !== seq) return;
+      setPending(p => (p ? { ...p, progress: 100, attachment } : p));
+    } catch (e) {
+      if (pendingSeqRef.current !== seq) return;
+      setPending(p => (p ? { ...p, error: (e as Error).message } : p));
+    }
+  };
+
+  const uploading = !!pending && !pending.attachment && !pending.error;
 
   // Mention suggestions for the active "@query".
   const suggestions = useMemo(() => {
@@ -324,7 +379,8 @@ const MessageComposer = forwardRef<MessageComposerHandle, Props>(function Messag
 
   const submit = async () => {
     const body = cleanOutgoing(text);
-    if (!body || disabled || readOnly) return;
+    const attachment = pending?.attachment ?? null;
+    if ((!body && !attachment) || uploading || disabled || readOnly) return;
     const mentions = collectMentions(body);
     setShowEmoji(false);
     setMention(null);
@@ -337,7 +393,8 @@ const MessageComposer = forwardRef<MessageComposerHandle, Props>(function Messag
         taRef.current?.setSelectionRange(marker.length, marker.length);
       });
     }
-    await onSend(body, mentions);
+    dropPending();
+    await onSend(body, mentions, attachment);
   };
 
   const insertEmoji = (emoji: string) => {
@@ -412,9 +469,42 @@ const MessageComposer = forwardRef<MessageComposerHandle, Props>(function Messag
           <div className="ac-reply-preview-bar" />
           <div className="flex-grow-1 min-w-0">
             <div className="ac-reply-preview-name">{contactName(replyToSender)}</div>
-            <div className="ac-reply-preview-body text-truncate">{toPlainText(replyTo.body)}</div>
+            <div className="ac-reply-preview-body text-truncate">
+              {toPlainText(replyTo.body) || attachmentLabel(replyTo.attachment)}
+            </div>
           </div>
           <button type="button" className="ac-reply-cancel" onClick={onCancelReply} title="Cancel reply">
+            <i className="bi bi-x-lg" />
+          </button>
+        </div>
+      )}
+
+      {pending && (
+        <div className="ac-attach-preview">
+          {pending.previewUrl ? (
+            <img className="ac-attach-thumb" src={pending.previewUrl} alt="" />
+          ) : (
+            <span className="ac-attach-thumb ac-attach-thumb-icon">
+              <i className={`bi ${pending.file.type.startsWith('video/') ? 'bi-camera-video' : 'bi-file-earmark'}`} />
+            </span>
+          )}
+          <div className="flex-grow-1 min-w-0">
+            <div className="ac-attach-name text-truncate">{pending.file.name}</div>
+            {pending.error ? (
+              <div className="ac-attach-status text-danger">{pending.error}</div>
+            ) : pending.attachment ? (
+              <div className="ac-attach-status">
+                <i className="bi bi-check-circle-fill me-1" />
+                {fmtBytes(pending.file.size)} — ready to send
+              </div>
+            ) : (
+              <>
+                <div className="ac-attach-status">Uploading… {pending.progress}%</div>
+                <div className="ac-attach-bar"><span style={{ width: `${pending.progress}%` }} /></div>
+              </>
+            )}
+          </div>
+          <button type="button" className="ac-reply-cancel" title="Remove attachment" onClick={dropPending}>
             <i className="bi bi-x-lg" />
           </button>
         </div>
@@ -506,6 +596,29 @@ const MessageComposer = forwardRef<MessageComposerHandle, Props>(function Messag
           </div>
         )}
 
+        {uploadFile && (
+          <>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*,video/*"
+              className="d-none"
+              onChange={e => {
+                const f = e.target.files?.[0];
+                if (f) pickFile(f);
+              }}
+            />
+            <button
+              type="button"
+              className="ac-composer-icon"
+              title="Attach a photo or video"
+              disabled={disabled || uploading}
+              onClick={() => fileRef.current?.click()}
+            >
+              <i className="bi bi-paperclip" />
+            </button>
+          </>
+        )}
         <div ref={emojiWrapRef} className="ac-emoji-wrap">
           <button type="button" className="ac-composer-icon" title="Emoji" disabled={disabled} onClick={() => setShowEmoji(s => !s)}>
             <i className="bi bi-emoji-smile" />
@@ -558,7 +671,13 @@ const MessageComposer = forwardRef<MessageComposerHandle, Props>(function Messag
           }}
         />
 
-        <button type="button" className="ac-composer-send" title="Send" disabled={disabled || !cleanOutgoing(text)} onClick={submit}>
+        <button
+          type="button"
+          className="ac-composer-send"
+          title={uploading ? 'Uploading…' : 'Send'}
+          disabled={disabled || uploading || (!cleanOutgoing(text) && !pending?.attachment)}
+          onClick={submit}
+        >
           <i className="bi bi-send-fill" />
         </button>
       </div>

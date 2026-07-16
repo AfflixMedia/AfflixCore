@@ -5,7 +5,7 @@
 import { Modal } from 'react-bootstrap';
 import Avatar from '../../components/Avatar';
 import type { ChatMessage, MemberReceipt } from './types';
-import { contactName, messageTime, receiptTime } from './types';
+import { contactName, messageTime, receiptTime, attachmentLabel } from './types';
 import { toPlainText } from './messageFormat';
 
 interface Props {
@@ -41,7 +41,9 @@ export default function MessageInfoModal({ message, receipts, isGroup, onClose }
       <Modal.Body>
         <div className="ac-info-preview">
           <div className="ac-info-preview-body">
-            {message.deleted_at ? <em>This message was deleted</em> : toPlainText(message.body)}
+            {message.deleted_at
+              ? <em>This message was deleted</em>
+              : (toPlainText(message.body) || attachmentLabel(message.attachment))}
           </div>
           <div className="ac-info-preview-meta">Sent {receiptTime(message.created_at) || messageTime(message.created_at)}</div>
         </div>

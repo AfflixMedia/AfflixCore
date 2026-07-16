@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { Modal, Form, Badge, InputGroup } from 'react-bootstrap';
 import Avatar from '../../components/Avatar';
 import type { ChatContact, ChatMessage } from './types';
-import { contactName, roleLabel, roleBadge } from './types';
+import { contactName, roleLabel, roleBadge, attachmentLabel } from './types';
 import { toPlainText } from './messageFormat';
 
 interface Props {
@@ -40,7 +40,9 @@ export default function ForwardModal({ show, message, contacts, onForward, onClo
         {message && (
           <div className="ac-forward-preview mb-3">
             <i className="bi bi-quote me-1 text-muted" />
-            <span className="text-truncate">{toPlainText(message.body)}</span>
+            <span className="text-truncate">
+              {toPlainText(message.body) || attachmentLabel(message.attachment)}
+            </span>
           </div>
         )}
         <InputGroup className="mb-3">

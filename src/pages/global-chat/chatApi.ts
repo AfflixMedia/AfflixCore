@@ -4,7 +4,7 @@
 import { supabase } from '../../lib/supabase';
 import type {
   ChatContact, Conversation, Participant, ChatMessage, ConversationOverview,
-  ChatEvent, ChatReaction, ChatBookmark,
+  ChatEvent, ChatReaction, ChatBookmark, ChatAttachment,
 } from './types';
 
 /** Internal-staff directory (excludes the caller). */
@@ -81,6 +81,7 @@ export async function sendMessage(params: {
   forwardedFromId?: string | null;
   isForwarded?: boolean;
   mentions?: string[] | null;
+  attachment?: ChatAttachment | null;   // Drive-hosted image/video
 }): Promise<ChatMessage> {
   const { data, error } = await supabase
     .from('chat_messages')
@@ -92,6 +93,7 @@ export async function sendMessage(params: {
       forwarded_from_id: params.forwardedFromId ?? null,
       is_forwarded: params.isForwarded ?? false,
       mentions: params.mentions && params.mentions.length ? params.mentions : null,
+      attachment: params.attachment ?? null,
     })
     .select('*')
     .single();
