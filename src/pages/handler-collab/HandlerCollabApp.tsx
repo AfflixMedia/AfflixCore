@@ -1359,8 +1359,16 @@ async function contractTemplatePayload() {
 // Contract column — fill the standard agreement template from the deal row.
 // Featured products: the creator's own list, else the month's focus products
 // (passed by the Drilldown; the Creators tab has no brand-month in scope).
-async function downloadContractFor(c, brandName, focusNames = []) {
-  const prodNames = creatorProducts(c).map(p => p.name).filter(Boolean);
+// Product page links + the month's content guide ride along as clickable
+// reference links when set.
+async function downloadContractFor(c, brandName, opts = {}) {
+  const own = creatorProducts(c);
+  const focus = opts.focusProducts || [];
+  const prodNames = own.map(p => p.name).filter(Boolean);
+  // Links follow the same priority as the names; fall back to the month's
+  // focus-product links when the chosen list carries none.
+  let productLinks = (own.length ? own : focus).filter(p => isValidUrl(p.url));
+  if (!productLinks.length) productLinks = focus.filter(p => isValidUrl(p.url));
   const accounts = tiktokAccounts(c.tiktok_handle);
   const { downloadCreatorContract } = await import('./contractPdf');
   await downloadCreatorContract({
@@ -1372,7 +1380,9 @@ async function downloadContractFor(c, brandName, focusNames = []) {
     videosCount: parseInt(c.videos_count, 10) || 0,
     paymentMethod: c.zelle && c.paypal ? 'Zelle or PayPal' : c.paypal ? 'PayPal' : 'Zelle',
     effectiveDate: c.onboarded_on || null,
-    productNames: prodNames.length ? prodNames : focusNames,
+    productNames: prodNames.length ? prodNames : focus.map(p => p.name).filter(Boolean),
+    productLinks,
+    contentGuideUrl: isValidUrl(opts.contentGuideUrl) ? opts.contentGuideUrl : null,
   });
 }
 
@@ -1466,7 +1476,7 @@ function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCr
                   patchCreatorLocal={patchCreatorLocal} onSetStatus={onSetStatus} onToggleVisible={onToggleVisible}
                   noteCount={creatorNoteCount ? creatorNoteCount(c) : 0}
                   onNotes={onCreatorNotes ? () => onCreatorNotes(c) : null}
-                  onContract={() => downloadContractFor(c, brand.name, products.map(p => p.name).filter(Boolean))}
+                  onContract={() => downloadContractFor(c, brand.name, { focusProducts: products, contentGuideUrl: bm.content_guide_url })}
                   onContractLink={onSetContractLink ? (url) => onSetContractLink(c.id, url) : null} />
               ))}
             </React.Fragment>

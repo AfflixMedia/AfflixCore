@@ -15,6 +15,8 @@ export type ContractInput = {
   paymentMethod: string;     // "Zelle" / "PayPal" / "Zelle or PayPal"
   effectiveDate?: string | null; // ISO YYYY-MM-DD (onboarding date); null = today
   productNames?: string[];   // featured product(s); [] = "<brand> products"
+  productLinks?: { name?: string; url: string }[]; // featured-product page links (clickable); omitted when none set
+  contentGuideUrl?: string | null; // brand content-guide link (clickable); omitted when not set
   // Handler's contract-template settings (signature block only):
   repName?: string;              // Brand Representative name
   signatureDataUrl?: string | null; // PNG data URL, drawn/embedded on the Signature line
@@ -143,6 +145,38 @@ export async function downloadCreatorContract(input: ContractInput) {
   heading('1. Purpose');
   para([{ t: 'The Creator agrees to create and publish' }, { t: `${nWords} original TikTok videos`, b: true }, { t: `featuring ${featuring} on the Creator's official TikTok account.` }]);
 
+  // Reference links (only when set): featured-product pages + the brand's
+  // content guide, rendered as clickable blue URLs (kept as raw URLs so a
+  // printed copy stays usable).
+  function linkLines(url: string, indent: number, after = 4) {
+    const size = 10.5;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(size);
+    const lines: string[] = doc.splitTextToSize(url, W - M * 2 - indent);
+    const lineH = size * 1.45;
+    for (const ln of lines) {
+      ensure(lineH);
+      doc.setTextColor(17, 85, 204);
+      doc.textWithLink(ln, M + indent, y, { url });
+      y += lineH;
+    }
+    y += after;
+  }
+  const isHttp = (s?: string | null) => !!s && /^https?:\/\//i.test(s);
+  const prodLinks = (input.productLinks || []).filter(p => isHttp(p.url));
+  if (prodLinks.length) {
+    para([{ t: `Featured product link${prodLinks.length > 1 ? 's' : ''}:`, b: true }], { after: 2 });
+    prodLinks.forEach((p, i) => {
+      para([{ t: p.name || `Product ${i + 1}` }], { indent: 22, bullet: 'dot', after: 0 });
+      linkLines(p.url, 22, 3);
+    });
+    y += 2;
+  }
+  if (isHttp(input.contentGuideUrl)) {
+    para([{ t: 'Brand content guide:', b: true }], { after: 2 });
+    linkLines(input.contentGuideUrl as string, 22);
+  }
+
   heading('2. Deliverables');
   para([{ t: 'The Creator agrees to:' }], { after: 4 });
   para([{ t: 'Create and publish a total of' }, { t: `${nWords} TikTok videos`, b: true }, { t: `featuring ${brand}.` }], { indent: 22, bullet: 'dot', after: 2 });
@@ -150,7 +184,7 @@ export async function downloadCreatorContract(input: ContractInput) {
   {
     // Completion deadline scales with deal size: ≤4 videos → 10 days, 5+ → 14 days
     // (skipped when the count is unknown, to keep the neutral wording clean).
-    const deadlineDays = count < 5 ? 10 : 14;
+    const deadlineDays = count < 6 ? 10 : 14;
     if (count > 0) para([{ t: 'Complete the deliverables within' }, { t: `${numWords(deadlineDays)} (${deadlineDays}) days`, b: true }, { t: 'after the sample has been delivered.' }], { indent: 22, bullet: 'dot', after: 2 });
   }
   para([{ t: 'After all' }, { t: `${nShort} videos`, b: true }, { t: 'have been posted, provide the Brand with:' }], { indent: 22, bullet: 'dot', after: 2 });
