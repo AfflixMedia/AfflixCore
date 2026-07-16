@@ -25,7 +25,7 @@ import {
   fetchReactions, setReaction, clearReaction,
   fetchBookmarks, addBookmark, updateBookmark, deleteBookmark, setBookmarkAccess,
 } from './chatApi';
-import { uploadChatFile, signAttachmentUrls } from './driveUpload';
+import { uploadChatFile, signAttachmentUrls, discardChatFile } from './driveUpload';
 import type {
   ChatAttachment, ChatContact, Conversation, Participant, ChatMessage, ConversationOverview,
   ConversationView, ChatEvent, ChatReaction, ChatBookmark, Receipt,
@@ -502,6 +502,14 @@ export default function GlobalChat() {
     [activeId],
   );
 
+  // Draft attachment thrown away before sending → delete the Drive file.
+  // activeIdRef (not activeId) so the composer's unmount cleanup still has a
+  // conversation to authenticate against mid-switch.
+  const handleDiscardFile = useCallback((a: ChatAttachment) => {
+    const conv = activeIdRef.current;
+    if (conv) void discardChatFile(conv, a.drive_id);
+  }, []);
+
   // ---- Acknowledgement reactions ----
   const handleReact = async (messageId: string, emoji: string) => {
     if (!activeId || !myId) return;
@@ -538,9 +546,14 @@ export default function GlobalChat() {
     const msg = deleteMsg;
     if (!msg) return;
     try {
+      const att = msg.attachment;   // capture before the tombstone clears it
       await deleteForEveryone(msg.id);
       setMessages(prev => prev.map(m => m.id === msg.id
-        ? { ...m, deleted_at: new Date().toISOString(), body: '', mentions: null } : m));
+        ? { ...m, deleted_at: new Date().toISOString(), body: '', mentions: null, attachment: null } : m));
+      // The tombstone dropped this message's reference; discard deletes the
+      // Drive file unless a forwarded copy elsewhere still references it
+      // (server-side reference check — WhatsApp/Discord semantics).
+      if (att) handleDiscardFile(att);
       refreshOverview();
     } catch (e) { setErr((e as Error).message); }
     finally { setDeleteMsg(null); }
@@ -688,6 +701,7 @@ export default function GlobalChat() {
           onDelete={(m) => setDeleteMsg(m)}
           onSend={handleSend}
           uploadFile={handleUploadFile}
+          discardFile={handleDiscardFile}
           onBack={clearActive}
         />
       </div>

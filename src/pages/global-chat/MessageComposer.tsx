@@ -120,6 +120,9 @@ interface Props {
   /** Upload a picked image/video to Google Drive (provided by GlobalChat);
    *  absent → no attach button. */
   uploadFile?: (file: File, onProgress: (pct: number) => void) => Promise<ChatAttachment>;
+  /** Best-effort delete of an uploaded draft attachment that won't be sent
+   *  (X button, replaced pick, leaving the chat). */
+  discardFile?: (a: ChatAttachment) => void;
 }
 
 // One picked image/video being uploaded to Drive (or ready to send).
@@ -134,7 +137,7 @@ interface PendingAttachment {
 const MessageComposer = forwardRef<MessageComposerHandle, Props>(function MessageComposer({
   disabled, readOnly, readOnlyNote, readOnlyIcon,
   mentionables = [], resources = [], products = [], tasks = [], brandId,
-  replyTo, replyToSender, onCancelReply, onSend, uploadFile,
+  replyTo, replyToSender, onCancelReply, onSend, uploadFile, discardFile,
 }: Props, ref) {
   const brandGroup = !!brandId;
   const [text, setText] = useState('');
@@ -143,6 +146,18 @@ const MessageComposer = forwardRef<MessageComposerHandle, Props>(function Messag
   // Skip stale async upload results after the pending chip was dismissed
   // (or replaced by another pick).
   const pendingSeqRef = useRef(0);
+  // Mirrors `pending` for unmount cleanup (dropPending clears it eagerly so a
+  // just-sent attachment is never discarded by the unmount hook).
+  const pendingRef = useRef<PendingAttachment | null>(null);
+  useEffect(() => { pendingRef.current = pending; }, [pending]);
+  const discardFileRef = useRef(discardFile);
+  useEffect(() => { discardFileRef.current = discardFile; }, [discardFile]);
+  // Leaving the conversation (composer is re-keyed per chat) with an unsent
+  // uploaded draft → delete it from Drive, WhatsApp-style.
+  useEffect(() => () => {
+    const p = pendingRef.current;
+    if (p?.attachment) discardFileRef.current?.(p.attachment);
+  }, []);
   const [showEmoji, setShowEmoji] = useState(false);
   const [listMode, setListMode] = useState<ListMode>(null);
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
@@ -173,19 +188,23 @@ const MessageComposer = forwardRef<MessageComposerHandle, Props>(function Messag
 
   const closeSlash = () => { setSlash(null); setSlashKind(null); };
 
-  // ---- Image/video attachment (uploaded to Google Drive on pick) ----------
-  const dropPending = () => {
+  // ---- File attachment (uploaded to Google Drive on pick) -----------------
+  // `discardUpload` deletes the already-uploaded file from Drive too — true
+  // when the draft is being thrown away (X / replaced pick), false when the
+  // attachment is about to be sent.
+  const dropPending = (discardUpload = false) => {
     pendingSeqRef.current += 1;                 // ignore in-flight results
-    setPending(prev => {
-      if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
-      return null;
-    });
+    const prev = pendingRef.current;
+    if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+    if (discardUpload && prev?.attachment) discardFileRef.current?.(prev.attachment);
+    pendingRef.current = null;
+    setPending(null);
     if (fileRef.current) fileRef.current.value = '';
   };
 
   const pickFile = async (file: File) => {
     if (!uploadFile) return;
-    dropPending();
+    dropPending(true);   // replacing a draft deletes the previous upload
     const seq = ++pendingSeqRef.current;
     const previewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : null;
     setPending({ file, previewUrl, progress: 0, attachment: null, error: null });
@@ -501,7 +520,7 @@ const MessageComposer = forwardRef<MessageComposerHandle, Props>(function Messag
               </>
             )}
           </div>
-          <button type="button" className="ac-reply-cancel" title="Remove attachment" onClick={dropPending}>
+          <button type="button" className="ac-reply-cancel" title="Remove attachment" onClick={() => dropPending(true)}>
             <i className="bi bi-x-lg" />
           </button>
         </div>

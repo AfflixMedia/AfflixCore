@@ -85,6 +85,42 @@ async function hmacHex(msg: string, key: string): Promise<string> {
 
 const SIGN_TTL_SECONDS = 6 * 60 * 60;   // signed media URLs live 6 hours
 
+// Garbage collector (Discord-style): delete folder files older than 24h that
+// no chat message references — catches drafts abandoned via tab-close and any
+// eager delete the client missed. Runs best-effort in the background of
+// 'create' calls; the 24h grace period protects in-flight drafts.
+async function sweepOrphans(admin: any, folderId: string): Promise<void> {
+  try {
+    const token = await driveAccessToken();
+    const cutoff = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    const q = encodeURIComponent(
+      `'${folderId}' in parents and trashed = false and modifiedTime < '${cutoff}'`,
+    );
+    const res = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true`,
+      { headers: { 'Authorization': `Bearer ${token}` } },
+    );
+    if (!res.ok) return;
+    const files: { id: string }[] = (await res.json()).files ?? [];
+    if (files.length === 0) return;
+    const { data: used } = await admin.from('chat_messages')
+      .select('attachment')
+      .in('attachment->>drive_id', files.map(f => f.id));
+    const usedSet = new Set(
+      (used ?? []).map((r: any) => r.attachment?.drive_id).filter(Boolean),
+    );
+    for (const f of files) {
+      if (usedSet.has(f.id)) continue;
+      await fetch(
+        `https://www.googleapis.com/drive/v3/files/${f.id}?supportsAllDrives=true`,
+        { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } },
+      );
+    }
+  } catch (e) {
+    console.warn('orphan sweep failed:', (e as Error).message);
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   try {
@@ -169,6 +205,9 @@ serve(async (req) => {
       }
       const uploadUrl = initRes.headers.get('location');
       if (!uploadUrl) return json({ error: 'Drive did not return an upload session' }, 502);
+      // Piggyback the orphan GC on upload traffic (background, best-effort).
+      const sweep = sweepOrphans(admin, folderId);
+      (globalThis as any).EdgeRuntime?.waitUntil?.(sweep);
       return json({ upload_url: uploadUrl, kind });
     }
 
@@ -203,6 +242,38 @@ serve(async (req) => {
           url: `https://drive.google.com/file/d/${file.id}/view`,
         },
       });
+    }
+
+    // Delete an uploaded file that is NOT referenced by any message — used by
+    // the composer when a draft attachment is removed, and after
+    // delete-for-everyone (the tombstone clears the reference first).
+    // Reference-counted by design: a file forwarded into other chats is still
+    // referenced there, so it survives until the LAST message dies.
+    if (action === 'discard') {
+      const fileId = String(body.drive_id ?? '');
+      if (!/^[\w-]{10,}$/.test(fileId)) return json({ error: 'Invalid file id' }, 400);
+      const { data: refs } = await admin.from('chat_messages')
+        .select('id')
+        .eq('attachment->>drive_id', fileId)
+        .limit(1);
+      if (refs && refs.length > 0) {
+        return json({ error: 'File is attached to a message' }, 409);
+      }
+      const token = await driveAccessToken();
+      const meta = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,parents&supportsAllDrives=true`,
+        { headers: { 'Authorization': `Bearer ${token}` } },
+      );
+      if (!meta.ok) return json({ ok: true });   // already gone
+      const file = await meta.json();
+      if (!Array.isArray(file.parents) || !file.parents.includes(folderId)) {
+        return json({ error: 'File is outside the chat uploads folder' }, 403);
+      }
+      await fetch(
+        `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`,
+        { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } },
+      );
+      return json({ ok: true });
     }
 
     if (action === 'sign') {

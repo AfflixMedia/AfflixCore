@@ -44,6 +44,8 @@ interface Props {
   onSend: (body: string, mentions: string[], attachment?: ChatAttachment | null) => void | Promise<void>;
   /** Upload a picked image/video to Google Drive (from GlobalChat). */
   uploadFile?: (file: File, onProgress: (pct: number) => void) => Promise<ChatAttachment>;
+  /** Best-effort delete of an unsent draft upload (from GlobalChat). */
+  discardFile?: (a: ChatAttachment) => void;
   onBack: () => void;        // mobile: back to list
 }
 
@@ -56,7 +58,7 @@ export default function ChatPanel({
   myId, directory, unreadAnchorId, participantsByUser, attachmentUrls, members, announcementCount,
   canPost, reactionsByMsg, resources, composerRef, onReact, onOpenContact, onOpenGroup,
   onOpenSettings, onOpenBookmarks,
-  replyTo, onReply, onForward, onDelete, onSend, uploadFile, onBack,
+  replyTo, onReply, onForward, onDelete, onSend, uploadFile, discardFile, onBack,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
@@ -467,6 +469,7 @@ export default function ChatPanel({
         onCancelReply={() => onReply(null)}
         onSend={onSend}
         uploadFile={uploadFile}
+        discardFile={discardFile}
       />
 
       <MessageInfoModal

@@ -63,6 +63,19 @@ export async function uploadChatFile(
   return attachment;
 }
 
+/** Best-effort delete of an uploaded file that never made it into a message
+ *  (removed draft) or whose message was deleted for everyone. The server
+ *  refuses while any message still references the file (forwarded copies),
+ *  and the 24h orphan sweeper catches anything this misses — so errors here
+ *  are safely swallowed. */
+export async function discardChatFile(conversationId: string, driveId: string): Promise<void> {
+  try {
+    await supabase.functions.invoke('chat-drive-upload', {
+      body: { action: 'discard', conversation_id: conversationId, drive_id: driveId },
+    });
+  } catch { /* best-effort */ }
+}
+
 /** Short-lived signed streaming URLs for the given attachments (files are
  *  PRIVATE on Drive — the server checks the caller's login + membership of
  *  this conversation, then signs URLs for ~6h). Returns driveId → URL. */
