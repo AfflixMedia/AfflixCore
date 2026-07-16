@@ -580,6 +580,8 @@ export default function SharedReports() {
           offsiteSeries={offsiteSeries}
           affiliateSeries={affiliateSeries}
           gmvMaxSeries={gmvMaxSeries}
+          paidCreators={pcHandlerCreators}
+          onMarkPaid={confirmPaidCollabPayment}
           hasPrev={!!prevReport}
           audience={isClientDash ? 'client' : undefined}
           reportMeta={isClientDash ? {

@@ -9,6 +9,8 @@ import {
   ScalarData, RowData, fieldValue, formatValue,
 } from '../lib/reportSchemaV3';
 import { setReportCurrency } from '../lib/currency';
+import type { HandlerCreator } from '../pages/handler-collab/store';
+import { PaidCollabViz } from './report/PaidCollabReport';
 import { sanitizeRich } from '../lib/sanitize';
 import DashSidebar, { DashNavItem } from './report/DashSidebar';
 import SectionComments, { Comment, CommentSection } from './SectionComments';
@@ -791,21 +793,27 @@ const NAV_ICON: Record<string, string> = {
   product_traffic: 'bi-signpost-split-fill', traffic_analysis: 'bi-funnel-fill', channel_analytics: 'bi-collection-play-fill',
   offsite: 'bi-box-arrow-up-right', affiliate: 'bi-people-fill', top_creators: 'bi-trophy-fill',
   top_videos: 'bi-play-btn-fill', top_lives: 'bi-broadcast', gmv_max: 'bi-cash-stack',
+  paid_collab: 'bi-cash-coin',
 };
 const SECTION_ACCENT: Record<string, string> = {
   sampling: '#e8862e', overall: '#e8862e', product_analytics: '#0d6efd', product_traffic: '#06b6d4',
   traffic_analysis: '#06b6d4', channel_analytics: '#8b5cf6', offsite: '#0ea5e9', affiliate: '#198754',
   top_creators: '#e8862e', top_videos: '#0d6efd', top_lives: '#e11d63', gmv_max: '#8b5cf6',
+  paid_collab: '#198754',
 };
 
 export default function ReportDashboardV3({
   c, p, wow, sampleSeries, mtd, productSamples, offsiteSeries, affiliateSeries, gmvMaxSeries, hasPrev, commentsConfig, openSectionOnLoad, highlightCommentId,
-  approvalDecisions, approvalAction, audience = 'staff', reportMeta, currency,
+  approvalDecisions, approvalAction, audience = 'staff', reportMeta, currency, paidCreators, onMarkPaid,
 }: {
   c: WeeklyReportContentV3;
   p: WeeklyReportContentV3 | null;
   /** brand display currency (e.g. 'USD', 'EUR'); drives all money formatting. */
   currency?: string;
+  /** §13 live paid-collab roster (handler_collab_creators). */
+  paidCreators?: HandlerCreator[];
+  /** §13 client mark-as-paid callback (shared view only). */
+  onMarkPaid?: (creatorId: string, confirmed: boolean) => Promise<void> | void;
   /** week-over-week series (bars=orders, line=GMV) built by the page. Falls back to trendData GMV. */
   wow?: WowPoint[];
   /** per-week samples/videos series for the §1 line chart (last point = current week). */
@@ -844,13 +852,20 @@ export default function ReportDashboardV3({
   // §1 "Sampling & Videos" is no longer a standalone section — its cards are
   // rendered inside §8 (Affiliate Performance). It stays in the schema/editor so
   // data entry + auto-fill keep working; it's just merged in the report view.
-  const visibleSections = WEEKLY_SECTIONS_V3.filter(d => d.id !== 'sampling' && !(isClient && CLIENT_HIDE.has(d.id)));
+  // §13 Paid Collaborations only appears when the author toggled it on (opt-in)
+  // AND the brand actually has creators to show — never an empty section.
+  const visibleSections = WEEKLY_SECTIONS_V3.filter(d =>
+    d.id !== 'sampling'
+    && !(d.id === 'paid_collab' && (!c.paid_collab.enabled || (paidCreators?.length ?? 0) === 0))
+    && !(isClient && CLIENT_HIDE.has(d.id)));
   // Display numbering follows the visible order (no gap left by the removed §1).
   const dispNum = new Map<string, number>();
   visibleSections.forEach((d, i) => dispNum.set(d.id, i + 1));
 
   const sectionHasData = (def: SectionDefV3): boolean => {
     const data = (c as any)[def.id];
+    // §13 is a bespoke shape — it shows when the author enabled it and there are creators.
+    if (def.id === 'paid_collab') return c.paid_collab.enabled && (paidCreators?.length ?? 0) > 0;
     if (def.kind === 'scalar') return def.fields.some(f => !f.auto && data?.[f.key] != null);
     // Fixed sections (channel_analytics) always carry their locked rows, so
     // count them as "has data" only when a real metric was entered.
@@ -1033,6 +1048,7 @@ export default function ReportDashboardV3({
       case 'top_videos': return <TopVideos rows={rows} />;
       case 'top_lives': return <TopLives rows={rows} />;
       case 'gmv_max': return <GmvMaxViz rows={rows} series={gmvMaxSeries} />;
+      case 'paid_collab': return <PaidCollabViz data={c.paid_collab} creators={paidCreators ?? []} onMarkPaid={onMarkPaid} isClient={isClient} />;
       default:
         return def.kind === 'scalar' ? <TileGrid def={def} data={data} prev={prev} /> : null;
     }

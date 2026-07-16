@@ -30,7 +30,7 @@ export type StandardSectionIdV3 =
   | 'start'
   | 'sampling' | 'overall' | 'product_analytics' | 'product_traffic'
   | 'traffic_analysis' | 'channel_analytics' | 'offsite' | 'affiliate'
-  | 'top_creators' | 'top_videos' | 'top_lives' | 'gmv_max'
+  | 'top_creators' | 'top_videos' | 'top_lives' | 'gmv_max' | 'paid_collab'
   | 'insights';
 
 // ============================================================================
@@ -81,7 +81,7 @@ export interface SectionDefV3 {
    *   'gmv_max_product' -> pull per-product ad spend from GMV Max
    *   'video_paste'     -> paste-and-parse TikTok Shop video rows
    */
-  special?: 'sampling' | 'shop_score' | 'product_catalog' | 'gmv_max_product' | 'video_paste' | 'live_sessions';
+  special?: 'sampling' | 'shop_score' | 'product_catalog' | 'gmv_max_product' | 'video_paste' | 'live_sessions' | 'paid_collab';
 }
 
 // ---- tiny formula helpers --------------------------------------------------
@@ -255,6 +255,16 @@ export const WEEKLY_SECTIONS_V3: SectionDefV3[] = [
       { key: 'roas', label: 'ROAS', format: 'ratio', auto: v => div(v.gross_revenue, v.cost), formula: 'Revenue ÷ Cost' },
     ],
   },
+  // 13 ─────────────────────────────────────────────────────────────────────
+  //  Bespoke section (not scalar/table): live creator roster from the paid-collab
+  //  workspace with per-creator notes + client "mark as paid". Body is hand-wired
+  //  in the editor and dashboard; kind:'table' is a placeholder for the registry.
+  {
+    id: 'paid_collab', num: '13', title: 'Paid Collaborations', kind: 'table',
+    special: 'paid_collab',
+    blurb: 'Creators in the paid-collab program, their payment status, and pending payouts the client can settle.',
+    fields: [],
+  },
 ];
 
 export const SECTION_BY_ID_V3: Record<string, SectionDefV3> =
@@ -281,6 +291,17 @@ export const SECTION_LABELS_V3: Record<string, string> = {
 export type ScalarData = Record<string, number | null | boolean>;
 export type RowData = Record<string, number | null | string>;
 
+/** §13 Paid Collaborations — report config only; the creator roster is live from
+ *  handler_collab_creators (never snapshotted into content), so status stays current
+ *  and the client's "mark as paid" reflects immediately. */
+export interface PaidCollabData {
+  enabled: boolean;                    // the toggle
+  month: string | null;                // 'YYYY-MM' program-month filter; null = all
+  pending_only: boolean;               // show only payment-pending creators
+  intro: string;                       // rich-text note for the client
+  notes: Record<string, string>;       // per-creator note, keyed by handler_collab_creators.id
+}
+
 export interface WeeklyReportContentV3 {
   /** Marks this report as the v3 (12-section) format. Always 'v3'. */
   format_version: 'v3';
@@ -296,6 +317,7 @@ export interface WeeklyReportContentV3 {
   top_videos: RowData[];
   top_lives: RowData[];
   gmv_max: RowData[];
+  paid_collab: PaidCollabData;
   insights: Insights;
   custom_sections: CustomSection[];
   approval: ApprovalRequest;
@@ -350,6 +372,7 @@ export const emptyContentV3 = (): WeeklyReportContentV3 => ({
   top_videos: [],
   top_lives: [],
   gmv_max: [],
+  paid_collab: { enabled: false, month: null, pending_only: false, intro: '', notes: {} },
   insights: { summary: '' },
   custom_sections: [],
   approval: { enabled: false, content: '' },
@@ -440,6 +463,19 @@ export function normalizeContentV3(raw: any): WeeklyReportContentV3 {
     expires_at: src.approval?.expires_at ?? null,
   };
 
+  const pcSrc = src.paid_collab ?? {};
+  const pcNotes: Record<string, string> = {};
+  if (pcSrc.notes && typeof pcSrc.notes === 'object') {
+    for (const [k, v] of Object.entries(pcSrc.notes)) pcNotes[str(k)] = str(v);
+  }
+  const paid_collab: PaidCollabData = {
+    enabled: !!pcSrc.enabled,
+    month: pcSrc.month ? str(pcSrc.month) : null,
+    pending_only: !!pcSrc.pending_only,
+    intro: str(pcSrc.intro),
+    notes: pcNotes,
+  };
+
   return {
     format_version: 'v3',
     sampling: scalar(SECTION_BY_ID_V3.sampling),
@@ -454,6 +490,7 @@ export function normalizeContentV3(raw: any): WeeklyReportContentV3 {
     top_videos: table(SECTION_BY_ID_V3.top_videos),
     top_lives: table(SECTION_BY_ID_V3.top_lives),
     gmv_max: table(SECTION_BY_ID_V3.gmv_max),
+    paid_collab,
     insights: { summary: str(src.insights?.summary) },
     custom_sections,
     approval,

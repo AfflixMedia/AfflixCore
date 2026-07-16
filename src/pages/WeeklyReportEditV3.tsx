@@ -11,6 +11,8 @@ import {
   CustomSection, CustomField, CustomFieldType, StandardSectionIdV3,
 } from '../lib/reportSchemaV3';
 import { ScalarSectionBodyV3, TableSectionBodyV3 } from '../components/report/SectionBodyV3';
+import { PaidCollabEditorBody } from '../components/report/PaidCollabReport';
+import type { HandlerCreator } from './handler-collab/store';
 import VideoPasteBar from '../components/report/VideoPasteBar';
 import SectionComments, { Comment, CommentSection } from '../components/SectionComments';
 import { useAuth } from '../auth/AuthContext';
@@ -55,6 +57,7 @@ export default function WeeklyReportEditV3() {
   const [showComments, setShowComments] = useState(false);
   const [priorReports, setPriorReports] = useState<ReportRow[]>([]);
   const [pcPrograms, setPcPrograms] = useState<{ id: string; name: string | null; ended_at: string | null }[]>([]);
+  const [pcCreators, setPcCreators] = useState<HandlerCreator[]>([]);   // §13 live paid-collab roster
   const [selectedPriorId, setSelectedPriorId] = useState<string>('');
   const [priorComments, setPriorComments] = useState<Comment[]>([]);
   const [loadingComments, setLoadingComments] = useState(false);
@@ -108,6 +111,11 @@ export default function WeeklyReportEditV3() {
         .select('id,name,ended_at').eq('brand_id', r.brand_id)
         .order('launch_date', { ascending: false });
       setPcPrograms((pcp as any[]) ?? []);
+      // §13 — live paid-collab roster (handler-collab family). Apply the follow-up
+      // status sweep first so statuses are fresh, then load this brand's creators.
+      try { await supabase.rpc('handler_collab_apply_follow_ups'); } catch { /* best effort */ }
+      const { data: pcc } = await supabase.from('handler_collab_creators').select('*').eq('brand_id', r.brand_id);
+      setPcCreators((pcc as HandlerCreator[]) ?? []);
       const { data: priors } = await supabase.from('weekly_reports')
         .select('*').eq('brand_id', r.brand_id).lt('week_start', r.week_start)
         .order('week_start', { ascending: false }).limit(12);
@@ -682,6 +690,12 @@ export default function WeeklyReportEditV3() {
             onClick={fetchLiveSessionsFromBrand} msg={liveMsg} onClose={() => setLiveMsg(null)} />
           <ScalarSectionBodyV3 def={def} data={(c as any)[def.id]} onField={(k, v) => setSec(def.id, k, v)} />
         </>
+      );
+    }
+    if (def.special === 'paid_collab') {
+      return (
+        <PaidCollabEditorBody data={c.paid_collab} creators={pcCreators}
+          onChange={patch => setC(prev => ({ ...prev, paid_collab: { ...prev.paid_collab, ...patch } }))} />
       );
     }
     if (def.special === 'product_catalog') {

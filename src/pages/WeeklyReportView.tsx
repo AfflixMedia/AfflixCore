@@ -14,6 +14,7 @@ import { normalizeContentV3 } from '../lib/reportSchemaV3';
 import ReportDashboard, { TrendPoint, ApprovalDecisionView } from '../components/ReportDashboard';
 import ReportDashboardV2 from '../components/ReportDashboardV2';
 import ReportDashboardV3 from '../components/ReportDashboardV3';
+import type { HandlerCreator } from './handler-collab/store';
 import { ChronoPoint } from '../components/report/ChronologyChart';
 
 /** Pull §2 chronology metrics from a report's content (v2 or legacy shape). */
@@ -239,6 +240,18 @@ export default function WeeklyReportView() {
       roas: cost > 0 ? rev / cost : null, cpo: orders > 0 ? cost / orders : null,
     };
   }), [trend]);
+  // v3 §13 — live paid-collab roster (handler-collab family) for the report brand.
+  const [paidCreators, setPaidCreators] = useState<HandlerCreator[]>([]);
+  useEffect(() => {
+    if (!report || (report.content as any)?.format_version !== 'v3') return;
+    let alive = true;
+    (async () => {
+      try { await supabase.rpc('handler_collab_apply_follow_ups'); } catch { /* best effort */ }
+      const { data } = await supabase.from('handler_collab_creators').select('*').eq('brand_id', report.brand_id);
+      if (alive) setPaidCreators((data as HandlerCreator[]) ?? []);
+    })();
+    return () => { alive = false; };
+  }, [report]);
   // v3 §1 month-to-date + §3 per-product samples-this-week (from Sample Seeding).
   const [mtd, setMtd] = useState<{ samples: number | null; videos: number | null } | null>(null);
   const [productSamples, setProductSamples] = useState<Record<string, number | null>>({});
@@ -387,6 +400,7 @@ export default function WeeklyReportView() {
             offsiteSeries={offsiteSeries}
             affiliateSeries={affiliateSeries}
             gmvMaxSeries={gmvMaxSeries}
+            paidCreators={paidCreators}
             trendData={trendData}
             hasPrev={!!prev}
             openSectionOnLoad={openSection}
