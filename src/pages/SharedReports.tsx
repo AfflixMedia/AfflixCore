@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import DOMPurify from 'dompurify';
 import { Card, Spinner, Alert, Form, Row, Col, Badge, Button, Tab, Nav, Offcanvas, Modal } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import { fnError } from '../lib/functionError';
@@ -96,9 +97,13 @@ export default function SharedReports() {
   const [pcComments, setPcComments] = useState<any[]>([]);
   const [openProgramId, setOpenProgramId] = useState<string | null>(null);
   const [linkMode, setLinkMode] = useState<'brand' | 'general'>('brand');
+  // Sample-seeding rows for the v3 MTD tiles / per-product samples column.
+  // null = the edge fn payload didn't carry them (not redeployed yet).
+  const [samplesDaily, setSamplesDaily] = useState<any[] | null>(null);
+  const [samplesProducts, setSamplesProducts] = useState<any[]>([]);
   const [decisions, setDecisions] = useState<ApprovalDecisionRow[]>([]);
-  // Every link's decisions on this link's reports — feeds the "Approved"
-  // history tab so approvals made via an older/rotated link still show.
+  // Every link's decisions on this link's reports — feeds the "Approvals"
+  // tab so decisions made via an older/rotated link still show.
   const [allDecisions, setAllDecisions] = useState<ApprovalDecisionRow[]>([]);
   const [showApprovals, setShowApprovals] = useState(false);
   const [singleApprovalId, setSingleApprovalId] = useState<string | null>(null);
@@ -156,6 +161,8 @@ export default function SharedReports() {
         setPcMonths((data.handler_months ?? []) as HandlerBrandMonth[]);
         setPcHandlerCreators((data.handler_creators ?? []) as HandlerCreator[]);
         setPcComments((data.paid_collab_comments ?? []) as any[]);
+        setSamplesDaily((data.samples_daily as any[] | undefined) ?? null);
+        setSamplesProducts((data.samples_products as any[] | undefined) ?? []);
         const mode: 'brand' | 'general' = data.link_mode === 'general' ? 'general' : 'brand';
         setLinkMode(mode);
         // Default landing tab — first enabled section
@@ -309,11 +316,66 @@ export default function SharedReports() {
       });
   }, [openReport, reports]);
 
-  // Decisions are keyed by (report_type, report_id) so a weekly + monthly report
-  // never accidentally share state.
+  // v3 §1 "Samples Approved MTD" / "Videos Posted MTD" tiles + §3 per-product
+  // samples column. When the edge fn returns the sample-seeding daily rows
+  // (samples_daily) this runs the EXACT same math as Bob's WeeklyReportView —
+  // month-window scoped to the 1st, so a week straddling the month boundary
+  // only counts its in-month days. Fallback (older fn payload): approximate by
+  // summing the shared weekly reports whose week ends in the open month.
+  const { mtd, productSamples } = useMemo(() => {
+    const none = { mtd: undefined, productSamples: undefined as Record<string, number | null> | undefined };
+    if (!openReport || (openReport.content as any)?.format_version !== 'v3') return none;
+    const monthStart = `${openReport.week_end.slice(0, 7)}-01`;
+    if (samplesDaily) {
+      const rows = samplesDaily.filter(d =>
+        d.brand_id === openReport.brand_id && d.entry_date <= openReport.week_end);
+      const sumCounts = (pc: any) => Object.values(pc ?? {}).reduce((a: number, v: any) => a + (Number(v) || 0), 0);
+      const monthRows = rows.filter(d => d.entry_date >= monthStart);
+      const mtdVal: { samples: number | null; videos: number | null } = monthRows.length === 0
+        ? { samples: null, videos: null }
+        : {
+          samples: monthRows.reduce((s, d) => s + sumCounts(d.product_counts) + (Number(d.others_count) || 0), 0),
+          videos: monthRows.reduce((s, d) => s + (Number(d.new_videos) || 0), 0),
+        };
+      const weekRows = rows.filter(d => d.entry_date >= openReport.week_start);
+      const bySpid: Record<string, number> = {};
+      for (const d of weekRows) for (const [spid, cnt] of Object.entries(d.product_counts ?? {})) bySpid[spid] = (bySpid[spid] ?? 0) + (Number(cnt) || 0);
+      const extBySpid = new Map(samplesProducts.filter(p => p.brand_id === openReport.brand_id)
+        .map(p => [String(p.id), String(p.external_product_id ?? '')]));
+      const byExt: Record<string, number | null> = {};
+      for (const [spid, cnt] of Object.entries(bySpid)) { const ext = extBySpid.get(spid); if (ext) byExt[ext] = (Number(byExt[ext]) || 0) + cnt; }
+      return { mtd: mtdVal, productSamples: byExt };
+    }
+    const toN = (v: any) => (v == null || v === '') ? null : (Number.isFinite(Number(v)) ? Number(v) : null);
+    const monthReports = reports.filter(r =>
+      r.brand_id === openReport.brand_id && r.week_end >= monthStart && r.week_end <= openReport.week_end);
+    const sum = (key: 'samples_approved' | 'new_videos_posted') => {
+      const vals = monthReports.map(r => toN(((r.content as any)?.sampling ?? {})[key])).filter((v): v is number => v != null);
+      return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
+    };
+    return { mtd: { samples: sum('samples_approved'), videos: sum('new_videos_posted') }, productSamples: undefined };
+  }, [openReport, reports, samplesDaily, samplesProducts]);
+
+  // Latest decision per report from ANY link (allDecisions), keyed
+  // `type:id` so a weekly + monthly report never accidentally share state.
+  // Legacy decision rows may lack report_type — treat anything that isn't
+  // 'monthly' as weekly (report ids are unique across both tables anyway).
+  // This single map drives every decision read-out: the report cards, the
+  // Approvals tab, the popup's locked "your decision" state, and the
+  // pending-approvals prompt — so they can never disagree with each other.
+  const latestDecisions = useMemo(() => {
+    const m = new Map<string, ApprovalDecisionRow>();
+    for (const d of allDecisions) {
+      const t = d.report_type === 'monthly' ? 'monthly' : 'weekly';
+      const k = `${t}:${d.report_id}`;
+      const cur = m.get(k);
+      if (!cur || d.decided_at > cur.decided_at) m.set(k, d);
+    }
+    return m;
+  }, [allDecisions]);
   const decidedSet = useMemo(
-    () => new Set(decisions.map(d => `${d.report_type}:${d.report_id}`)),
-    [decisions],
+    () => new Set(latestDecisions.keys()),
+    [latestDecisions],
   );
   // Show the approval prompt only when the client OPENS a report that requested
   // approval (and hasn't decided yet). promptedRef stops it re-popping when the
@@ -325,11 +387,9 @@ export default function SharedReports() {
     if (!a?.enabled) return;
     if (a.expires_at && new Date(a.expires_at).getTime() < Date.now()) return;
     const key = `${type}:${r.id}`;
-    // Don't re-prompt for a report already decided — on THIS link (decidedSet) or
-    // any other/rotated link (allDecisions, which also feeds the Approved tab).
-    const decidedAnywhere = decidedSet.has(key)
-      || allDecisions.some(d => d.report_type === type && d.report_id === r.id);
-    if (decidedAnywhere || promptedRef.current.has(key)) return;
+    // Don't re-prompt for a report already decided on ANY link (decidedSet
+    // derives from allDecisions, so rotated links are covered).
+    if (decidedSet.has(key) || promptedRef.current.has(key)) return;
     promptedRef.current.add(key);
     setSingleApprovalId(r.id);
     setSingleApprovalType(type);
@@ -394,7 +454,7 @@ export default function SharedReports() {
   }, [singleApprovalId, singleApprovalType, reports, monthlyReports, pendingApprovals]);
   const existingDecisionsMap = useMemo(() => {
     const map: Record<string, { decision: 'approved' | 'changes_requested'; comment: string | null; decided_by_name: string; decided_at: string }> = {};
-    for (const d of decisions) {
+    for (const d of latestDecisions.values()) {
       map[d.report_id] = {
         decision: d.decision,
         comment: d.comment,
@@ -403,47 +463,60 @@ export default function SharedReports() {
       };
     }
     return map;
-  }, [decisions]);
+  }, [latestDecisions]);
   const monthsWithData = useMemo(() => {
     const s = new Set<string>(reports.map(r => r.week_start.slice(0, 7)));
     monthlyReports.forEach(r => s.add(r.month));
     return s;
   }, [reports, monthlyReports]);
 
-  // "Approved" tab — this brand's approved-report history, newest decision
-  // first. Uses allDecisions (every link's decisions) so history survives link
-  // rotation. Each row joins the decision to its (still-shared) report so the
-  // row can open it; decisions whose report is no longer on the link are skipped.
-  const approvedForBrand = useMemo(() => {
+  // "Approvals" tab — every shared report on this brand that requested client
+  // approval, joined to the client's latest decision when one exists (null =
+  // still awaiting the client — action required). Undecided requests sort
+  // first (newest period), then decided rows newest-decision-first. Uses
+  // allDecisions (every link's decisions) so history survives link rotation;
+  // reports no longer on the link are skipped (we iterate the shared reports).
+  const approvalsForBrand = useMemo(() => {
+    // Every requested approval gets a row, decided or not — expiry only stops
+    // the auto-prompt, the client can still decide from the cards/this tab.
+    const stillRequested = (a: any) => !!a?.enabled;
     const rows: {
-      decision: ApprovalDecisionRow;
+      decision: ApprovalDecisionRow | null;
       reportType: 'weekly' | 'monthly';
       reportId: string;
       periodLabel: string;
       monthKey: string;
+      approvalHtml: string;
     }[] = [];
-    for (const d of allDecisions) {
-      if (d.decision !== 'approved') continue;
-      if (d.report_type === 'monthly') {
-        const r = monthlyReports.find(x => x.id === d.report_id);
-        if (!r || r.brand_id !== activeBrandId) continue;
-        rows.push({
-          decision: d, reportType: 'monthly', reportId: r.id,
-          periodLabel: fmtMonthLabel(r.month), monthKey: r.month,
-        });
-      } else {
-        const r = reports.find(x => x.id === d.report_id);
-        if (!r || r.brand_id !== activeBrandId) continue;
-        rows.push({
-          decision: d, reportType: 'weekly', reportId: r.id,
-          periodLabel: `Week #${r.week_number} — ${formatRange(r.week_start, r.week_end)}`,
-          monthKey: r.week_start.slice(0, 7),
-        });
-      }
+    for (const r of reports) {
+      if (r.brand_id !== activeBrandId) continue;
+      const d = latestDecisions.get(`weekly:${r.id}`) ?? null;
+      if (!d && !stillRequested((r.content as any)?.approval)) continue;
+      rows.push({
+        decision: d, reportType: 'weekly', reportId: r.id,
+        periodLabel: `Week #${r.week_number} — ${formatRange(r.week_start, r.week_end)}`,
+        monthKey: r.week_start.slice(0, 7),
+        approvalHtml: String((r.content as any)?.approval?.content ?? ''),
+      });
     }
-    rows.sort((a, b) => b.decision.decided_at.localeCompare(a.decision.decided_at));
+    for (const r of monthlyReports) {
+      if (r.brand_id !== activeBrandId) continue;
+      const d = latestDecisions.get(`monthly:${r.id}`) ?? null;
+      if (!d && !stillRequested((r.content as any)?.approval)) continue;
+      rows.push({
+        decision: d, reportType: 'monthly', reportId: r.id,
+        periodLabel: fmtMonthLabel(r.month), monthKey: r.month,
+        approvalHtml: String((r.content as any)?.approval?.content ?? ''),
+      });
+    }
+    rows.sort((a, b) => {
+      if (!a.decision !== !b.decision) return a.decision ? 1 : -1;
+      if (!a.decision || !b.decision) return b.monthKey.localeCompare(a.monthKey);
+      return b.decision.decided_at.localeCompare(a.decision.decided_at);
+    });
     return rows;
-  }, [allDecisions, reports, monthlyReports, activeBrandId]);
+  }, [latestDecisions, reports, monthlyReports, activeBrandId]);
+  const pendingApprovalRows = approvalsForBrand.filter(r => !r.decision).length;
 
   const clientName = client?.name ?? 'Client';
   if (loading) return <PublicShell clientName={clientName}><div className="text-center py-5"><Spinner animation="border" /></div></PublicShell>;
@@ -625,6 +698,8 @@ export default function SharedReports() {
           trendData={trendData}
           wow={wowData}
           sampleSeries={sampleSeries}
+          mtd={mtd}
+          productSamples={productSamples}
           offsiteSeries={offsiteSeries}
           affiliateSeries={affiliateSeries}
           gmvMaxSeries={gmvMaxSeries}
@@ -648,7 +723,7 @@ export default function SharedReports() {
           }}
           approvalAction={openReport.content?.approval?.enabled ? {
             myDecision: (() => {
-              const d = decisions.find(x => x.report_id === openReport.id && x.report_type !== 'monthly');
+              const d = latestDecisions.get(`weekly:${openReport.id}`);
               return d ? {
                 id: d.id, decision: d.decision, comment: d.comment,
                 decided_by_name: d.decided_by_name, decided_at: d.decided_at,
@@ -765,7 +840,7 @@ export default function SharedReports() {
           brandName={activeBrand.name}
           clientName={activeBrand.client}
           currency={activeBrand.currency ?? undefined}
-          approvalDecisions={decisions
+          approvalDecisions={allDecisions
             .filter(d => d.report_id === openMonthly.id && d.report_type === 'monthly')
             .map(d => ({
               id: d.id, decision: d.decision, comment: d.comment,
@@ -773,7 +848,7 @@ export default function SharedReports() {
             }))}
           approvalAction={openMonthly.content?.approval?.enabled ? {
             myDecision: (() => {
-              const d = decisions.find(x => x.report_id === openMonthly.id && x.report_type === 'monthly');
+              const d = latestDecisions.get(`monthly:${openMonthly.id}`);
               return d ? {
                 id: d.id, decision: d.decision, comment: d.comment,
                 decided_by_name: d.decided_by_name, decided_at: d.decided_at,
@@ -1018,8 +1093,14 @@ export default function SharedReports() {
                 {(includeReports || includeMonthlyReports) && (
                   <Nav.Item>
                     <Nav.Link eventKey="approved" className="d-flex align-items-center gap-2 px-3">
-                      <i className="bi bi-check2-circle" /> Approved
-                      <Badge bg="success">{approvedForBrand.length}</Badge>
+                      <i className="bi bi-check2-circle" /> Approvals
+                      <Badge bg="secondary">{approvalsForBrand.length}</Badge>
+                      {pendingApprovalRows > 0 && (
+                        <Badge bg="danger" pill title={`${pendingApprovalRows} report${pendingApprovalRows === 1 ? '' : 's'} awaiting your decision`}>
+                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff', display: 'inline-block', marginRight: 4, verticalAlign: 'middle' }} />
+                          {pendingApprovalRows}
+                        </Badge>
+                      )}
                     </Nav.Link>
                   </Nav.Item>
                 )}
@@ -1068,7 +1149,7 @@ export default function SharedReports() {
                   ) : (
                     <Row className="g-3">
                       {monthFiltered.map(r => {
-                        const dec = decisions.find(d => d.report_id === r.id);
+                        const dec = latestDecisions.get(`weekly:${r.id}`);
                         const approvalEnabled = !!r.content?.approval?.enabled;
                         return (
                           <Col md={6} lg={4} key={r.id}>
@@ -1159,7 +1240,7 @@ export default function SharedReports() {
                         ) : (
                           <Row className="g-3">
                             {monthFilteredMonthly.map(r => {
-                              const dec = decisions.find(d => d.report_id === r.id && d.report_type === 'monthly');
+                              const dec = latestDecisions.get(`monthly:${r.id}`);
                               const approvalEnabled = !!r.content?.approval?.enabled;
                               return (
                                 <Col md={6} lg={4} key={r.id}>
@@ -1224,28 +1305,37 @@ export default function SharedReports() {
 
                 <Tab.Pane eventKey="approved">
                   <div className="mb-3">
-                    <h5 className="mb-0">{activeBrand.name} — Approved Reports</h5>
+                    <h5 className="mb-0">{activeBrand.name} — Report Approvals</h5>
                     <small className="text-muted">
-                      {approvedForBrand.length} approved report{approvedForBrand.length !== 1 ? 's' : ''} — click a row to open the report
+                      {approvalsForBrand.length} approval request{approvalsForBrand.length !== 1 ? 's' : ''}
+                      {pendingApprovalRows > 0 && (
+                        <> · <span className="text-danger fw-semibold">{pendingApprovalRows} awaiting your decision</span></>
+                      )} — click a row to open the report
                     </small>
                   </div>
-                  {approvedForBrand.length === 0 ? (
+                  {approvalsForBrand.length === 0 ? (
                     <div className="text-center py-5 text-muted">
                       <i className="bi bi-clipboard-check" style={{ fontSize: '2rem' }} /><br />
-                      Nothing approved yet. Reports you approve will show up here.
+                      No approval requests yet. Reports that need your approval will show up here.
                     </div>
                   ) : (
                     <div className="d-flex flex-column gap-2">
-                      {approvedForBrand.map(({ decision: d, reportType, reportId, periodLabel, monthKey }) => (
+                      {approvalsForBrand.map(({ decision: d, reportType, reportId, periodLabel, monthKey, approvalHtml }) => {
+                        const state: 'pending' | 'approved' | 'changes' =
+                          !d ? 'pending' : d.decision === 'approved' ? 'approved' : 'changes';
+                        const color = state === 'approved' ? '#198754' : state === 'changes' ? '#d97706' : '#dc3545';
+                        const icon = state === 'approved' ? 'bi-check-circle-fill'
+                          : state === 'changes' ? 'bi-arrow-repeat' : 'bi-shield-exclamation';
+                        return (
                         <div
-                          key={d.id}
+                          key={`${reportType}:${reportId}`}
                           role="button"
                           tabIndex={0}
                           title="Open this report"
                           className="d-flex align-items-center gap-3 p-3 rounded"
                           style={{
                             background: 'white', border: '1px solid #e5e7eb',
-                            borderLeft: '4px solid #198754', cursor: 'pointer',
+                            borderLeft: `4px solid ${color}`, cursor: 'pointer',
                             transition: 'transform .15s, box-shadow .15s',
                           }}
                           onClick={() => {
@@ -1259,10 +1349,10 @@ export default function SharedReports() {
                           onMouseLeave={e => { (e.currentTarget as HTMLElement).style.transform = ''; (e.currentTarget as HTMLElement).style.boxShadow = ''; }}
                         >
                           <div style={{
-                            width: 44, height: 44, borderRadius: 10, background: '#19875415',
+                            width: 44, height: 44, borderRadius: 10, background: `${color}15`,
                             display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
                           }}>
-                            <i className="bi bi-check-circle-fill" style={{ color: '#198754', fontSize: '1.3rem' }} />
+                            <i className={`bi ${icon}`} style={{ color, fontSize: '1.3rem' }} />
                           </div>
                           <div style={{ minWidth: 0, flex: 1 }}>
                             <div className="d-flex align-items-center gap-2 flex-wrap">
@@ -1270,23 +1360,60 @@ export default function SharedReports() {
                               <Badge bg={reportType === 'weekly' ? 'primary' : 'info'} pill>
                                 {reportType === 'weekly' ? 'Weekly' : 'Monthly'}
                               </Badge>
+                              {state === 'pending' && (
+                                <Badge bg="danger" pill>
+                                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff', display: 'inline-block', marginRight: 4, verticalAlign: 'middle' }} />
+                                  Action required
+                                </Badge>
+                              )}
+                              {state === 'changes' && (
+                                <Badge bg="warning" text="dark" pill>Changes requested</Badge>
+                              )}
                             </div>
                             <small className="text-muted d-block mt-1">
-                              <i className="bi bi-person-check me-1" />
-                              Approved by {d.decided_by_name} · {fmtDecidedAt(d.decided_at)}
+                              {state === 'pending' ? (
+                                <><i className="bi bi-hourglass-split me-1" />Awaiting your approval — no decision yet</>
+                              ) : state === 'approved' ? (
+                                <><i className="bi bi-person-check me-1" />Approved by {d!.decided_by_name} · {fmtDecidedAt(d!.decided_at)}</>
+                              ) : (
+                                <><i className="bi bi-person-exclamation me-1" />Changes requested by {d!.decided_by_name} · {fmtDecidedAt(d!.decided_at)}</>
+                              )}
                             </small>
-                            {d.comment && (
+                            {approvalHtml && (
+                              <div
+                                className="ac-rte-view ac-approval-content small mt-2"
+                                style={{ maxHeight: 110, overflowY: 'auto' }}
+                                onClick={e => e.stopPropagation()}
+                                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(approvalHtml) }}
+                              />
+                            )}
+                            {d?.comment && (
                               <small className="text-muted d-block mt-1 text-truncate fst-italic">
                                 “{d.comment}”
                               </small>
                             )}
                           </div>
+                          {state === 'pending' && (
+                            <Button
+                              size="sm"
+                              variant="danger"
+                              title="Review this report and give your decision"
+                              onClick={e => {
+                                e.stopPropagation();
+                                setSingleApprovalId(reportId);
+                                setSingleApprovalType(reportType);
+                                setShowApprovals(true);
+                              }}
+                            >
+                              <i className="bi bi-shield-check me-1" /> Review &amp; decide
+                            </Button>
+                          )}
                           {(() => {
                             const threadCount = approvalThreadCount(reportId, reportType);
                             return (
                               <Button
                                 size="sm"
-                                variant="outline-success"
+                                variant={state === 'approved' ? 'outline-success' : 'outline-secondary'}
                                 title="View the conversation for this report"
                                 onClick={e => {
                                   e.stopPropagation();
@@ -1297,13 +1424,14 @@ export default function SharedReports() {
                                 }}
                               >
                                 <i className="bi bi-chat-left-text me-1" /> Conversation
-                                {threadCount > 0 && <Badge bg="success" pill className="ms-1">{threadCount}</Badge>}
+                                {threadCount > 0 && <Badge bg={state === 'approved' ? 'success' : 'secondary'} pill className="ms-1">{threadCount}</Badge>}
                               </Button>
                             );
                           })()}
                           <i className="bi bi-chevron-right text-muted" />
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </Tab.Pane>

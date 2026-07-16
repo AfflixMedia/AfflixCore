@@ -20,8 +20,9 @@ import type { TrendPoint, CommentsConfig, ApprovalDecisionView, ApprovalActionCo
 /** One point of the week-over-week combo chart (bars = orders, line = GMV). */
 export interface WowPoint { label: string; gmv: number; orders: number }
 
-// Sections the internal team sees but the client does not (ad-spend cost).
-const CLIENT_HIDE = new Set<string>(['gmv_max']);
+// Sections the internal team sees but the client does not (currently none —
+// GMV Max was client-hidden until 2026-07-17, user call to show it).
+const CLIENT_HIDE = new Set<string>([]);
 
 // num() preserves "never entered" as null (blank -> "—", no fabricated 0);
 // numv() coerces to 0 for sums / chart values where a real number is required.

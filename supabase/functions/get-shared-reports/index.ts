@@ -225,6 +225,32 @@ serve(async (req) => {
       }
     }
 
+    // Sample-seeding rows for the v3 report's §1 MTD tiles + §3 per-product
+    // "samples approved this week" column (the public client can't read
+    // brand_samples_* directly). Only fetched when a v3 report is shared,
+    // windowed to the span the shared reports actually cover (a week that
+    // straddles a month boundary needs its pre-1st days, hence week_start).
+    let samples_daily: any[] = [];
+    let samples_products: any[] = [];
+    const v3Reports = (reports ?? []).filter((r: any) => r?.content?.format_version === 'v3');
+    if (brands.length > 0 && v3Reports.length > 0) {
+      const allowedIds = brands.map((b: any) => b.id);
+      const froms = v3Reports.map((r: any) => {
+        const monthStart = `${String(r.week_end).slice(0, 7)}-01`;
+        return String(r.week_start) < monthStart ? String(r.week_start) : monthStart;
+      }).sort();
+      const tos = v3Reports.map((r: any) => String(r.week_end)).sort();
+      const [{ data: sdRows }, { data: spRows }] = await Promise.all([
+        admin.from('brand_samples_daily')
+          .select('brand_id,entry_date,new_videos,others_count,product_counts')
+          .in('brand_id', allowedIds).gte('entry_date', froms[0]).lte('entry_date', tos[tos.length - 1]),
+        admin.from('brand_samples_products')
+          .select('id,brand_id,external_product_id').in('brand_id', allowedIds),
+      ]);
+      samples_daily = sdRows ?? [];
+      samples_products = spRows ?? [];
+    }
+
     return json({
       client,
       brands,
@@ -252,6 +278,8 @@ serve(async (req) => {
       handler_months,
       handler_creators,
       paid_collab_comments,
+      samples_daily,
+      samples_products,
       link_mode: 'brand',
     });
   } catch (e) {
