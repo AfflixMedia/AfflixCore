@@ -580,7 +580,7 @@ export default function SharedReports() {
           offsiteSeries={offsiteSeries}
           affiliateSeries={affiliateSeries}
           gmvMaxSeries={gmvMaxSeries}
-          paidCreators={pcHandlerCreators}
+          paidCreators={pcHandlerCreators.filter(pc => pc.brand_id === openReport.brand_id)}
           onMarkPaid={confirmPaidCollabPayment}
           hasPrev={!!prevReport}
           audience={isClientDash ? 'client' : undefined}

@@ -10,7 +10,7 @@ import {
 } from '../lib/reportSchemaV3';
 import { setReportCurrency } from '../lib/currency';
 import type { HandlerCreator } from '../pages/handler-collab/store';
-import { PaidCollabViz } from './report/PaidCollabReport';
+import { PaidCollabViz, filterCreators } from './report/PaidCollabReport';
 import { sanitizeRich } from '../lib/sanitize';
 import DashSidebar, { DashNavItem } from './report/DashSidebar';
 import SectionComments, { Comment, CommentSection } from './SectionComments';
@@ -853,10 +853,12 @@ export default function ReportDashboardV3({
   // rendered inside §8 (Affiliate Performance). It stays in the schema/editor so
   // data entry + auto-fill keep working; it's just merged in the report view.
   // §13 Paid Collaborations only appears when the author toggled it on (opt-in)
-  // AND the brand actually has creators to show — never an empty section.
+  // AND there are creators to show AFTER the month/pending filters — never empty.
+  const paidCollabShown = (c.paid_collab?.enabled && paidCreators)
+    ? filterCreators(paidCreators, c.paid_collab).length : 0;
   const visibleSections = WEEKLY_SECTIONS_V3.filter(d =>
     d.id !== 'sampling'
-    && !(d.id === 'paid_collab' && (!c.paid_collab.enabled || (paidCreators?.length ?? 0) === 0))
+    && !(d.id === 'paid_collab' && paidCollabShown === 0)
     && !(isClient && CLIENT_HIDE.has(d.id)));
   // Display numbering follows the visible order (no gap left by the removed §1).
   const dispNum = new Map<string, number>();
@@ -864,8 +866,8 @@ export default function ReportDashboardV3({
 
   const sectionHasData = (def: SectionDefV3): boolean => {
     const data = (c as any)[def.id];
-    // §13 is a bespoke shape — it shows when the author enabled it and there are creators.
-    if (def.id === 'paid_collab') return c.paid_collab.enabled && (paidCreators?.length ?? 0) > 0;
+    // §13 is a bespoke shape — matches the visibleSections gate (post-filter count).
+    if (def.id === 'paid_collab') return paidCollabShown > 0;
     if (def.kind === 'scalar') return def.fields.some(f => !f.auto && data?.[f.key] != null);
     // Fixed sections (channel_analytics) always carry their locked rows, so
     // count them as "has data" only when a real metric was entered.

@@ -19,7 +19,8 @@ function monthsOf(creators: HandlerCreator[]): string[] {
 }
 
 // Apply the report's month + pending-only filters to the live roster.
-function filterCreators(creators: HandlerCreator[], data: PaidCollabData): HandlerCreator[] {
+// (Brand scoping is the caller's job — pass an already brand-scoped roster.)
+export function filterCreators(creators: HandlerCreator[], data: PaidCollabData): HandlerCreator[] {
   let out = data.month ? creators.filter(c => creatorMonth(c) === data.month) : creators;
   if (data.pending_only) out = out.filter(isPendingVisible);
   return out;
@@ -64,7 +65,7 @@ export function PaidCollabViz({ data, creators, onMarkPaid, isClient }: {
 
       <div className="pc-kpis mb-3">
         <Kpi label="Creators" color="#6366F1" value={String(shown.length)} sub={data.month ? monthLabel(data.month) : 'all months'} />
-        <Kpi label="Payment pending" color="#E8862E" value={String(pendingCount)} sub={confirmedCount > 0 ? `${confirmedCount} marked paid by you` : 'awaiting payout'} />
+        <Kpi label="Payment pending" color="#E8862E" value={String(pendingCount)} sub={confirmedCount > 0 ? `${confirmedCount} ${isClient ? 'marked paid by you' : 'client-confirmed'}` : 'awaiting payout'} />
         <Kpi label="Total payout" color="#0EA5E9" value={fmt$(totalPayout)} sub="across shown creators" />
         <Kpi label="Payment sent" color="#198754" value={String(paidCount)} sub="finalised by the team" />
       </div>
@@ -103,7 +104,8 @@ export function PaidCollabEditorBody({ data, creators, onChange }: {
 }) {
   const months = monthsOf(creators);
   const shown = filterCreators(creators, data);
-  const setNote = (id: string, text: string) => onChange({ notes: { ...(data.notes ?? {}), [id]: text } });
+  // Pass just the changed key; the parent merges it into prev.notes (update-safe).
+  const setNote = (id: string, text: string) => onChange({ notes: { [id]: text } });
 
   return (
     <div className="v3-pc-editor">

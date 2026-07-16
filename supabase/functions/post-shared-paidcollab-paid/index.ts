@@ -43,8 +43,14 @@ serve(async (req) => {
 
     // Confirm the creator belongs to this brand.
     const { data: cr } = await admin.from('handler_collab_creators')
-      .select('id,brand_id,name,onboarded_on').eq('id', creator_id).maybeSingle();
+      .select('id,brand_id,name,onboarded_on,payment_status,pending_visible_to_client').eq('id', creator_id).maybeSingle();
     if (!cr || cr.brand_id !== brand_id) return json({ error: 'Invalid creator' }, 400);
+    // Defense in depth: only a genuinely client-visible pending payout can be
+    // confirmed. The UI already gates this (clientStatus masking), but never
+    // trust the client — reject a crafted request against a masked/paid creator.
+    if (confirmed && !(cr.payment_status === 'pending' && cr.pending_visible_to_client === true)) {
+      return json({ error: 'This payout is not open for confirmation' }, 409);
+    }
 
     const cleanName = String(author_name ?? '').trim().slice(0, 80) || 'Client';
 

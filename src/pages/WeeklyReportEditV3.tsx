@@ -695,7 +695,14 @@ export default function WeeklyReportEditV3() {
     if (def.special === 'paid_collab') {
       return (
         <PaidCollabEditorBody data={c.paid_collab} creators={pcCreators}
-          onChange={patch => setC(prev => ({ ...prev, paid_collab: { ...prev.paid_collab, ...patch } }))} />
+          onChange={patch => setC(prev => ({
+            ...prev,
+            paid_collab: {
+              ...prev.paid_collab, ...patch,
+              // notes patches carry only the changed key — merge into prev.notes.
+              notes: patch.notes ? { ...prev.paid_collab.notes, ...patch.notes } : prev.paid_collab.notes,
+            },
+          }))} />
       );
     }
     if (def.special === 'product_catalog') {

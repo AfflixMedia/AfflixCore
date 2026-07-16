@@ -202,16 +202,23 @@ serve(async (req) => {
     let handler_months: any[] = [];
     let handler_creators: any[] = [];
     let paid_collab_comments: any[] = [];
-    if (includePaidCollab && brands.length > 0) {
+    // The v3 report §13 "Paid Collaborations" needs the creator roster even on links
+    // WITHOUT the paid-collab tab toggle, so the client can settle pending payouts.
+    const needPcForSection = (reports ?? []).some((r: any) =>
+      r?.content?.format_version === 'v3' && r?.content?.paid_collab?.enabled === true);
+    if (brands.length > 0 && (includePaidCollab || needPcForSection)) {
       const allowedIds = brands.map((b: any) => b.id);
-      const [{ data: hmRows }, { data: hcRows }, { data: pccRows }] = await Promise.all([
-        admin.from('handler_collab_brand_months').select('*').in('brand_id', allowedIds),
-        admin.from('handler_collab_creators').select('*').in('brand_id', allowedIds),
-        admin.from('paid_collab_comments').select('*').in('brand_id', allowedIds).order('created_at', { ascending: true }),
-      ]);
-      handler_months = hmRows ?? [];
+      const { data: hcRows } = await admin.from('handler_collab_creators').select('*').in('brand_id', allowedIds);
       handler_creators = hcRows ?? [];
-      paid_collab_comments = pccRows ?? [];
+      // Months + discussion threads are only for the full paid-collab tab.
+      if (includePaidCollab) {
+        const [{ data: hmRows }, { data: pccRows }] = await Promise.all([
+          admin.from('handler_collab_brand_months').select('*').in('brand_id', allowedIds),
+          admin.from('paid_collab_comments').select('*').in('brand_id', allowedIds).order('created_at', { ascending: true }),
+        ]);
+        handler_months = hmRows ?? [];
+        paid_collab_comments = pccRows ?? [];
+      }
     }
 
     return json({
