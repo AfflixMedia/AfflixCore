@@ -274,7 +274,7 @@ export default function ChatPanel({
           <div className="ac-chat-drop-inner">
             <i className="bi bi-cloud-arrow-up" />
             <div className="ac-chat-drop-title">Drop to share</div>
-            <div className="ac-chat-drop-sub">Photos and videos · sent to “{view.title}”</div>
+            <div className="ac-chat-drop-sub">Photos, videos & documents · sent to “{view.title}”</div>
           </div>
         </div>
       )}

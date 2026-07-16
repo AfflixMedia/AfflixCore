@@ -68,6 +68,19 @@ export const attachmentLabel = (a: ChatAttachment | null | undefined): string =>
 // signed URLs minted per conversation (`signAttachmentUrls` in driveUpload.ts,
 // streamed by the chat-drive-media edge fn) — there is no public Drive URL.
 
+/** Bootstrap icon for a generic file attachment, picked by extension. */
+export const attachmentFileIcon = (name: string | null | undefined): string => {
+  const ext = (name ?? '').split('.').pop()?.toLowerCase() ?? '';
+  if (ext === 'pdf') return 'bi-file-earmark-pdf';
+  if (['doc', 'docx', 'odt', 'rtf'].includes(ext)) return 'bi-file-earmark-word';
+  if (['xls', 'xlsx', 'csv', 'ods'].includes(ext)) return 'bi-file-earmark-excel';
+  if (['ppt', 'pptx', 'odp'].includes(ext)) return 'bi-file-earmark-ppt';
+  if (['zip', 'rar', '7z', 'gz', 'tar'].includes(ext)) return 'bi-file-earmark-zip';
+  if (['txt', 'md', 'log'].includes(ext)) return 'bi-file-earmark-text';
+  if (['mp3', 'wav', 'm4a', 'ogg', 'aac'].includes(ext)) return 'bi-file-earmark-music';
+  return 'bi-file-earmark';
+};
+
 export const fmtBytes = (n: number): string => {
   if (!Number.isFinite(n) || n <= 0) return '';
   if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;

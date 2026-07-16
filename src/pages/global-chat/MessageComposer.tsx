@@ -12,7 +12,7 @@ import { Badge } from 'react-bootstrap';
 import Avatar from '../../components/Avatar';
 import EmojiPicker from './EmojiPicker';
 import type { ChatAttachment, ChatBookmark, ChatContact, ChatMessage, ChatTagProduct, ChatTagTask } from './types';
-import { contactName, roleLabel, roleBadge, attachmentLabel, fmtBytes } from './types';
+import { contactName, roleLabel, roleBadge, attachmentLabel, attachmentFileIcon, fmtBytes } from './types';
 import { toPlainText } from './messageFormat';
 import { resourceIcon } from '../../lib/resourceIcon';
 
@@ -186,15 +186,8 @@ const MessageComposer = forwardRef<MessageComposerHandle, Props>(function Messag
   const pickFile = async (file: File) => {
     if (!uploadFile) return;
     dropPending();
-    const isImage = file.type.startsWith('image/');
-    const isVideo = file.type.startsWith('video/');
-    if (!isImage && !isVideo) {
-      setPending({ file, previewUrl: null, progress: 0, attachment: null,
-        error: 'Only images and videos can be shared.' });
-      return;
-    }
     const seq = ++pendingSeqRef.current;
-    const previewUrl = isImage ? URL.createObjectURL(file) : null;
+    const previewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : null;
     setPending({ file, previewUrl, progress: 0, attachment: null, error: null });
     try {
       const attachment = await uploadFile(file, pct => {
@@ -489,7 +482,7 @@ const MessageComposer = forwardRef<MessageComposerHandle, Props>(function Messag
             <img className="ac-attach-thumb" src={pending.previewUrl} alt="" />
           ) : (
             <span className="ac-attach-thumb ac-attach-thumb-icon">
-              <i className={`bi ${pending.file.type.startsWith('video/') ? 'bi-camera-video' : 'bi-file-earmark'}`} />
+              <i className={`bi ${pending.file.type.startsWith('video/') ? 'bi-camera-video' : attachmentFileIcon(pending.file.name)}`} />
             </span>
           )}
           <div className="flex-grow-1 min-w-0">
@@ -605,7 +598,6 @@ const MessageComposer = forwardRef<MessageComposerHandle, Props>(function Messag
             <input
               ref={fileRef}
               type="file"
-              accept="image/*,video/*"
               className="d-none"
               onChange={e => {
                 const f = e.target.files?.[0];
@@ -615,7 +607,7 @@ const MessageComposer = forwardRef<MessageComposerHandle, Props>(function Messag
             <button
               type="button"
               className="ac-composer-icon"
-              title="Attach a photo or video"
+              title="Attach a file"
               disabled={disabled || uploading}
               onClick={() => fileRef.current?.click()}
             >
@@ -639,10 +631,9 @@ const MessageComposer = forwardRef<MessageComposerHandle, Props>(function Messag
           onChange={onChange}
           onClick={e => detectMention(e.currentTarget.value, e.currentTarget.selectionStart ?? 0)}
           onPaste={e => {
-            // Pasting a screenshot / copied media attaches it like the 📎 pick.
+            // Pasting a screenshot / copied file attaches it like the 📎 pick.
             if (!uploadFile) return;
-            const f = Array.from(e.clipboardData?.files ?? [])
-              .find(x => x.type.startsWith('image/') || x.type.startsWith('video/'));
+            const f = e.clipboardData?.files?.[0];
             if (f) { e.preventDefault(); pickFile(f); }
           }}
           onKeyDown={e => {

@@ -37,6 +37,7 @@ const cors = {
 
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;    // 25 MB
 const MAX_VIDEO_BYTES = 512 * 1024 * 1024;   // 512 MB
+const MAX_FILE_BYTES  = 100 * 1024 * 1024;   // 100 MB — documents/archives/etc.
 
 // Access-token cache across warm invocations of this function instance.
 let cachedToken: { token: string; expiresAt: number } | null = null;
@@ -123,12 +124,11 @@ serve(async (req) => {
       const mime = String(body.mime ?? '');
       const size = Number(body.size ?? 0);
       const origin = String(body.origin ?? '');
-      const kind = mime.startsWith('image/') ? 'image' : mime.startsWith('video/') ? 'video' : null;
-      if (!kind) return json({ error: 'Only image and video files can be shared.' }, 400);
+      const kind = mime.startsWith('image/') ? 'image' : mime.startsWith('video/') ? 'video' : 'file';
       if (!Number.isFinite(size) || size <= 0) return json({ error: 'Invalid file size' }, 400);
-      const cap = kind === 'image' ? MAX_IMAGE_BYTES : MAX_VIDEO_BYTES;
+      const cap = kind === 'image' ? MAX_IMAGE_BYTES : kind === 'video' ? MAX_VIDEO_BYTES : MAX_FILE_BYTES;
       if (size > cap) {
-        return json({ error: `File too large — max ${Math.round(cap / 1024 / 1024)} MB for ${kind}s.` }, 400);
+        return json({ error: `File too large — max ${Math.round(cap / 1024 / 1024)} MB for ${kind === 'file' ? 'files' : kind + 's'}.` }, 400);
       }
 
       const token = await driveAccessToken();

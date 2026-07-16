@@ -10,7 +10,7 @@ import EmojiPicker from './EmojiPicker';
 import type { ChatAttachment, ChatContact, ChatMessage, ChatReaction, Receipt } from './types';
 import {
   messageTime, contactName, ACK_REACTIONS, ackMeaning, ackUnified,
-  attachmentLabel, fmtBytes,
+  attachmentLabel, attachmentFileIcon, fmtBytes,
 } from './types';
 import { renderMessageHtml, toPlainText, MentionRef } from './messageFormat';
 
@@ -116,8 +116,8 @@ function AttachmentView({ a, src }: { a: ChatAttachment; src: string | null }) {
   // only useful to the account owner.
   return (
     <a className="ac-msg-attach ac-msg-attach-file" href={src ?? a.url} target="_blank"
-       rel="noopener noreferrer">
-      <i className="bi bi-file-earmark me-2" />
+       rel="noopener noreferrer" title={a.name}>
+      <i className={`bi ${attachmentFileIcon(a.name)} me-2`} />
       <span className="text-truncate">{a.name}</span>
       {a.size > 0 && <span className="ms-2 text-muted">{fmtBytes(a.size)}</span>}
     </a>
