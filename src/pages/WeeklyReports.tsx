@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { Button, Card, Modal, Form, Spinner, Alert, Badge, Dropdown, InputGroup } from 'react-bootstrap';
 import { useNavigate } from 'react-router-dom';
+import DOMPurify from 'dompurify';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/AuthContext';
 import { useNotifications } from '../notifications/NotificationsContext';
@@ -539,6 +540,16 @@ export default function WeeklyReports() {
                   </div>
                   <div className="wr-year-tag">{fromISO(r.week_start).getFullYear()}</div>
                 </div>
+
+                {/* Approvals tab: show the question/request the client was asked to approve */}
+                {statusTab === 'approved' && String(r.content?.approval?.content ?? '').trim() !== '' && (
+                  <div
+                    className="ac-rte-view ac-approval-content small mt-2"
+                    style={{ maxHeight: 110, overflowY: 'auto' }}
+                    onClick={e => e.stopPropagation()}
+                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(String(r.content.approval.content)) }}
+                  />
+                )}
 
                 <div className="wr-card-bottom">
                   <span className="text-muted small">
