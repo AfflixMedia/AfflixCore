@@ -543,12 +543,10 @@ function DeltaInline({ f, cur, prev }: { f: SectionField; cur: number | null; pr
 
 // ---- top creators / videos / lives -----------------------------------------
 const MEDAL = ['#f59e0b', '#94a3b8', '#cd7f32'];
-// Rank presentation: the numeral is primary; a small accent icon sits beside it
-// (gem for #1, star for #2/#3). Colour is gold/silver/bronze, grey for 4+.
-const RANK_ICON = ['bi-gem', 'bi-star-fill', 'bi-star-fill'];
+// Rank presentation: just the numeral on a gold/silver/bronze pill (grey for 4+).
 const rankColor = (i: number) => MEDAL[i] ?? '#cbd5e1';
 function rankInner(i: number) {
-  return <><span className="tp-rank-n">{i + 1}</span>{RANK_ICON[i] && <i className={`bi ${RANK_ICON[i]} tp-rank-i`} />}</>;
+  return <span className="tp-rank-n">{i + 1}</span>;
 }
 function tiktokLink(h: string) { return `https://www.tiktok.com/@${encodeURIComponent(String(h).trim().replace(/^@+/, '').replace(/\s+/g, ''))}`; }
 
