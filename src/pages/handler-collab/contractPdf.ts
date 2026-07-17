@@ -22,7 +22,7 @@ export type ContractInput = {
   signatureDataUrl?: string | null; // PNG data URL, drawn/embedded on the Signature line
 };
 
-type Seg = { t: string; b?: boolean };
+type Seg = { t: string; b?: boolean; url?: string }; // url → words render blue + clickable
 
 const ONES = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
   'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
@@ -40,11 +40,6 @@ function fmtContractDate(iso?: string | null): string {
   return `${p(d.getMonth() + 1)} / ${p(d.getDate())} / ${d.getFullYear()}`;
 }
 
-function joinNames(names: string[]): string {
-  if (names.length <= 1) return names[0] || '';
-  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-}
-
 export async function downloadCreatorContract(input: ContractInput) {
   const { jsPDF } = await import('jspdf');
   const doc = new jsPDF({ unit: 'pt', format: 'letter' });
@@ -59,9 +54,23 @@ export async function downloadCreatorContract(input: ContractInput) {
   const amountTxt = `USD $${Math.round(input.amount || 0).toLocaleString()}`;
   const method = 'PayPal / Zelle'; // always both, regardless of the deal's saved payout details
   const dateTxt = fmtContractDate(input.effectiveDate);
-  const featuring = input.productNames && input.productNames.length
-    ? joinNames(input.productNames)
-    : `${brand} products`;
+  // Product / guide links, resolved up-front so §1's product names and §2's
+  // "content brief" bullet can embed them directly on the words.
+  const isHttp = (s?: string | null) => !!s && /^https?:\/\//i.test(s);
+  const prodLinks = (input.productLinks || []).filter(p => isHttp(p.url));
+  const linkByName = new Map(prodLinks.filter(p => p.name).map(p => [String(p.name).trim().toLowerCase(), p.url]));
+  const guideUrl = isHttp(input.contentGuideUrl) ? (input.contentGuideUrl as string) : undefined;
+  const featNames = (input.productNames || []).filter(Boolean);
+  const urlFor = (n: string) => linkByName.get(n.trim().toLowerCase())
+    ?? (featNames.length === 1 && prodLinks.length === 1 ? prodLinks[0].url : undefined);
+  // "A, B and C" as segments — each name clickable when it has a link.
+  const featuringSegs: Seg[] = featNames.length
+    ? featNames.flatMap((n, i) => {
+        const segs: Seg[] = [{ t: i < featNames.length - 2 ? `${n},` : n, url: urlFor(n) }];
+        if (i === featNames.length - 2) segs.push({ t: 'and' });
+        return segs;
+      })
+    : [{ t: `${brand} products` }];
   // "six (6)" when the deal size is known, neutral wording when it isn't
   const nWords = count > 0 ? `${numWords(count)} (${count})` : 'the agreed number of';
   const nShort = count > 0 ? `${numWords(count)}` : 'the agreed';
@@ -76,8 +85,8 @@ export async function downloadCreatorContract(input: ContractInput) {
     const size = opts.size ?? 11;
     const indent = opts.indent ?? 0;
     const maxW = W - M * 2 - indent;
-    const words: { w: string; b: boolean }[] = [];
-    segs.forEach(s => String(s.t).split(/\s+/).forEach(w => { if (w) words.push({ w, b: !!s.b }); }));
+    const words: { w: string; b: boolean; url?: string }[] = [];
+    segs.forEach(s => String(s.t).split(/\s+/).forEach(w => { if (w) words.push({ w, b: !!s.b, url: s.url }); }));
     doc.setFontSize(size);
     doc.setFont('helvetica', 'normal');
     const spaceW = doc.getTextWidth(' ');
@@ -85,8 +94,8 @@ export async function downloadCreatorContract(input: ContractInput) {
       doc.setFont('helvetica', word.b ? 'bold' : 'normal');
       return doc.getTextWidth(word.w);
     };
-    const lines: { w: string; b: boolean }[][] = [];
-    let line: { w: string; b: boolean }[] = [], lw = 0;
+    const lines: { w: string; b: boolean; url?: string }[][] = [];
+    let line: { w: string; b: boolean; url?: string }[] = [], lw = 0;
     for (const word of words) {
       const ww = wWidth(word);
       if (line.length && lw + spaceW + ww > maxW) { lines.push(line); line = [word]; lw = ww; }
@@ -104,8 +113,13 @@ export async function downloadCreatorContract(input: ContractInput) {
       for (const word of ln) {
         doc.setFont('helvetica', word.b ? 'bold' : 'normal');
         doc.setFontSize(size);
-        doc.setTextColor(35, 35, 35);
-        doc.text(word.w, x, y);
+        if (word.url) {
+          doc.setTextColor(17, 85, 204);
+          doc.textWithLink(word.w, x, y, { url: word.url });
+        } else {
+          doc.setTextColor(35, 35, 35);
+          doc.text(word.w, x, y);
+        }
         x += doc.getTextWidth(word.w) + spaceW;
       }
       y += lineH;
@@ -143,7 +157,7 @@ export async function downloadCreatorContract(input: ContractInput) {
   para([{ t: 'Effective Date:', b: true }, { t: dateTxt }], { after: 4 });
 
   heading('1. Purpose');
-  para([{ t: 'The Creator agrees to create and publish' }, { t: `${nWords} original TikTok videos`, b: true }, { t: `featuring ${featuring} on the Creator's official TikTok account.` }]);
+  para([{ t: 'The Creator agrees to create and publish' }, { t: `${nWords} original TikTok videos`, b: true }, { t: 'featuring' }, ...featuringSegs, { t: "on the Creator's official TikTok account." }]);
 
   // Reference links (only when set): featured-product pages + the brand's
   // content guide, rendered as clickable blue URLs (kept as raw URLs so a
@@ -162,25 +176,23 @@ export async function downloadCreatorContract(input: ContractInput) {
     }
     y += after;
   }
-  const isHttp = (s?: string | null) => !!s && /^https?:\/\//i.test(s);
-  const prodLinks = (input.productLinks || []).filter(p => isHttp(p.url));
   if (prodLinks.length) {
     para([{ t: `Featured product link${prodLinks.length > 1 ? 's' : ''}:`, b: true }], { after: 2 });
     prodLinks.forEach((p, i) => {
-      para([{ t: p.name || `Product ${i + 1}` }], { indent: 22, bullet: 'dot', after: 0 });
+      para([{ t: p.name || `Product ${i + 1}`, url: p.url }], { indent: 22, bullet: 'dot', after: 0 });
       linkLines(p.url, 22, 3);
     });
     y += 2;
   }
-  if (isHttp(input.contentGuideUrl)) {
+  if (guideUrl) {
     para([{ t: 'Brand content guide:', b: true }], { after: 2 });
-    linkLines(input.contentGuideUrl as string, 22);
+    linkLines(guideUrl, 22);
   }
 
   heading('2. Deliverables');
   para([{ t: 'The Creator agrees to:' }], { after: 4 });
   para([{ t: 'Create and publish a total of' }, { t: `${nWords} TikTok videos`, b: true }, { t: `featuring ${brand}.` }], { indent: 22, bullet: 'dot', after: 2 });
-  para([{ t: 'Creator is required to follow the content brief (guide).' }], { indent: 22, bullet: 'dot', after: 2 });
+  para([{ t: 'Creator is required to follow the' }, { t: 'content brief (guide).', url: guideUrl }], { indent: 22, bullet: 'dot', after: 2 });
   para([{ t: "Keep the videos publicly available on the Creator's TikTok account." }], { indent: 22, bullet: 'dot', after: 2 });
   {
     // Completion deadline scales with deal size: ≤4 videos → 10 days, 5+ → 14 days
