@@ -277,7 +277,8 @@ a:hover { color: var(--ac-primary-2); }
 .ac-rte .ql-container { min-height: 180px; font-size: 1rem; background: white; }
 .ac-rte .ql-toolbar { background: #f8fafc; border-radius: 6px 6px 0 0; }
 .ac-rte .ql-container.ql-snow { border-radius: 0 0 6px 6px; }
-.ac-rte-view { line-height: 1.6; font-family: var(--ac-font-body); }
+.ac-rte-view { line-height: 1.6; font-family: var(--ac-font-body); overflow-wrap: anywhere; word-break: break-word; }
+.ac-rte-view table { max-width: 100%; }
 .ac-rte-view p { margin-bottom: .6rem; }
 .ac-rte-view ul, .ac-rte-view ol { margin-bottom: .6rem; padding-left: 1.5rem; }
 .ac-rte-view blockquote { border-left: 3px solid var(--ac-primary); margin: 0 0 .6rem; padding-left: 1rem; color: var(--ac-text-muted); }
