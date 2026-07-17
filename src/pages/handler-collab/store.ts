@@ -101,6 +101,42 @@ export async function applyFollowUps(): Promise<void> {
   try { await supabase.rpc('handler_collab_apply_follow_ups'); } catch { /* ignore */ }
 }
 
+/* ── activity log (Logs tab) ──
+   Brand-scoped audit rows written by the handler_collab_creators_log trigger
+   (migration 20260821090000): payment-status changes (who + old → new, incl.
+   the automatic sweep), client "marked payment as done", creator add/remove.
+   RLS: Bob + every handler assigned to the brand + internal staff with brand
+   access — so co-handlers of a shared brand see each other's changes. */
+export type ActivityAction =
+  | 'creator_added' | 'status_change'
+  | 'client_paid_marked' | 'client_paid_unmarked' | 'creator_removed';
+export interface ActivityLog {
+  id: string;
+  brand_id: string;
+  creator_id: string | null;
+  creator_name: string;
+  month: string | null;          // creator's onboarded month at log time
+  action: ActivityAction;
+  old_status: string | null;
+  new_status: string | null;
+  auto: boolean;                 // true = automatic status sweep, not a person
+  actor_id: string | null;
+  actor_name: string;
+  created_at: string;
+}
+
+export async function loadActivityLogs(brandIds: string[], limit = 500): Promise<ActivityLog[]> {
+  if (!brandIds.length) return [];
+  const { data, error } = await supabase
+    .from('handler_collab_activity_log')
+    .select('*')
+    .in('brand_id', brandIds)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data || []) as ActivityLog[];
+}
+
 export async function loadAll() {
   // Apply the follow-up status rules before reading, so the lists show them fresh.
   await applyFollowUps();

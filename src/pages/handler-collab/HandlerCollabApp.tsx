@@ -242,6 +242,9 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
   // Paid-collab comments + the discussion drawer ({brandId, tt, tk, highlight}|null).
   const [comments, setComments] = useState([]);
   const [commentDrawer, setCommentDrawer] = useState(null);
+  // Activity log (Logs tab) — brand-scoped audit rows (status changes, payments,
+  // client confirmations, creator add/remove) shared by every handler of the brand.
+  const [logs, setLogs] = useState([]);
 
   // Custom brand ordering (drag-and-drop), persisted per handler in the database
   // (handler_collab_brand_order) so it follows the account across devices. It's a saved
@@ -315,6 +318,8 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
       if (an) setReportAnchors(an);
       const cm = await store.loadComments(ids).catch(() => null);
       if (cm) setComments(cm);
+      const lg = await store.loadActivityLogs(ids).catch(() => null);
+      if (lg) setLogs(lg);
       const nts = await store.loadNotes().catch(() => null);
       if (nts) setNotes(nts);
     } catch (e) {
@@ -760,7 +765,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
         {err && <div className="pc-banner" style={{ background: 'var(--pc-error-bg)', color: 'var(--pc-error-fg)' }}><span>⚠️</span><span>{err}</span></div>}
 
         <div className="pc-tabs">
-          {[{ id: 'brands', label: 'Brands' }, { id: 'creators', label: 'Creators' }, { id: 'performance', label: 'Performance' }, { id: 'reporting', label: 'Internal Reporting' }, { id: 'discussions', label: 'Discussions' }, { id: 'notes', label: 'Notes' }].map(t => (
+          {[{ id: 'brands', label: 'Brands' }, { id: 'creators', label: 'Creators' }, { id: 'performance', label: 'Performance' }, { id: 'reporting', label: 'Internal Reporting' }, { id: 'discussions', label: 'Discussions' }, { id: 'logs', label: 'Logs' }, { id: 'notes', label: 'Notes' }].map(t => (
             <button key={t.id} className={`pc-tab ${tab === t.id ? 'active' : ''}`} onClick={() => { setTab(t.id); setDrillId(null); }}>
               {t.label}
               {t.id === 'discussions' && needsReplyCount > 0 && <span className="pc-tab-badge">{needsReplyCount}</span>}
@@ -782,6 +787,8 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
             <ReportingView brands={brands} brandById={brandById} creators={creators} month={month} comments={comments} onOpenComments={openComments} />
           ) : tab === 'discussions' ? (
             <DiscussionsView comments={comments} brandById={brandById} creators={creators} onOpen={openComments} />
+          ) : tab === 'logs' ? (
+            <LogsView logs={logs} brandById={brandById} />
           ) : tab === 'notes' ? (
             <NotesBoard brands={brands} brandById={brandById} creators={creators} month={month} />
           ) : (
@@ -879,6 +886,160 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
         />
       )}
     </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════
+   Logs tab — brand-scoped activity feed (handler_collab_activity_log):
+   who changed a creator's payment status (incl. payments sent + the
+   automatic sweep), client "marked payment as done", creator add/remove.
+   Every handler assigned to the brand sees the same rows.
+════════════════════════════════════════════════════════════ */
+const LOG_KINDS = [
+  { id: 'all', label: 'All' },
+  { id: 'payments', label: 'Payments' },
+  { id: 'status', label: 'Status changes' },
+  { id: 'client', label: 'Client confirmations' },
+  { id: 'roster', label: 'Added / removed' },
+];
+function logKind(l) {
+  if (l.action === 'status_change') return l.new_status === 'paid' ? 'payments' : 'status';
+  if (l.action === 'client_paid_marked' || l.action === 'client_paid_unmarked') return 'client';
+  return 'roster';
+}
+const LOG_ICON = {
+  payments: { icon: 'bi-cash-coin', cls: 'pay' },
+  status: { icon: 'bi-arrow-repeat', cls: 'status' },
+  client: { icon: 'bi-patch-check', cls: 'client' },
+  roster: { icon: 'bi-person-plus', cls: 'roster' },
+};
+const logStatusOpt = (v) => STATUS_OPTIONS.find(s => s.value === v) || null;
+
+function LogStatusPill({ value }) {
+  const opt = logStatusOpt(value);
+  return <span className={`pc-log-st ${opt ? opt.cls : ''}`}>{opt ? opt.label : (value || '—')}</span>;
+}
+
+function logDayKey(iso) {
+  const d = new Date(iso);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+function logDayLabel(key) {
+  const today = logDayKey(new Date().toISOString());
+  const yd = new Date(); yd.setDate(yd.getDate() - 1);
+  if (key === today) return 'Today';
+  if (key === logDayKey(yd.toISOString())) return 'Yesterday';
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+}
+const logTime = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+
+// One log row → a readable sentence. Bold = people/creators; status pills for transitions.
+function LogText({ l }) {
+  const actor = l.actor_name || 'Someone';
+  const creator = <b>{l.creator_name || 'a creator'}</b>;
+  if (l.action === 'status_change') {
+    const arrow = <span className="pc-log-arrow"><LogStatusPill value={l.old_status} /><i className="bi bi-arrow-right" /><LogStatusPill value={l.new_status} /></span>;
+    if (l.auto) return <>Automatic status update — {creator} {arrow}</>;
+    if (l.new_status === 'paid') return <><b>{actor}</b> marked {creator}&apos;s payment as sent {arrow}</>;
+    return <><b>{actor}</b> changed {creator}&apos;s status {arrow}</>;
+  }
+  if (l.action === 'client_paid_marked') return <><b>{actor}</b> (client) marked {creator}&apos;s payment as done</>;
+  if (l.action === 'client_paid_unmarked') return <><b>{actor}</b> removed the &quot;payment done&quot; mark on {creator}</>;
+  if (l.action === 'creator_added') {
+    return <><b>{actor}</b> added creator {creator} {l.new_status ? <LogStatusPill value={l.new_status} /> : null}</>;
+  }
+  if (l.action === 'creator_removed') return <><b>{actor}</b> removed creator {creator}</>;
+  return <>{creator}</>;
+}
+
+function LogsView({ logs, brandById }) {
+  const [brandFilter, setBrandFilter] = useState('all');
+  const [kind, setKind] = useState('all');
+  const [q, setQ] = useState('');
+
+  const brandOptions = useMemo(() => {
+    const ids = [...new Set(logs.map(l => l.brand_id))];
+    return ids
+      .map(id => ({ id, name: brandById[id]?.name || 'Unknown brand' }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [logs, brandById]);
+
+  const filtered = useMemo(() => logs.filter(l => {
+    if (brandFilter !== 'all' && l.brand_id !== brandFilter) return false;
+    if (kind !== 'all' && logKind(l) !== kind) return false;
+    if (q.trim()) {
+      const s = q.trim().toLowerCase();
+      const hay = `${l.creator_name} ${l.actor_name} ${brandById[l.brand_id]?.name || ''}`.toLowerCase();
+      if (!hay.includes(s)) return false;
+    }
+    return true;
+  }), [logs, brandFilter, kind, q, brandById]);
+
+  // rows arrive newest-first from the store; group them by (local) day
+  const groups = useMemo(() => {
+    const m = new Map();
+    filtered.forEach(l => {
+      const k = logDayKey(l.created_at);
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(l);
+    });
+    return [...m.entries()];
+  }, [filtered]);
+
+  if (!logs.length) {
+    return (
+      <div className="pc-card">
+        <div className="pc-empty pc-empty-lg">
+          <div className="pc-empty-icon">🕘</div>
+          <h3>No activity yet</h3>
+          <p>Payment-status changes, payments sent, client payment confirmations and creator add/removals across your brands will show up here — including changes made by other handlers of the same brand.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="pc-logs-toolbar">
+        <div className="pc-logs-kind">
+          {LOG_KINDS.map(k => (
+            <button key={k.id} className={`pc-logs-kbtn ${kind === k.id ? 'active' : ''}`} onClick={() => setKind(k.id)}>{k.label}</button>
+          ))}
+        </div>
+        <select className="pc-input pc-logs-brand" value={brandFilter} onChange={e => setBrandFilter(e.target.value)} aria-label="Filter by brand">
+          <option value="all">All brands</option>
+          {brandOptions.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+        <input className="pc-search pc-logs-search" placeholder="Search creator, person or brand…" value={q} onChange={e => setQ(e.target.value)} />
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="pc-card"><div className="pc-empty"><div className="pc-empty-icon">🔍</div><h3>Nothing matches</h3><p>No log entries match the current filters.</p></div></div>
+      ) : groups.map(([day, rows]) => (
+        <div className="pc-card pc-log-day" key={day}>
+          <div className="pc-log-day-head">{logDayLabel(day)}<span className="pc-log-day-count">{rows.length}</span></div>
+          {rows.map(l => {
+            const k = logKind(l);
+            const ic = l.action === 'creator_removed' ? { icon: 'bi-person-dash', cls: 'roster' } : LOG_ICON[k];
+            return (
+              <div className="pc-log-row" key={l.id}>
+                <span className={`pc-log-ico ${ic.cls}`}><i className={`bi ${ic.icon}`} /></span>
+                <div className="pc-log-body">
+                  <div className="pc-log-text"><LogText l={l} /></div>
+                  <div className="pc-log-meta">
+                    <span className="pc-log-brand">{brandById[l.brand_id]?.name || 'Unknown brand'}</span>
+                    {l.month && <span className="pc-log-month">{l.month}</span>}
+                    <span className="pc-log-time">{logTime(l.created_at)}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </>
   );
 }
 
