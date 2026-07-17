@@ -204,6 +204,16 @@ export function CreatorRowRO({ c, idx, onToggleAuth, onConfirmPaid, staffView }:
         <div className="pc-cell pc-num" data-label="Videos">{c.videos_count || '—'}</div>
         <div className="pc-cell" data-label="Payout"><PayoutRO paypal={c.paypal} zelle={c.zelle} /></div>
         <div className="pc-cell" data-label="Status"><span className={`pc-badge ${st.cls}`}><span className="dot" />{st.label}</span></div>
+        <div className="pc-cell pc-contract-cell" data-label="Contract">
+          {c.contract_url
+            ? (
+              <a className="pc-contract-btn pc-clink has" href={c.contract_url} target="_blank" rel="noopener noreferrer"
+                title="Open signed contract" aria-label="Open signed contract" onClick={e => e.stopPropagation()}>
+                <i className="bi bi-link-45deg" />
+              </a>
+            )
+            : <span className="pc-handle">—</span>}
+        </div>
         <div className="pc-cell pc-num" data-label="Content"><span className="pc-content-cell">{filled > 0 ? <b>{filled}</b> : ''} {open ? '▴' : '▾'}</span></div>
       </div>
       {open && (
@@ -218,6 +228,12 @@ export function CreatorRowRO({ c, idx, onToggleAuth, onConfirmPaid, staffView }:
                 </div>
               </div>
               <div className="pc-vx-actions">
+                {c.contract_url && (
+                  <a className="pc-vx-contractlink" href={c.contract_url} target="_blank" rel="noopener noreferrer"
+                    title="Open signed contract" onClick={e => e.stopPropagation()}>
+                    <i className="bi bi-file-earmark-check" />Signed contract
+                  </a>
+                )}
                 {adCount > 0 && (
                   <span className={`pc-vx-authtally ${allAuth ? 'done' : ''}`}>
                     <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
@@ -350,7 +366,7 @@ export function CreatorListHeadRO() {
   return (
     <div className="pc-ct-head">
       <div className="pc-num">#</div><div>Completed on</div><div>Name</div><div>TikTok</div><div className="pc-num">Amount</div>
-      <div className="pc-num">Videos</div><div>Payout</div><div>Status</div><div className="pc-num">Content</div>
+      <div className="pc-num">Videos</div><div>Payout</div><div>Status</div><div>Contract</div><div className="pc-num">Content</div>
     </div>
   );
 }

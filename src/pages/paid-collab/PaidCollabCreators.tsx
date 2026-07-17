@@ -424,6 +424,16 @@ export default function PaidCollabCreators() {
                             ) : <span className="cct-muted">—</span>}
                           </div>
                         </div>
+                        {(c as any).contract_url && (
+                          <div>
+                            <div className="cct-dt-l">Signed contract</div>
+                            <div className="cct-dt-v">
+                              <a href={(c as any).contract_url} target="_blank" rel="noopener noreferrer">
+                                <i className="bi bi-file-earmark-check me-1" />Open contract
+                              </a>
+                            </div>
+                          </div>
+                        )}
                       </div>
 
                       {/* Client "process payment & mark as done" — same GUI as the share
