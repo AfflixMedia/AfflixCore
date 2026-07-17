@@ -2891,7 +2891,7 @@ input[type="number"] {
 /* Plain uppercase tracking-widest section labels (exact Stitch aesthetic — no accent bar) */
 .s14-title { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
 .s14-title-accent { display: none; }
-.s14-title-text { font-family: 'DM Sans', sans-serif; font-weight: 700; font-size: 1.78rem; letter-spacing: .12em; text-transform: uppercase; color: #554337; line-height: 1.3; margin: 0; }
+.s14-title-text { font-family: 'DM Sans', sans-serif; font-weight: 700; font-size: 1.78rem; letter-spacing: .12em; text-transform: uppercase; color: #334155; line-height: 1.3; margin: 0; }
 .s14-title-sub { font-size: .76rem; color: #aab2c0; margin-top: 1px; text-transform: none; letter-spacing: 0; font-weight: 400; }
 
 /* Centred client canvas — warm surface comes from the page shell; cards pop with real shadow */
