@@ -974,8 +974,8 @@ export default function ReportDashboardV3({
         return (
           <>
             <div className="row g-3">
-              <div className="col-sm-6 col-lg-4"><WeekMtdTile label="Samples Approved" f={wkS} data={data} prev={prev} mtd={mtd ? mtd.samples : undefined} /></div>
-              <div className="col-sm-6 col-lg-4"><WeekMtdTile label="Videos Posted" f={wkV} data={data} prev={prev} mtd={mtd ? mtd.videos : undefined} /></div>
+              <div className="col-sm-6"><WeekMtdTile label="Samples Approved" f={wkS} data={data} prev={prev} mtd={mtd ? mtd.samples : undefined} /></div>
+              <div className="col-sm-6"><WeekMtdTile label="Videos Posted" f={wkV} data={data} prev={prev} mtd={mtd ? mtd.videos : undefined} /></div>
             </div>
             {sampleSeries && <SamplesLineChart data={sampleSeries} />}
           </>
