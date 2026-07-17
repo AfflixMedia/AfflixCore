@@ -8,9 +8,10 @@ import { supabase } from '../../lib/supabase';
    bob/apc/client/handler read via user_has_brand_access).
 ════════════════════════════════════════════════════════════ */
 
-// follow_up = zero posted videos, or "in progress" with no new video for 1 week
-// (auto-managed by the handler_collab_creators_auto_status trigger + the
-// handler_collab_apply_follow_ups() sweep — see migration 20260806090000).
+// follow_up = "in progress" with no new posted video for 1 week (new creators
+// start in progress with a fresh 7-day window, even at zero videos; auto-managed
+// by the handler_collab_creators_auto_status trigger + the
+// handler_collab_apply_follow_ups() sweep — migrations 20260806090000 + 20260820090000).
 export type PaymentStatus = 'videos_in_progress' | 'follow_up' | 'pending' | 'paid';
 
 export interface VideoCode {
