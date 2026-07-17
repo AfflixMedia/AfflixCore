@@ -52,7 +52,13 @@ serve(async (req) => {
       return json({ error: 'This payout is not open for confirmation' }, 409);
     }
 
-    const cleanName = String(author_name ?? '').trim().slice(0, 80) || 'Client';
+    // The client's name is REQUIRED to confirm a payment (the team must know who
+    // marked it). The share-link UI prompts for it; reject nameless confirms from
+    // crafted requests too. Undo (confirmed=false) needs no name.
+    const cleanName = String(author_name ?? '').trim().slice(0, 80);
+    if (confirmed && !cleanName) {
+      return json({ error: 'Please add your name before marking a payment as done.' }, 400);
+    }
 
     const { data: updated, error } = await admin.from('handler_collab_creators')
       .update({

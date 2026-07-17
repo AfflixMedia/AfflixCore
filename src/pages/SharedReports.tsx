@@ -631,15 +631,32 @@ export default function SharedReports() {
 
   // Client flags that they processed a creator's payment (PayPal). Soft flag +
   // notifies the team; does NOT change the real payment_status.
+  // The client's NAME is required to confirm: reuse the remembered public name,
+  // ask once if it's missing, and block the mark when left blank (the edge fn
+  // rejects nameless confirms too). Undo needs no name.
   const confirmPaidCollabPayment = async (creatorId: string, confirmed: boolean) => {
+    let name = (publicName || '').trim();
+    if (confirmed && !name) {
+      const typed = window.prompt('Please enter your name to mark this payment as done:') || '';
+      name = typed.trim();
+      if (!name) { window.alert('Your name is required to mark a payment as done.'); return; }
+      setPublicName(name);
+      try { localStorage.setItem('ac_public_name', name); } catch { }
+    }
     const brandId = pcHandlerCreators.find(c => c.id === creatorId)?.brand_id;
-    const { data, error } = await supabase.functions.invoke('post-shared-paidcollab-paid', {
-      body: { token, brand_id: brandId, creator_id: creatorId, confirmed, author_name: publicName || null },
-    });
-    if (error) throw await fnError(error);
-    if ((data as any)?.error) throw new Error((data as any).error);
-    const updated = (data as any).creator as HandlerCreator;
-    setPcHandlerCreators(prev => prev.map(c => (c.id === creatorId ? { ...c, ...updated } : c)));
+    try {
+      const { data, error } = await supabase.functions.invoke('post-shared-paidcollab-paid', {
+        body: { token, brand_id: brandId, creator_id: creatorId, confirmed, author_name: name || null },
+      });
+      if (error) throw await fnError(error);
+      if ((data as any)?.error) throw new Error((data as any).error);
+      const updated = (data as any).creator as HandlerCreator;
+      setPcHandlerCreators(prev => prev.map(c => (c.id === creatorId ? { ...c, ...updated } : c)));
+    } catch (e: any) {
+      // Surface failures (the row's toggle otherwise fails silently — its caller
+      // only resets the busy state).
+      window.alert(e?.message || 'Could not update the payment confirmation.');
+    }
   };
 
   // Approval prompt — reused across the landing list and the report detail views
