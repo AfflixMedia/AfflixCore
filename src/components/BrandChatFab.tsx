@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/AuthContext';
-import { brandDetailId, usePageScrolled } from './AdsNotesFab';
+import { brandDetailId, useDraggableFab } from './AdsNotesFab';
 import '../pages/handler-collab/handlerCollab.css';
 
 /* Floating chat button — Brand Detail pages only. Jumps straight into the
@@ -15,7 +15,7 @@ export default function BrandChatFab() {
   const { profile } = useAuth();
   const location = useLocation();
   const nav = useNavigate();
-  const scrolled = usePageScrolled();
+  const fabDrag = useDraggableFab('ac_fab_pos_chat');
 
   const brandId = brandDetailId(location.pathname);
   const role = profile?.role ?? '';
@@ -35,12 +35,12 @@ export default function BrandChatFab() {
 
   if (!brandId || !chatRole || !convId) return null;
 
-  // The notes fab shows app-wide for every chat-capable role, but hides until
-  // the page is scrolled — stack above it only while it's actually visible.
+  // The notes fab shows app-wide for every chat-capable role — always stack above it.
   return (
     <div className="pc-app" style={{ display: 'contents' }}>
       <button
-        className={`pc-notesfab pc-chatfab${scrolled ? ' pc-fab-up' : ''}`}
+        className="pc-notesfab pc-chatfab pc-fab-up"
+        style={fabDrag.style} {...fabDrag.handlers}
         title="Open brand chat" aria-label="Open brand chat"
         onClick={() => nav(`/chats?c=${convId}`)}>
         <i className="bi bi-chat-dots" />
