@@ -62,6 +62,34 @@ function KpiTile({ f, data, prev }: { f: SectionField; data: ScalarData; prev: S
   );
 }
 
+/** §1 sampling tile — the weekly value and its month-to-date companion share
+ *  one card (Samples Approved: week + MTD, Videos Posted: week + MTD). The MTD
+ *  half only renders when the page supplied `mtd` (undefined = not available). */
+function WeekMtdTile({ label, f, data, prev, mtd }: {
+  label: string; f: SectionField; data: ScalarData; prev: ScalarData | null; mtd?: number | null;
+}) {
+  const cur = fieldValue(f, data);
+  const pv = prev ? fieldValue(f, prev) : null;
+  return (
+    <div className="ac-kpi h-100">
+      <div className="ac-kpi-label">{label}</div>
+      <div className="d-flex align-items-end gap-4 flex-wrap">
+        <div>
+          <div className="ac-kpi-value">{formatValue(f.format, cur)}</div>
+          <div className="v3-mtd-note">This week</div>
+        </div>
+        {mtd !== undefined && (
+          <div>
+            <div className="ac-kpi-value">{mtd == null ? '—' : formatValue('number', mtd)}</div>
+            <div className="v3-mtd-note">Month to date</div>
+          </div>
+        )}
+      </div>
+      <div className="ac-kpi-foot">{f.comparable && <DeltaPill f={f} cur={cur} prev={pv} />}</div>
+    </div>
+  );
+}
+
 function SectionTitle({ title, sub, color = '#e8862e', fb }: { title: string; sub?: string; color?: string; fb?: ReactNode }) {
   return (
     <div className="s14-title">
@@ -946,14 +974,8 @@ export default function ReportDashboardV3({
         return (
           <>
             <div className="row g-3">
-              <div className="col-6 col-lg-3"><KpiTile f={wkS} data={data} prev={prev} /></div>
-              <div className="col-6 col-lg-3"><KpiTile f={wkV} data={data} prev={prev} /></div>
-              {mtd && (
-                <>
-                  <div className="col-6 col-lg-3"><div className="ac-kpi h-100"><div className="ac-kpi-label">Samples Approved MTD</div><div className="ac-kpi-value">{mtd.samples == null ? '—' : formatValue('number', mtd.samples)}</div><div className="ac-kpi-foot"><span className="v3-mtd-note">Month to date</span></div></div></div>
-                  <div className="col-6 col-lg-3"><div className="ac-kpi h-100"><div className="ac-kpi-label">Videos Posted MTD</div><div className="ac-kpi-value">{mtd.videos == null ? '—' : formatValue('number', mtd.videos)}</div><div className="ac-kpi-foot"><span className="v3-mtd-note">Month to date</span></div></div></div>
-                </>
-              )}
+              <div className="col-sm-6 col-lg-4"><WeekMtdTile label="Samples Approved" f={wkS} data={data} prev={prev} mtd={mtd ? mtd.samples : undefined} /></div>
+              <div className="col-sm-6 col-lg-4"><WeekMtdTile label="Videos Posted" f={wkV} data={data} prev={prev} mtd={mtd ? mtd.videos : undefined} /></div>
             </div>
             {sampleSeries && <SamplesLineChart data={sampleSeries} />}
           </>
