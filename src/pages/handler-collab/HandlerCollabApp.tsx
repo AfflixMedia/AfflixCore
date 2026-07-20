@@ -12,6 +12,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { PayChip, PayoutDetail } from '../paid-collab/handlerCollabReadonly';
 import PaidCollabComments from '../../components/paidcollab/PaidCollabComments';
 import NotesBoard, { BrandNotesDrawer, CreatorNotesDrawer, AllNotesDrawer, NoteEditor } from './NotesBoard';
+import { useDraggableFab } from '../../components/AdsNotesFab';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -271,6 +272,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
   const [keepBrand, setKeepBrand] = useState(null);       // { id, name } — Keep-notes list drawer
   const [keepCreator, setKeepCreator] = useState(null);   // { id, key, name, handle, brandId, brandName } — creator Keep-notes drawer
   const [allNotesOpen, setAllNotesOpen] = useState(false); // global notes drawer (floating button)
+  const notesFabDrag = useDraggableFab('ac_fab_pos_notes'); // drag-to-place the floating notes button
   const [openNote, setOpenNote] = useState(null);          // a single note opened directly (deep link)
   const [pendingNoteId, setPendingNoteId] = useState(null); // ?note=<id> waiting for notes to load
   const [confirmDel, setConfirmDel] = useState(null);     // { message, onYes }
@@ -860,7 +862,8 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
           onClose={() => setKeepCreator(null)} onChanged={reload} />
       )}
       {/* global notes — reachable from anywhere in the workspace */}
-      <button className="pc-notesfab" onClick={() => setAllNotesOpen(true)} title="Notes" aria-label="Open notes">
+      <button className="pc-notesfab" style={notesFabDrag.style} {...notesFabDrag.handlers}
+        onClick={() => setAllNotesOpen(true)} title="Notes" aria-label="Open notes">
         <i className="bi bi-journal-text" />
         {dueReminderCount > 0 && <span className="pc-notesfab-badge">{dueReminderCount}</span>}
       </button>
