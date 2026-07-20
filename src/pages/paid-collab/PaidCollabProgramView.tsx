@@ -79,7 +79,7 @@ export default function PaidCollabProgramView() {
   const budget = Number(bm.budget) || 0;
   const usage = budget > 0 ? Math.round((agg.allocated / budget) * 100) : 0;
   const products = focusProductList(bm.focus_product_url);
-  const costPerVideo = agg.delivered > 0 ? agg.allocated / agg.delivered : 0;
+  const costPerVideo = agg.videos > 0 ? agg.allocated / agg.videos : 0;
 
   return (
     <div className="pc-app">

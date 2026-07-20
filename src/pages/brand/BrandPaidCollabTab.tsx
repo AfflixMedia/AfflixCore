@@ -178,7 +178,7 @@ export default function BrandPaidCollabTab({ brandId, brandName, canEdit, onPend
   if (loading) return <div className="text-center py-5"><Spinner animation="border" /></div>;
   if (err) return <Alert variant="danger">{err}</Alert>;
 
-  const costPerVideo = totals.delivered > 0 ? totals.allocated / totals.delivered : 0;
+  const costPerVideo = totals.videos > 0 ? totals.allocated / totals.videos : 0;
 
   const overview = (months.length === 0 && creators.length === 0) ? (
     <div className="pc-card"><div className="pc-empty">

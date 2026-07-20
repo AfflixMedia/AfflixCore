@@ -91,7 +91,7 @@ export default function SharedHandlerCollabPane({ brand, months, creators, comme
     mc.forEach(c => { allocated += Number(c.amount) || 0; if (c.payment_status === 'paid') paid += Number(c.amount) || 0; videos += Number(c.videos_count) || 0; delivered += deliveredCount(c); });
     const budget = Number(m?.budget) || 0;
     const usage = budget > 0 ? Math.round((allocated / budget) * 100) : 0;
-    const cpv = delivered > 0 ? allocated / delivered : 0;
+    const cpv = videos > 0 ? allocated / videos : 0;
     const products = m ? focusProductList(m.focus_product_url) : [];
     return (
       <div className="pc-app" style={{ minHeight: 0, background: 'transparent' }}>
