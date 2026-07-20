@@ -70,22 +70,26 @@ function WeekMtdTile({ label, f, data, prev, mtd }: {
 }) {
   const cur = fieldValue(f, data);
   const pv = prev ? fieldValue(f, prev) : null;
+  const hasMtd = mtd !== undefined;
   return (
-    <div className="ac-kpi h-100">
+    <div className="ac-kpi h-100 v3-wmtile">
       <div className="ac-kpi-label">{label}</div>
-      <div className="d-flex align-items-end gap-4 flex-wrap">
-        <div>
+      <div className="v3-wmtile-split">
+        <div className="v3-wmtile-half">
           <div className="ac-kpi-value">{formatValue(f.format, cur)}</div>
           <div className="v3-mtd-note">This week</div>
+          {f.comparable && <div className="mt-2"><DeltaPill f={f} cur={cur} prev={pv} /></div>}
         </div>
-        {mtd !== undefined && (
-          <div>
-            <div className="ac-kpi-value">{mtd == null ? '—' : formatValue('number', mtd)}</div>
-            <div className="v3-mtd-note">Month to date</div>
-          </div>
+        {hasMtd && (
+          <>
+            <div className="v3-wmtile-divider" />
+            <div className="v3-wmtile-half">
+              <div className="ac-kpi-value">{mtd == null ? '—' : formatValue('number', mtd)}</div>
+              <div className="v3-mtd-note">Month to date</div>
+            </div>
+          </>
         )}
       </div>
-      <div className="ac-kpi-foot">{f.comparable && <DeltaPill f={f} cur={cur} prev={pv} />}</div>
     </div>
   );
 }

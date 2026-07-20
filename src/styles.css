@@ -4517,6 +4517,11 @@ body.ac-pdf-capturing .dash-sidebar { display: none !important; }
 @keyframes v3pulse { 0% { box-shadow: 0 0 0 0 rgba(22,199,132,.55); } 70% { box-shadow: 0 0 0 7px rgba(22,199,132,0); } 100% { box-shadow: 0 0 0 0 rgba(22,199,132,0); } }
 .v3-mtd-note { font-size: .66rem; color: #a78a76; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
 
+/* §1 sampling combined tile — week / MTD spread across the card with a divider */
+.v3-wmtile-split { display: flex; align-items: stretch; gap: 8px; margin-top: 10px; }
+.v3-wmtile-half { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.v3-wmtile-divider { align-self: stretch; width: 1px; background: #eee2d7; flex-shrink: 0; }
+
 /* §13 Paid Collaborations */
 .pc-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .75rem; }
 .v3-pc-notes { display: flex; flex-direction: column; gap: .55rem; }
