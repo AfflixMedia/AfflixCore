@@ -39,13 +39,17 @@ export function PaidCollabViz({ data, creators, onMarkPaid, isClient }: {
   const hasIntro = introHtml.replace(/<[^>]*>/g, '').trim().length > 0;
 
   if (shown.length === 0) {
+    // Client view: an enabled section with no creators but a note shows just the
+    // note (no "nothing to show" chrome). Staff still see the diagnostic message.
     return (
       <div className="v3-paidcollab">
         {hasIntro && <div className="s14-card mb-3"><div className="ac-rte-view" dangerouslySetInnerHTML={{ __html: introHtml }} /></div>}
-        <div className="s14-empty">
-          No paid-collab creators to show{data.month ? ` for ${monthLabel(data.month)}` : ''}
-          {data.pending_only ? ' (payment-pending only)' : ''}.
-        </div>
+        {!(isClient && hasIntro) && (
+          <div className="s14-empty">
+            No paid-collab creators to show{data.month ? ` for ${monthLabel(data.month)}` : ''}
+            {data.pending_only ? ' (payment-pending only)' : ''}.
+          </div>
+        )}
       </div>
     );
   }

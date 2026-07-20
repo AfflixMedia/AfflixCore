@@ -883,13 +883,19 @@ export default function ReportDashboardV3({
   // §1 "Sampling & Videos" is no longer a standalone section — its cards are
   // rendered inside §8 (Affiliate Performance). It stays in the schema/editor so
   // data entry + auto-fill keep working; it's just merged in the report view.
-  // §13 Paid Collaborations only appears when the author toggled it on (opt-in)
-  // AND there are creators to show AFTER the month/pending filters — never empty.
+  // §13 Paid Collaborations appears when the author toggled it on (opt-in) AND it
+  // has something to say — either creators to show AFTER the month/pending filters,
+  // OR a written note for the client (so an enabled section with just a note, e.g.
+  // when there are no payment-pending creators, still reaches the client).
   const paidCollabShown = (c.paid_collab?.enabled && paidCreators)
     ? filterCreators(paidCreators, c.paid_collab).length : 0;
+  const paidCollabNote = (c.paid_collab?.intro ?? '')
+    .replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
+  const paidCollabVisible = !!c.paid_collab?.enabled
+    && (paidCollabShown > 0 || paidCollabNote.length > 0);
   const visibleSections = WEEKLY_SECTIONS_V3.filter(d =>
     d.id !== 'sampling'
-    && !(d.id === 'paid_collab' && paidCollabShown === 0)
+    && !(d.id === 'paid_collab' && !paidCollabVisible)
     && !(isClient && CLIENT_HIDE.has(d.id)));
   // Display numbering follows the visible order (no gap left by the removed §1).
   const dispNum = new Map<string, number>();
@@ -897,8 +903,8 @@ export default function ReportDashboardV3({
 
   const sectionHasData = (def: SectionDefV3): boolean => {
     const data = (c as any)[def.id];
-    // §13 is a bespoke shape — matches the visibleSections gate (post-filter count).
-    if (def.id === 'paid_collab') return paidCollabShown > 0;
+    // §13 is a bespoke shape — matches the visibleSections gate (creators or note).
+    if (def.id === 'paid_collab') return paidCollabVisible;
     if (def.kind === 'scalar') return def.fields.some(f => !f.auto && data?.[f.key] != null);
     // Fixed sections (channel_analytics) always carry their locked rows, so
     // count them as "has data" only when a real metric was entered.
