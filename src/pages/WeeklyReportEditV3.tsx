@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, FormEvent, Fragment } from 'react';
+import { useEffect, useMemo, useRef, useState, CSSProperties, FormEvent, Fragment } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card, Form, Button, Spinner, Alert, Badge, Modal, Offcanvas, Dropdown, Accordion } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
@@ -16,6 +16,9 @@ import type { HandlerCreator } from './handler-collab/store';
 import VideoPasteBar from '../components/report/VideoPasteBar';
 import SectionComments, { Comment, CommentSection } from '../components/SectionComments';
 import { useAuth } from '../auth/AuthContext';
+import { useEditLock } from '../lib/useEditLock';
+import { useLiveReportContent } from '../lib/useLiveReportContent';
+import EditLockBanner from '../components/EditLockBanner';
 import RichTextEditor from '../components/RichTextEditor';
 import { CustomSectionInline, CustomSectionDefModal, customSectionsAt, newSection, AddSectionMenu } from '../components/CustomSectionEditor';
 
@@ -39,10 +42,24 @@ interface ReportRow {
 interface Brand { id: string; name: string; client: string; client_status: string | null; currency?: string | null; }
 type Msg = { kind: 'success' | 'warning' | 'danger'; text: string } | null;
 
+/** Hand-off freeze: long enough for the previous editor's final save to land. */
+const HANDOFF_SETTLE_MS = 2000;
+
 export default function WeeklyReportEditV3() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
   const { profile } = useAuth();
+  // Collaborative edit lock — only one teammate edits a report at a time.
+  const lock = useEditLock({
+    kind: 'weekly',
+    id,
+    userId: profile?.id,
+    name: profile?.full_name || profile?.email || 'A teammate',
+    role: profile?.role,
+    isSuperbob: profile?.is_superbob,
+  });
+  // True while we re-pull the latest content right after taking over editing.
+  const [reloading, setReloading] = useState(false);
   const [report, setReport] = useState<ReportRow | null>(null);
   const [brand, setBrand] = useState<Brand | null>(null);
   const [c, setC] = useState<WeeklyReportContentV3>(emptyContentV3());
@@ -147,6 +164,7 @@ export default function WeeklyReportEditV3() {
   const runAutosave = async () => {
     if (savingRef.current || !mountedRef.current) return;      // one write at a time
     if (brand?.client_status === 'closed') return;
+    if (lockRef.current.isLockedOut || lockRef.current.reloading) return;   // read-only / mid hand-off
     const snap = JSON.stringify(latestContentRef.current);
     if (snap === lastSavedContent.current) return;             // nothing new
     savingRef.current = true;
@@ -165,10 +183,61 @@ export default function WeeklyReportEditV3() {
     if (loading || !report || lastSavedContent.current === null) return;   // not until first load
     if (brand?.client_status === 'closed') return;                          // inactive brand
     if (contentKey === lastSavedContent.current) return;                    // nothing changed
+    if (lock.isLockedOut || reloading) return;      // never write from a read-only view
     const t = setTimeout(() => void runAutosave(), 1200);
     return () => clearTimeout(t);   // debounce: cancel the not-yet-fired timer
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contentKey]);
+  }, [contentKey, lock.isLockedOut, reloading]);
+
+  // Follow the current editor's autosaved changes live while locked out, so a
+  // read-only viewer never has to reload to see the latest data. It stays on
+  // through the hand-off freeze too, so whoever takes over arrives holding the
+  // previous editor's final save instead of a stale snapshot.
+  useLiveReportContent({
+    table: 'weekly_reports',
+    id,
+    active: lock.isLockedOut || reloading,
+    onContent: raw => {
+      const normalized = normalizeContentV3(raw);
+      setC(normalized);
+      lastSavedContent.current = JSON.stringify(normalized);
+    },
+  });
+
+  // Edit-lock hand-off. Flush our newest edits the instant we LOSE control so
+  // the next editor continues from them, and re-pull the latest content when we
+  // GAIN it, briefly freezing the form so typing can't clobber the swap.
+  const lockRef = useRef({ isLockedOut: false, reloading: false });
+  lockRef.current = { isLockedOut: lock.isLockedOut, reloading };
+  const wasLockedOut = useRef(false);
+  useEffect(() => {
+    if (loading || !report) return;
+    const nowLocked = lock.isLockedOut;
+    if (nowLocked === wasLockedOut.current) return;   // no transition
+    const lostControl = nowLocked && !wasLockedOut.current;
+    wasLockedOut.current = nowLocked;
+
+    if (lostControl) {
+      if (brand?.client_status === 'closed') return;
+      const snapshot = latestContentRef.current;
+      void supabase.from('weekly_reports').update({ content: snapshot }).eq('id', id)
+        .then(({ error }) => { if (!error) lastSavedContent.current = JSON.stringify(snapshot); });
+    } else {
+      setReloading(true);
+      const t = setTimeout(async () => {
+        const { data, error } = await supabase.from('weekly_reports').select('content').eq('id', id).single();
+        if (!error && data) {
+          const normalized = normalizeContentV3(data.content);
+          setC(normalized);
+          lastSavedContent.current = JSON.stringify(normalized);
+          setAutoSave('idle');
+        }
+        setReloading(false);
+      }, HANDOFF_SETTLE_MS);
+      return () => clearTimeout(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lock.isLockedOut]);
 
   // ----- preset helpers (custom + standard) ---------------------------------
   const addCustomFromPreset = (preset: PresetRow) => {
@@ -468,6 +537,11 @@ export default function WeeklyReportEditV3() {
       setErr(`${brand.name} is inactive — reactivate the brand before saving changes.`);
       return;
     }
+    if (lock.isLockedOut) {
+      setErr(`${lock.editorName ?? 'Another teammate'} is currently editing this report. Request edit access to make changes.`);
+      return;
+    }
+    if (reloading) return;   // mid hand-off — wait for the latest content to load
     setSaving(true); setErr(null);
     const update: Record<string, any> = { content: c, status };
     if (c.approval?.enabled) update.is_shared = true;
@@ -509,6 +583,12 @@ export default function WeeklyReportEditV3() {
   // from a previously-viewed dashboard doesn't leak into this brand's preview.
   setReportCurrency(brand.currency);
   const brandInactive = brand.client_status === 'closed';
+  // Freeze the form body when another teammate holds the lock OR while we're
+  // pulling the latest content right after taking over.
+  const formFrozen = lock.isLockedOut || reloading;
+  const lockStyle: CSSProperties | undefined = formFrozen
+    ? { pointerEvents: 'none', opacity: 0.55, userSelect: 'none' }
+    : undefined;
   const autoSaveBadge = autoSave === 'idle' ? null : (
     <span className={`small d-inline-flex align-items-center me-2 ${autoSave === 'error' ? 'text-danger' : 'text-muted'}`}>
       {autoSave === 'saving' && <><Spinner animation="border" size="sm" className="me-1" style={{ width: 13, height: 13 }} />Saving…</>}
@@ -757,6 +837,13 @@ export default function WeeklyReportEditV3() {
           <div><strong>{brand.name} is inactive.</strong>{' '}You can review the data but Save is disabled until the brand is reactivated.</div>
         </Alert>
       )}
+      <EditLockBanner lock={lock} />
+      {reloading && (
+        <Alert variant="info" className="d-flex align-items-center gap-2">
+          <Spinner animation="border" size="sm" />
+          <span>You took over — loading the latest changes…</span>
+        </Alert>
+      )}
       <div className="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
         <div>
           <h2 className="mb-1">{brand.name} <small className="text-muted fs-6">— {brand.client}</small></h2>
@@ -764,6 +851,11 @@ export default function WeeklyReportEditV3() {
             Week #{report.week_number} · {formatRange(report.week_start, report.week_end)}
             <Badge bg={report.status === 'draft' ? 'secondary' : 'success'} className="ms-2">{report.status}</Badge>
             <Badge bg="dark" className="ms-2">New format</Badge>
+            {lock.ready && lock.othersCount > 0 && lock.isOwner && (
+              <Badge bg="success" className="ms-2">
+                <i className="bi bi-pencil-fill me-1" />You have control · {lock.othersCount} watching
+              </Badge>
+            )}
           </div>
         </div>
         <div className="d-flex gap-2 flex-wrap">
@@ -774,14 +866,15 @@ export default function WeeklyReportEditV3() {
           )}
           {autoSaveBadge}
           <Button variant="outline-secondary" onClick={() => nav('/reporting/weekly')}>Cancel</Button>
-          <Button variant="outline-primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
-          <Button variant="primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
+          <Button variant="outline-primary" disabled={saving || brandInactive || formFrozen} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
+          <Button variant="primary" disabled={saving || brandInactive || formFrozen} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
         </div>
       </div>
 
       {err && <Alert variant="danger">{err}</Alert>}
       {presetMsg && <Alert variant="info" className="py-2 small" dismissible onClose={() => setPresetMsg(null)}>{presetMsg}</Alert>}
 
+      <div style={lockStyle} aria-disabled={formFrozen}>
       {renderCustomAt('start')}
 
       {/* 12 standard sections, registry-driven */}
@@ -885,6 +978,8 @@ export default function WeeklyReportEditV3() {
         )}
       </Card>
 
+      </div>
+
       <CustomSectionDefModal
         show={csModalOpen} onHide={() => setCsModalOpen(false)} initial={csDraft}
         onSave={saveCustomDef} isEdit={csIsEdit} positions={V3_POSITIONS}
@@ -914,8 +1009,8 @@ export default function WeeklyReportEditV3() {
       <div className="d-flex justify-content-end gap-2 mb-4">
         {autoSaveBadge}
         <Button variant="outline-secondary" onClick={() => nav('/reporting/weekly')}>Cancel</Button>
-        <Button variant="outline-primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
-        <Button variant="primary" disabled={saving || brandInactive} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
+        <Button variant="outline-primary" disabled={saving || brandInactive || formFrozen} onClick={(e) => submit(e as any, 'draft')}>Save draft</Button>
+        <Button variant="primary" disabled={saving || brandInactive || formFrozen} onClick={(e) => submit(e as any, 'submitted')}>{saving ? 'Saving…' : 'Save & view dashboard'}</Button>
       </div>
 
       <Modal show={showComments} onHide={() => setShowComments(false)} centered size="lg" scrollable>

@@ -29,6 +29,7 @@ import NumberInput from '../components/NumberInput';
 import ImageInput from '../components/ImageInput';
 import { parseMonthlyReportPdf } from '../lib/importMonthlyReport';
 import { useEditLock } from '../lib/useEditLock';
+import { useLiveReportContent } from '../lib/useLiveReportContent';
 import EditLockBanner from '../components/EditLockBanner';
 
 const SECTION_LABELS: Record<string, string> = {
@@ -66,6 +67,9 @@ function shiftMonth(yyyymm: string, delta: number) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
+/** Hand-off freeze: long enough for the previous editor's final save to land. */
+const HANDOFF_SETTLE_MS = 2000;
+
 export default function MonthlyReportEdit() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
@@ -76,6 +80,8 @@ export default function MonthlyReportEdit() {
     id,
     userId: profile?.id,
     name: profile?.full_name || profile?.email || 'A teammate',
+    role: profile?.role,
+    isSuperbob: profile?.is_superbob,
   });
   const [report, setReport] = useState<MonthlyReportRow | null>(null);
   const [brand, setBrand] = useState<Brand | null>(null);
@@ -242,6 +248,21 @@ export default function MonthlyReportEdit() {
     return () => clearTimeout(t);
   }, [contentKey, lock.isLockedOut]);
 
+  // Follow the current editor's autosaved changes live while locked out, so a
+  // read-only viewer never has to reload to see the latest data. It stays on
+  // through the hand-off freeze too, so whoever takes over arrives holding the
+  // previous editor's final save instead of a stale snapshot.
+  useLiveReportContent({
+    table: 'monthly_reports',
+    id,
+    active: lock.isLockedOut || reloading,
+    onContent: raw => {
+      const normalized = normalizeMonthlyContent(raw);
+      setC(normalized);
+      lastSavedContent.current = JSON.stringify(normalized);
+    },
+  });
+
   // Edit-lock hand-off (see WeeklyReportEdit): flush our newest edits when we
   // LOSE control, and re-pull the latest content when we GAIN it, freezing the
   // form briefly during the swap so we don't clobber the incoming changes.
@@ -270,7 +291,7 @@ export default function MonthlyReportEdit() {
           setAutoSave('idle');
         }
         setReloading(false);
-      }, 1200);
+      }, HANDOFF_SETTLE_MS);
       return () => clearTimeout(t);
     }
   }, [lock.isLockedOut]);
@@ -624,9 +645,7 @@ export default function MonthlyReportEdit() {
           </div>
         </Alert>
       )}
-      {lock.isLockedOut && lock.editorName && (
-        <EditLockBanner editorName={lock.editorName} onTakeOver={lock.takeOver} />
-      )}
+      <EditLockBanner lock={lock} />
       {reloading && (
         <Alert variant="info" className="d-flex align-items-center gap-2">
           <Spinner animation="border" size="sm" />

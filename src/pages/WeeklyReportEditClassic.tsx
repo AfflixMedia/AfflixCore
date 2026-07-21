@@ -27,6 +27,7 @@ type ClickedSection =
 import NumberInput from '../components/NumberInput';
 import { parseReportPdf } from '../lib/importReport';
 import { useEditLock } from '../lib/useEditLock';
+import { useLiveReportContent } from '../lib/useLiveReportContent';
 import EditLockBanner from '../components/EditLockBanner';
 
 const SECTION_LABELS: Record<string, string> = {
@@ -46,6 +47,9 @@ interface ReportRow {
 }
 interface Brand { id: string; name: string; client: string; client_status: string | null; }
 
+/** Hand-off freeze: long enough for the previous editor's final save to land. */
+const HANDOFF_SETTLE_MS = 2000;
+
 export default function WeeklyReportEditClassic() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
@@ -56,6 +60,8 @@ export default function WeeklyReportEditClassic() {
     id,
     userId: profile?.id,
     name: profile?.full_name || profile?.email || 'A teammate',
+    role: profile?.role,
+    isSuperbob: profile?.is_superbob,
   });
   const [report, setReport] = useState<ReportRow | null>(null);
   const [brand, setBrand] = useState<Brand | null>(null);
@@ -208,6 +214,21 @@ export default function WeeklyReportEditClassic() {
     return () => clearTimeout(t);
   }, [contentKey, lock.isLockedOut]);
 
+  // Follow the current editor's autosaved changes live while locked out, so a
+  // read-only viewer never has to reload to see the latest data. It stays on
+  // through the hand-off freeze too, so whoever takes over arrives holding the
+  // previous editor's final save instead of a stale snapshot.
+  useLiveReportContent({
+    table: 'weekly_reports',
+    id,
+    active: lock.isLockedOut || reloading,
+    onContent: raw => {
+      const normalized = normalizeContent(raw);
+      setC(normalized);
+      lastSavedContent.current = JSON.stringify(normalized);
+    },
+  });
+
   // Edit-lock hand-off. When control changes hands we (a) flush our newest edits
   // the instant we LOSE control so the next editor continues from them, and
   // (b) re-pull the latest content when we GAIN control after being locked out,
@@ -237,7 +258,7 @@ export default function WeeklyReportEditClassic() {
           setAutoSave('idle');
         }
         setReloading(false);
-      }, 1200);
+      }, HANDOFF_SETTLE_MS);
       return () => clearTimeout(t);
     }
   }, [lock.isLockedOut]);
@@ -687,9 +708,7 @@ export default function WeeklyReportEditClassic() {
           </div>
         </Alert>
       )}
-      {lock.isLockedOut && lock.editorName && (
-        <EditLockBanner editorName={lock.editorName} onTakeOver={lock.takeOver} />
-      )}
+      <EditLockBanner lock={lock} />
       {reloading && (
         <Alert variant="info" className="d-flex align-items-center gap-2">
           <Spinner animation="border" size="sm" />
