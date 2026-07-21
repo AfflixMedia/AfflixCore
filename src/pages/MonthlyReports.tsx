@@ -513,7 +513,7 @@ export default function MonthlyReports() {
                       Conversation
                     </Button>
                   )}
-                  {isBob && (
+                  {isBob && statusTab !== 'approved' && (
                     <Button
                       size="sm" variant="link" className="wr-card-delete"
                       onClick={(e) => deleteReport(r, e)}

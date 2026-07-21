@@ -637,7 +637,7 @@ export default function WeeklyReports() {
                       Conversation
                     </Button>
                   )}
-                  {isBob && (
+                  {isBob && statusTab !== 'approved' && (
                     <Button
                       size="sm" variant="link" className="wr-card-delete"
                       onClick={(e) => deleteReport(r, e)}
