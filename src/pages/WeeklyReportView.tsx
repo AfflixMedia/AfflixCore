@@ -50,6 +50,8 @@ interface ReportRow {
   review_status?: ReviewStatus; reviewed_at?: string | null; review_note?: string | null;
 }
 interface Brand { id: string; name: string; client: string; client_status: string | null; currency?: string | null; }
+/** Lightweight row for the prev/next week switcher. */
+interface SiblingWeek { id: string; week_start: string; week_end: string; week_number: number; }
 
 export default function WeeklyReportView() {
   const { id } = useParams<{ id: string }>();
@@ -63,6 +65,9 @@ export default function WeeklyReportView() {
   const [prev, setPrev] = useState<ReportRow | null>(null);
   const [brand, setBrand] = useState<Brand | null>(null);
   const [trend, setTrend] = useState<ReportRow[]>([]);
+  // Every week this brand has a report for (newest first) — powers the
+  // previous/next week navigation at the foot of the dashboard.
+  const [siblings, setSiblings] = useState<SiblingWeek[]>([]);
   // Optional canvas template overlay — populated when the report has template_id.
   const [templateSchema, setTemplateSchema] = useState<CanvasSchema | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
@@ -138,6 +143,8 @@ export default function WeeklyReportView() {
   useEffect(() => {
     (async () => {
       setLoading(true);
+      // Switching weeks keeps the route mounted — start the next one at the top.
+      window.scrollTo({ top: 0 });
       const { data: cur, error } = await supabase.from('weekly_reports').select('*').eq('id', id).single();
       if (error) { setErr(error.message); setLoading(false); return; }
       const r = cur as ReportRow;
@@ -161,6 +168,12 @@ export default function WeeklyReportView() {
         .select('*').eq('brand_id', r.brand_id)
         .lte('week_start', r.week_start).order('week_start', { ascending: false }).limit(8);
       setTrend(((tr as ReportRow[]) ?? []).slice().reverse());
+      // All of the brand's weeks (both directions) for the prev/next switcher —
+      // `trend` only reaches back from this report, so it can't serve this.
+      const { data: sib } = await supabase.from('weekly_reports')
+        .select('id,week_start,week_end,week_number').eq('brand_id', r.brand_id)
+        .order('week_start', { ascending: false });
+      setSiblings((sib as SiblingWeek[]) ?? []);
       const { data: cm } = await supabase.from('report_comments')
         .select('*').eq('report_id', r.id).order('created_at', { ascending: true });
       setComments((cm as Comment[]) ?? []);
@@ -309,6 +322,12 @@ export default function WeeklyReportView() {
 
   const brandActive = brand.client_status !== 'closed';
 
+  // Siblings are newest-first, so the older week sits after this one.
+  const sibIdx = siblings.findIndex(s => s.id === report.id);
+  const newerWeek = sibIdx > 0 ? siblings[sibIdx - 1] : null;
+  const olderWeek = sibIdx >= 0 && sibIdx < siblings.length - 1 ? siblings[sibIdx + 1] : null;
+  const goToWeek = (s: SiblingWeek) => nav(`/reporting/weekly/${s.id}`);
+
   return (
     <>
       <div className="d-flex align-items-start gap-3 mb-3 flex-wrap">
@@ -454,6 +473,45 @@ export default function WeeklyReportView() {
             }}
           />
         )}
+      </div>
+
+      {/* Previous / next week for THIS brand — outside the export area so it
+          never lands in the PDF. Mirrors the client share link's report nav. */}
+      <div className="ac-report-nav">
+        <button
+          type="button"
+          className="ac-nav-arrow-btn"
+          onClick={() => olderWeek && goToWeek(olderWeek)}
+          disabled={!olderWeek}
+          title={olderWeek ? formatRange(olderWeek.week_start, olderWeek.week_end) : undefined}
+        >
+          <i className="bi bi-arrow-left" />
+          <span className="ac-nav-arrow-label">
+            <span className="ac-nav-arrow-hint">Previous week</span>
+            <span>
+              {olderWeek
+                ? `Week #${olderWeek.week_number} · ${formatWeekShort(olderWeek.week_start, olderWeek.week_end)}`
+                : 'No earlier report'}
+            </span>
+          </span>
+        </button>
+        <button
+          type="button"
+          className="ac-nav-arrow-btn"
+          onClick={() => newerWeek && goToWeek(newerWeek)}
+          disabled={!newerWeek}
+          title={newerWeek ? formatRange(newerWeek.week_start, newerWeek.week_end) : undefined}
+        >
+          <span className="ac-nav-arrow-label" style={{ alignItems: 'flex-end' }}>
+            <span className="ac-nav-arrow-hint">Next week</span>
+            <span>
+              {newerWeek
+                ? `Week #${newerWeek.week_number} · ${formatWeekShort(newerWeek.week_start, newerWeek.week_end)}`
+                : 'No later report'}
+            </span>
+          </span>
+          <i className="bi bi-arrow-right" />
+        </button>
       </div>
     </>
   );
