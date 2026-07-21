@@ -215,6 +215,38 @@ export function CreatorRowRO({ c, idx, onToggleAuth, onConfirmPaid, staffView }:
             : <span className="pc-handle">—</span>}
         </div>
         <div className="pc-cell pc-num" data-label="Content"><span className="pc-content-cell">{filled > 0 ? <b>{filled}</b> : ''} {open ? '▴' : '▾'}</span></div>
+
+        {/* ── purpose-built mobile card (≤900px the cells above are hidden) ── */}
+        <div className="pc-mc">
+          <div className="pc-mc-head">
+            <div className="pc-mc-idblock">
+              <div className="pc-mc-name">{c.name}</div>
+              <div className="pc-mc-subline">
+                {accounts[0]
+                  ? <a className="pc-mc-handle" href={accounts[0].url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>{accounts[0].handle}</a>
+                  : <span className="pc-mc-muted">no TikTok</span>}
+                {accounts.length > 1 && <span className="pc-more">+{accounts.length - 1}</span>}
+                {c.completed_on && <><span className="pc-mc-dot">·</span><span className="pc-mc-muted">{fmtDate(c.completed_on)}</span></>}
+              </div>
+            </div>
+            <span className={`pc-mc-chev ${open ? 'open' : ''}`} aria-hidden>▾</span>
+          </div>
+          <div className="pc-mc-stats pc-mc-stats-3">
+            <div className="pc-mc-stat"><b>{fmt$(Number(c.amount) || 0)}</b><span>Deal</span></div>
+            <div className="pc-mc-stat"><b>{c.videos_count || '—'}</b><span>Videos</span></div>
+            <div className="pc-mc-stat"><b className={filled ? 'pc-green' : ''}>{filled}/{total || 0}</b><span>Delivered</span></div>
+          </div>
+          <div className="pc-mc-foot">
+            <span className={`pc-badge ${st.cls}`}><span className="dot" />{st.label}</span>
+            {c.contract_url && (
+              <a className="pc-contract-btn pc-clink has" href={c.contract_url} target="_blank" rel="noopener noreferrer"
+                title="Open signed contract" aria-label="Open signed contract" onClick={e => e.stopPropagation()}>
+                <i className="bi bi-link-45deg" />
+              </a>
+            )}
+            {(c.paypal || c.zelle) && <span className="pc-mc-footmeta"><PayoutRO paypal={c.paypal} zelle={c.zelle} /></span>}
+          </div>
+        </div>
       </div>
       {open && (
         <div className="pc-expand" onClick={e => e.stopPropagation()}>

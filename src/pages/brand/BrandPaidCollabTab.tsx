@@ -165,6 +165,22 @@ export default function BrandPaidCollabTab({ brandId, brandName, canEdit, onPend
     [months],
   );
 
+  // Per-month allocated / paid, so each brief row can show the same
+  // Budget · Allocated · Paid breakdown the KPI tiles show for the whole brand.
+  // Creators belong to the month they were onboarded in (same rule as the list below).
+  const monthStats = useMemo(() => {
+    const map: Record<string, { allocated: number; paid: number; creators: number }> = {};
+    creators.forEach(c => {
+      const k = monthKey(c.onboarded_on);
+      const s = map[k] || (map[k] = { allocated: 0, paid: 0, creators: 0 });
+      const amt = Number(c.amount) || 0;
+      s.allocated += amt;
+      if (c.payment_status === 'paid') s.paid += amt;
+      s.creators += 1;
+    });
+    return map;
+  }, [creators]);
+
   // Creators grouped by onboarded month (newest first), like the workspace.
   const groups = useMemo(() => {
     const map: Record<string, HandlerCreator[]> = {};
@@ -197,21 +213,51 @@ export default function BrandPaidCollabTab({ brandId, brandName, canEdit, onPend
       </div>
 
       {sortedMonths.length > 0 && (
-        <div className="pc-card" style={{ padding: 16, marginBottom: 16 }}>
-          <div style={{ fontWeight: 700, marginBottom: 10 }}>Monthly budgets &amp; briefs</div>
-          {sortedMonths.map(m => {
-            const products = focusProductList(m.focus_product_url);
-            return (
-              <div key={m.id} style={{ marginBottom: 10 }}>
-                <div className="pc-dd-links">
-                  <span className="pc-link-chip set">{monthLabel(m.month)} · {fmt$(Number(m.budget) || 0)}</span>
-                  {m.content_guide_url && <a className="pc-link-chip" href={m.content_guide_url} target="_blank" rel="noopener noreferrer">Content guide ↗</a>}
-                  {products.map((p, i) => <a key={i} className="pc-link-chip pc-chip-orange" href={p.url || undefined} target="_blank" rel="noopener noreferrer">{p.name || `Focus product ${i + 1}`} ↗</a>)}
+        <div className="pc-card pc-mb-card">
+          <div className="pc-mb-title">Monthly budgets &amp; briefs</div>
+          <div className="pc-mb-grid" role="table" aria-label="Monthly budgets and briefs">
+            <div className="pc-mb-head" role="row">
+              <span role="columnheader">Month</span>
+              <span role="columnheader" className="pc-mb-num">Budget</span>
+              <span role="columnheader" className="pc-mb-num">Allocated</span>
+              <span role="columnheader" className="pc-mb-num">Paid</span>
+              <span role="columnheader" className="pc-mb-num">Left</span>
+              <span role="columnheader">Use</span>
+              <span role="columnheader">Brief</span>
+            </div>
+            {sortedMonths.map(m => {
+              const products = focusProductList(m.focus_product_url);
+              const budget = Number(m.budget) || 0;
+              const st = monthStats[String(m.month)] || { allocated: 0, paid: 0, creators: 0 };
+              const pct = (n: number) => (budget > 0 ? Math.min(100, Math.round((n / budget) * 100)) : 0);
+              const notes = (m.notes || '').trim();
+              return (
+                <div key={m.id} className="pc-mb-r" role="row">
+                  <span className="pc-mb-month" role="cell">
+                    {monthLabel(m.month)}
+                    {st.creators > 0 && <em>{st.creators}</em>}
+                  </span>
+                  <span className="pc-mb-num pc-mb-b" role="cell" data-l="Budget">{fmt$(budget)}</span>
+                  <span className="pc-mb-num pc-mb-a" role="cell" data-l="Allocated">{fmt$(st.allocated)}</span>
+                  <span className="pc-mb-num pc-mb-p" role="cell" data-l="Paid">{fmt$(st.paid)}</span>
+                  <span className="pc-mb-num pc-mb-l" role="cell" data-l="Left">{fmt$(Math.max(0, budget - st.allocated))}</span>
+                  <span className="pc-mb-usecell" role="cell" data-l="Use">
+                    <span className="pc-mb-bar" title={`Allocated ${fmt$(st.allocated)} · Paid ${fmt$(st.paid)} of ${fmt$(budget)}`}>
+                      <i className="pc-mb-bar-alloc" style={{ width: `${pct(st.allocated)}%` }} />
+                      <i className="pc-mb-bar-paid" style={{ width: `${pct(st.paid)}%` }} />
+                    </span>
+                    <em>{pct(st.allocated)}%</em>
+                  </span>
+                  <span className="pc-mb-brief" role="cell">
+                    {m.content_guide_url && <a className="pc-link-chip" href={m.content_guide_url} target="_blank" rel="noopener noreferrer" title="Content guide">Guide ↗</a>}
+                    {products.map((p, i) => <a key={i} className="pc-link-chip pc-chip-orange" href={p.url || undefined} target="_blank" rel="noopener noreferrer" title={p.name || `Focus product ${i + 1}`}>{p.name || `Product ${i + 1}`} ↗</a>)}
+                    {notes && <span className="pc-link-chip pc-mb-note" title={notes}>{notes}</span>}
+                    {!m.content_guide_url && !products.length && !notes && <span className="pc-mb-dash">—</span>}
+                  </span>
                 </div>
-                {m.notes && m.notes.trim() && <div className="pc-kpi-sub" style={{ marginTop: 4, whiteSpace: 'pre-wrap' }}>{m.notes}</div>}
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
 

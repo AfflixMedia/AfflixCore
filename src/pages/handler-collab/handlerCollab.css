@@ -176,6 +176,49 @@
 .pc-dd-sub{ font-size:13.5px; color:var(--pc-text-2); font-weight:500; margin-top:2px; }
 .pc-dd-links{ display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
 .pc-dd-links .pc-link-chip{ height:32px; padding:0 14px; font-size:12.5px; font-weight:700; }
+
+/* Monthly budgets & briefs (Brand Detail → Paid Collab → Overview).
+   Dense one-line-per-month grid: labels live in a single header row instead of
+   repeating per month, so each month costs ~30px of vertical space. */
+.pc-mb-card{ padding:12px 14px; margin-bottom:16px; }
+.pc-mb-title{ font-weight:700; font-size:13px; margin-bottom:6px; }
+.pc-mb-grid{ display:flex; flex-direction:column; }
+.pc-mb-head, .pc-mb-r{
+  display:grid;
+  grid-template-columns:minmax(96px,1fr) 84px 84px 78px 78px 96px minmax(120px,1.6fr);
+  align-items:center; gap:10px;
+}
+.pc-mb-head{ font-size:9.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--pc-text-3); padding:0 4px 4px; border-bottom:1px solid var(--pc-divider); }
+.pc-mb-r{ padding:5px 4px; border-bottom:1px solid var(--pc-divider); min-height:30px; }
+.pc-mb-r:last-child{ border-bottom:0; }
+.pc-mb-r:hover{ background:var(--pc-card-2); }
+.pc-mb-num{ text-align:right; font-size:12.5px; font-weight:700; font-variant-numeric:tabular-nums; }
+.pc-mb-month{ display:flex; align-items:center; gap:5px; font-size:12.5px; font-weight:800; color:var(--pc-text); }
+.pc-mb-month em{ font-style:normal; font-size:9.5px; font-weight:700; color:var(--pc-text-3); background:var(--pc-card-2); border-radius:99px; padding:1px 5px; }
+.pc-mb-b{ color:var(--pc-text); }
+.pc-mb-a{ color:#8B5CF6; }
+.pc-mb-p{ color:#2E7D32; }
+.pc-mb-l{ color:var(--pc-text-3); }
+.pc-mb-usecell{ display:flex; align-items:center; gap:6px; }
+.pc-mb-usecell em{ font-style:normal; font-size:10px; font-weight:700; color:var(--pc-text-3); font-variant-numeric:tabular-nums; }
+.pc-mb-bar{ position:relative; flex:1; height:5px; border-radius:99px; background:var(--pc-divider); overflow:hidden; }
+.pc-mb-bar i{ position:absolute; left:0; top:0; bottom:0; border-radius:99px; transition:width .25s var(--pc-ease); }
+.pc-mb-bar-alloc{ background:#8B5CF6; }
+.pc-mb-bar-paid{ background:#2E7D32; }
+.pc-mb-brief{ display:flex; align-items:center; gap:5px; min-width:0; overflow:hidden; }
+.pc-mb-brief .pc-link-chip{ height:20px; padding:0 7px; font-size:10.5px; max-width:150px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:inline-block; line-height:20px; }
+.pc-mb-note{ color:var(--pc-text-3) !important; background:transparent !important; }
+.pc-mb-dash{ color:var(--pc-text-3); font-size:12px; }
+@media (prefers-reduced-motion:reduce){ .pc-mb-bar i{ transition:none; } }
+@media (max-width:760px){
+  .pc-mb-head{ display:none; }
+  .pc-mb-r{ grid-template-columns:repeat(2,1fr); gap:2px 10px; padding:8px 4px; }
+  .pc-mb-month{ grid-column:1 / -1; }
+  .pc-mb-num{ text-align:left; }
+  .pc-mb-num::before{ content:attr(data-l) " "; font-size:9.5px; font-weight:700; text-transform:uppercase; color:var(--pc-text-3); }
+  .pc-mb-usecell, .pc-mb-brief{ grid-column:1 / -1; }
+}
+
 .pc-dd-actions{ display:flex; gap:8px; align-items:center; flex-shrink:0; }
 @media (max-width:768px){ .pc-dd-actions{ width:100%; } .pc-dd-actions .pc-btn{ flex:1; justify-content:center; } }
 
@@ -343,6 +386,13 @@
 .pc-seg-btn:hover{ color:var(--pc-text); }
 .pc-seg-btn.active{ background:var(--pc-accent); color:#fff; box-shadow:0 3px 10px rgba(18,89,195,.24); }
 .pc-seg-btn:active{ transform:scale(.97); }
+/* phones: the segmented switch spans the row and scrolls sideways instead of
+   overflowing the card (Overview / Performance / Authorization) */
+@media (max-width:600px){
+  .pc-seg{ display:flex; width:100%; overflow-x:auto; scrollbar-width:none; -ms-overflow-style:none; -webkit-overflow-scrolling:touch; }
+  .pc-seg::-webkit-scrollbar{ display:none; }
+  .pc-seg-btn{ flex:1 0 auto; padding:0 13px; font-size:12.5px; white-space:nowrap; }
+}
 
 /* ── First-time weekly setup (pick week-1 / anchor date) ── */
 .pc-anchor-row{ display:inline-flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:center; margin-top:8px; }
