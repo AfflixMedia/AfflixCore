@@ -5,33 +5,20 @@ import DOMPurify from 'dompurify';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/AuthContext';
 import { useNotifications } from '../notifications/NotificationsContext';
-import { addDays, formatRange, fromISO } from '../lib/dates';
+import { addDays, formatRange, formatWeekShort, fromISO } from '../lib/dates';
 import TemplatePicker from '../components/canvas/TemplatePicker';
 import ReportConversationOffcanvas, { ConvReport } from '../components/ReportConversationOffcanvas';
 
-function currentMonth() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+// Weekly cycles are identical across brands, so the list is filtered by the
+// exact week (week_start) rather than by month — see the week navigator below.
+function weekFullLabel(start: string) {
+  return formatRange(start, addDays(start, 6));
 }
 
-function monthLabel(ym: string) {
-  const [y, m] = ym.split('-').map(Number);
-  return new Date(y, m - 1, 1).toLocaleString(undefined, { month: 'long', year: 'numeric' });
-}
-
-function recentMonths(count: number): string[] {
-  const now = new Date();
-  const out: string[] = [];
-  for (let i = count - 1; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
-  }
-  return out;
-}
-
-function shortMonthLabel(ym: string) {
-  const [y, m] = ym.split('-').map(Number);
-  return new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'short', year: '2-digit' });
+/** "Aug 3" — the week's year, only shown when it isn't the current one. */
+function weekYearSuffix(start: string) {
+  const y = fromISO(start).getFullYear();
+  return y === new Date().getFullYear() ? '' : ` ${y}`;
 }
 
 // Deterministic colored avatar palette — assigns each brand a stable color.
@@ -123,8 +110,9 @@ export default function WeeklyReports() {
   const [commentCounts, setCommentCounts] = useState<Map<string, number>>(new Map());
   const [convReport, setConvReport] = useState<ConvReport | null>(null);
 
-  // header state
-  const [fMonth, setFMonth] = useState(currentMonth());
+  // header state — fWeek is a week_start (YYYY-MM-DD); '' until reports load.
+  const [fWeek, setFWeek] = useState('');
+  const [weekMenu, setWeekMenu] = useState(false);
   const [fSearch, setFSearch] = useState('');
   const [statusTab, setStatusTab] = useState<StatusTab>('all');
 
@@ -200,10 +188,36 @@ export default function WeeklyReports() {
     return m;
   }, [apcs]);
 
-  // Report belongs to month of its week_start (per product spec).
+  // Every distinct reporting week that has reports, newest first — the week
+  // navigator steps through this list.
+  const weeks = useMemo(
+    () => Array.from(new Set(reports.map(r => r.week_start))).sort((a, b) => b.localeCompare(a)),
+    [reports],
+  );
+  const weekCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    reports.forEach(r => m.set(r.week_start, (m.get(r.week_start) ?? 0) + 1));
+    return m;
+  }, [reports]);
+
+  // Land on the latest week (and recover if the selected one disappears).
+  useEffect(() => {
+    if (weeks.length === 0) { if (fWeek) setFWeek(''); return; }
+    if (!weeks.includes(fWeek)) setFWeek(weeks[0]);
+  }, [weeks, fWeek]);
+
+  const weekIdx = weeks.indexOf(fWeek);
+  const hasOlder = weekIdx >= 0 && weekIdx < weeks.length - 1;
+  const hasNewer = weekIdx > 0;
+  const stepWeek = (delta: number) => {
+    const next = weeks[weekIdx + delta];
+    if (next) setFWeek(next);
+  };
+
+  // Reports are filtered to a single reporting week.
   const filteredReports = useMemo(() => {
     return reports.filter(r => {
-      if (r.week_start.slice(0, 7) !== fMonth) return false;
+      if (r.week_start !== fWeek) return false;
       if (statusTab === 'draft' && r.status !== 'draft') return false;
       if (statusTab === 'submitted' && r.status !== 'submitted') return false;
       if (statusTab === 'unread' && (unreadByReport.get(r.id) ?? 0) === 0) return false;
@@ -219,18 +233,18 @@ export default function WeeklyReports() {
       }
       return true;
     });
-  }, [reports, fMonth, statusTab, unreadByReport, approvalMap, fBrand, fApc, fSearch, brandMap, apcMap]);
+  }, [reports, fWeek, statusTab, unreadByReport, approvalMap, fBrand, fApc, fSearch, brandMap, apcMap]);
 
-  // Status tab counts (for current month, ignoring search/brand/apc filters)
+  // Status tab counts (for the selected week, ignoring search/brand/apc filters)
   const tabCounts = useMemo(() => {
-    const monthReports = reports.filter(r => r.week_start.slice(0, 7) === fMonth);
-    const drafts = monthReports.filter(r => r.status === 'draft').length;
-    const submitted = monthReports.filter(r => r.status === 'submitted').length;
-    const unread = monthReports.filter(r => (unreadByReport.get(r.id) ?? 0) > 0).length;
-    const approvals = monthReports.filter(r => approvalMap.has(r.id) || approvalRequested(r)).length;
-    const approvalsPending = monthReports.filter(r => !approvalMap.has(r.id) && approvalRequested(r)).length;
-    return { all: monthReports.length, drafts, submitted, unread, approvals, approvalsPending };
-  }, [reports, fMonth, unreadByReport, approvalMap]);
+    const weekReports = reports.filter(r => r.week_start === fWeek);
+    const drafts = weekReports.filter(r => r.status === 'draft').length;
+    const submitted = weekReports.filter(r => r.status === 'submitted').length;
+    const unread = weekReports.filter(r => (unreadByReport.get(r.id) ?? 0) > 0).length;
+    const approvals = weekReports.filter(r => approvalMap.has(r.id) || approvalRequested(r)).length;
+    const approvalsPending = weekReports.filter(r => !approvalMap.has(r.id) && approvalRequested(r)).length;
+    return { all: weekReports.length, drafts, submitted, unread, approvals, approvalsPending };
+  }, [reports, fWeek, unreadByReport, approvalMap]);
 
   const nextWindowFor = (brandId: string): { start: string; end: string; week_number: number } | null => {
     const anchor = settings[brandId];
@@ -332,34 +346,85 @@ export default function WeeklyReports() {
       {/* Header */}
       <div className="wr-header">
         <div className="wr-header-left">
-          <div className="wr-month-seg" role="group" aria-label="Report month">
-            <i className="bi bi-calendar3 wr-month-seg-ico" />
-            {recentMonths(3).map(m => (
-              <button
-                key={m}
-                type="button"
-                className={`wr-month-seg-btn${m === fMonth ? ' is-active' : ''}`}
-                onClick={() => setFMonth(m)}
-                aria-pressed={m === fMonth}
-              >
-                {shortMonthLabel(m)}
-              </button>
-            ))}
-            {/* Calendar — jump to ANY month (incl. months outside the recent 3). */}
-            <label
-              className={`wr-month-seg-btn wr-month-pick${!recentMonths(3).includes(fMonth) ? ' is-active' : ''}`}
-              title="Pick any month"
+          {/* Week navigator — every brand runs the same weekly cycle, so the list
+              is scoped to one week at a time, newest first. */}
+          <div className="wr-weeknav" role="group" aria-label="Reporting week">
+            <button
+              type="button"
+              className="wr-weeknav-arrow"
+              onClick={() => stepWeek(1)}
+              disabled={!hasOlder}
+              aria-label="Previous week"
+              title="Previous week"
             >
-              <i className="bi bi-calendar-week" />
-              <span>{recentMonths(3).includes(fMonth) ? 'Pick month' : shortMonthLabel(fMonth)}</span>
-              <input
-                type="month"
-                className="wr-month-input"
-                value={fMonth}
-                onChange={e => { if (e.target.value) setFMonth(e.target.value); }}
-              />
-            </label>
+              <i className="bi bi-chevron-left" aria-hidden="true" />
+            </button>
+
+            <div className="wr-weeknav-pick">
+              <button
+                type="button"
+                className="wr-weeknav-current"
+                onClick={() => setWeekMenu(o => !o)}
+                disabled={weeks.length === 0}
+                aria-haspopup="listbox"
+                aria-expanded={weekMenu}
+              >
+                <i className="bi bi-calendar-week wr-weeknav-ico" aria-hidden="true" />
+                <span className="wr-weeknav-label">
+                  {fWeek ? `${formatWeekShort(fWeek, addDays(fWeek, 6))}${weekYearSuffix(fWeek)}` : 'No weeks yet'}
+                </span>
+                {weekIdx === 0 && <span className="wr-weeknav-tag">Latest</span>}
+                <i className="bi bi-chevron-down wr-weeknav-caret" aria-hidden="true" />
+              </button>
+
+              {weekMenu && (
+                <>
+                  <button
+                    type="button"
+                    className="wr-weeknav-scrim"
+                    aria-label="Close week list"
+                    onClick={() => setWeekMenu(false)}
+                  />
+                  <ul className="wr-weeknav-menu" role="listbox" aria-label="Pick a week">
+                    {weeks.map((w, i) => (
+                      <li key={w}>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={w === fWeek}
+                          className={`wr-weeknav-opt${w === fWeek ? ' is-active' : ''}`}
+                          onClick={() => { setFWeek(w); setWeekMenu(false); }}
+                        >
+                          <span className="wr-weeknav-opt-main">
+                            {formatWeekShort(w, addDays(w, 6))}
+                            {i === 0 && <span className="wr-weeknav-tag">Latest</span>}
+                          </span>
+                          <span className="wr-weeknav-opt-meta">{weekCounts.get(w) ?? 0}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+
+            <button
+              type="button"
+              className="wr-weeknav-arrow"
+              onClick={() => stepWeek(-1)}
+              disabled={!hasNewer}
+              aria-label="Next week"
+              title="Next week"
+            >
+              <i className="bi bi-chevron-right" aria-hidden="true" />
+            </button>
           </div>
+
+          {hasNewer && (
+            <button type="button" className="wr-weeknav-latest" onClick={() => setFWeek(weeks[0])}>
+              Jump to latest
+            </button>
+          )}
         </div>
 
         <div className="wr-header-search">
@@ -454,10 +519,12 @@ export default function WeeklyReports() {
         <Card className="wr-empty">
           <Card.Body className="text-center py-5">
             <div className="wr-empty-icon"><i className="bi bi-journal-text" /></div>
-            <h5 className="mb-1">No reports for {monthLabel(fMonth)}</h5>
+            <h5 className="mb-1">
+              {fWeek ? `No reports for ${weekFullLabel(fWeek)}` : 'No reports yet'}
+            </h5>
             <p className="text-muted mb-3">
               {tabCounts.all === 0
-                ? 'Nothing has been created for this month yet.'
+                ? 'Nothing has been created for this week yet.'
                 : 'Try adjusting your filters or status tab.'}
             </p>
             <Button variant="primary" size="sm" onClick={() => setPickerOpen(true)}>
