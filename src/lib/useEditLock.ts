@@ -54,28 +54,49 @@ export interface EditAccessRequest { clientId: string; name: string; }
 /** Where this client's own outgoing take-over request stands. */
 export type EditRequestStatus = 'idle' | 'pending' | 'denied';
 
-/** Per-tab, per-record editing identity — kept across reloads in sessionStorage. */
-interface TabIdentity { clientId: string; joinedAt: number; claimSeq: number; }
+/**
+ * Per-tab, per-record editing identity — kept across reloads in sessionStorage.
+ *
+ * `left` separates the two ways an editor can disappear:
+ *   - RELOAD (F5, crash): React's cleanup never runs, so `left` stays false and
+ *     the tab re-claims its slot with the same standing — otherwise its own
+ *     not-yet-expired presence row would sit there as a ghost owner and lock it
+ *     out of its own report.
+ *   - LEAVING (navigating off the editor): cleanup runs and marks `left`, so
+ *     coming back later is a FRESH join at the back of the queue. Someone who
+ *     took over while you were gone keeps control, and you have to take it back
+ *     deliberately.
+ */
+interface TabIdentity { clientId: string; joinedAt: number; claimSeq: number; left?: boolean; }
 
 const identityKey = (kind: string, id?: string) => `ac_editlock:${kind}:${id ?? '-'}`;
 
+function newClientId() {
+  return typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `c${Date.now()}${Math.random().toString(36).slice(2)}`;
+}
+
 function loadIdentity(kind: string, id?: string): TabIdentity {
-  const fresh = (): TabIdentity => ({
-    clientId: typeof crypto !== 'undefined' && crypto.randomUUID
-      ? crypto.randomUUID()
-      : `c${Date.now()}${Math.random().toString(36).slice(2)}`,
-    joinedAt: Date.now(),
-    claimSeq: 0,
-  });
+  const fresh = (clientId = newClientId()): TabIdentity =>
+    ({ clientId, joinedAt: Date.now(), claimSeq: 0 });
   try {
     const raw = sessionStorage.getItem(identityKey(kind, id));
+    let made: TabIdentity;
     if (raw) {
       const p = JSON.parse(raw) as TabIdentity;
       if (p?.clientId && typeof p.joinedAt === 'number') {
-        return { clientId: p.clientId, joinedAt: p.joinedAt, claimSeq: p.claimSeq ?? 0 };
+        // Reload → keep our standing. Re-entry after leaving → queue at the back,
+        // reusing the clientId so any leftover presence row is replaced.
+        made = p.left
+          ? fresh(p.clientId)
+          : { clientId: p.clientId, joinedAt: p.joinedAt, claimSeq: p.claimSeq ?? 0 };
+      } else {
+        made = fresh();
       }
+    } else {
+      made = fresh();
     }
-    const made = fresh();
     sessionStorage.setItem(identityKey(kind, id), JSON.stringify(made));
     return made;
   } catch {
@@ -255,6 +276,15 @@ export function useEditLock(opts: {
 
     return () => {
       window.removeEventListener('pagehide', release);
+      // Cleanup runs when we navigate AWAY from the editor, but not on a reload
+      // — so this is what tells the next mount it must re-join at the back of
+      // the queue instead of reclaiming control it walked away from.
+      saveIdentity(kind, id, {
+        clientId: clientIdRef.current,
+        joinedAt: joinedAtRef.current,
+        claimSeq: claimSeqRef.current,
+        left: true,
+      });
       if (requestTimerRef.current) clearTimeout(requestTimerRef.current);
       setReady(false);
       setOwnerMeta(null);
