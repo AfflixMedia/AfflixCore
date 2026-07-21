@@ -12,6 +12,10 @@ import BrandPaidCollabTab, { isPendingAuthCode } from './brand/BrandPaidCollabTa
 import BrandProductsTab from './brand/BrandProductsTab';
 import BrandBillingTab from './brand/BrandBillingTab';
 import PaymentControlsTab from '../components/paidcollab/PaymentControlsTab';
+import Avatar from '../components/Avatar';
+
+/** Minimal person shape for the brand's Team Lead / APC header chips. */
+interface OwnerLite { id: string; name: string; avatar: string | null; }
 
 interface Brand {
   id: string;
@@ -83,6 +87,11 @@ export default function BrandDetail() {
   // Reports whose client approval request is still unanswered — drives the red
   // dot on the Approvals tab.
   const [pendingApprovalCount, setPendingApprovalCount] = useState(0);
+  // Who runs this brand — its Team Lead and APC, shown in the header. Either can
+  // be null (unassigned, or the viewer's RLS hides that profile).
+  const [owners, setOwners] = useState<{ lead: OwnerLite | null; apc: OwnerLite | null }>(
+    { lead: null, apc: null },
+  );
 
   const tabFromUrl = (params.get('tab') as TabKey) || 'resources';
 
@@ -92,6 +101,7 @@ export default function BrandDetail() {
       const [
         { data: b, error: bErr }, { data: assigns }, { data: siblings }, { data: authRows },
         { data: wApprovals }, { data: mApprovals }, { data: decidedRows },
+        { data: leadRows }, { data: apcRows },
       ] = await Promise.all([
         supabase.from('brands').select('id,name,client,client_id,share_enabled,client_status').eq('id', id).maybeSingle(),
         isApc
@@ -113,6 +123,9 @@ export default function BrandDetail() {
         supabase.from('weekly_reports').select('id,approval:content->approval').eq('brand_id', id ?? ''),
         supabase.from('monthly_reports').select('id,approval:content->approval').eq('brand_id', id ?? ''),
         supabase.from('report_approval_decisions').select('report_id'),
+        // Brand ownership for the header chips.
+        supabase.from('team_lead_brands').select('team_lead_id').eq('brand_id', id ?? ''),
+        supabase.from('apc_brands').select('apc_id').eq('brand_id', id ?? ''),
       ]);
       if (bErr) { setErr(bErr.message); setLoading(false); return; }
       if (!b) { setErr('Brand not found.'); setLoading(false); return; }
@@ -123,6 +136,25 @@ export default function BrandDetail() {
       const st = ((b as Brand).client_status ?? 'in_progress') as ClientStatus;
       setNavStatus(prev => (prev === 'all' || prev === st) ? prev : st);
       setAssignedToMe(((assigns as any[])?.length ?? 0) > 0);
+      // Resolve the owner ids to names + photos. RLS decides which profiles the
+      // viewer may read, so anyone hidden simply doesn't get a chip.
+      const leadId = (leadRows as any[])?.[0]?.team_lead_id ?? null;
+      const apcId = (apcRows as any[])?.[0]?.apc_id ?? null;
+      const ownerIds = [leadId, apcId].filter(Boolean) as string[];
+      if (ownerIds.length === 0) {
+        setOwners({ lead: null, apc: null });
+      } else {
+        const { data: people } = await supabase
+          .from('profiles').select('id,email,full_name,avatar_url').in('id', ownerIds);
+        const byId = new Map<string, OwnerLite>();
+        (people ?? []).forEach((r: any) => byId.set(r.id, {
+          id: r.id, name: r.full_name || r.email, avatar: r.avatar_url ?? null,
+        }));
+        setOwners({
+          lead: leadId ? byId.get(leadId) ?? null : null,
+          apc: apcId ? byId.get(apcId) ?? null : null,
+        });
+      }
       setPendingAuthCount(((authRows as any[]) ?? []).reduce((n, r) =>
         n + (Array.isArray(r.video_codes) ? r.video_codes.filter(isPendingAuthCode).length : 0), 0));
       // Same rule as the Approvals tab / reporting lists: approval requested
@@ -276,6 +308,25 @@ export default function BrandDetail() {
                 ? <Badge bg="success" className="ms-2"><i className="bi bi-globe me-1" />Sharing on</Badge>
                 : <Badge bg="secondary" className="ms-2"><i className="bi bi-lock me-1" />Sharing off</Badge>}
             </div>
+            {/* Who runs this brand: its Team Lead + APC. */}
+            {(owners.lead || owners.apc) && (
+              <div className="ac-brand-owners mt-2">
+                {owners.lead && (
+                  <span className="ac-owner-chip" title={`Team Lead: ${owners.lead.name}`}>
+                    <Avatar name={owners.lead.name} src={owners.lead.avatar} size="sm" variant="dark" />
+                    <span className="ac-owner-name">{owners.lead.name}</span>
+                    <span className="ac-owner-role">TL</span>
+                  </span>
+                )}
+                {owners.apc && (
+                  <span className="ac-owner-chip" title={`APC: ${owners.apc.name}`}>
+                    <Avatar name={owners.apc.name} src={owners.apc.avatar} size="sm" />
+                    <span className="ac-owner-name">{owners.apc.name}</span>
+                    <span className="ac-owner-role">APC</span>
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
