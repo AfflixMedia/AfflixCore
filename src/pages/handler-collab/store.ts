@@ -72,6 +72,9 @@ export interface HandlerCreator {
   // Link to the signed contract (e.g. Google Drive), pasted by the handler
   // after the creator returns the signed agreement PDF.
   contract_url?: string | null;
+  // Contract §2: days to complete the deliverables after sample delivery.
+  // Null = automatic (10 for <6 videos, 14 otherwise).
+  deliverable_days?: number | null;
   // Last time the posted-video count increased (drives the 1-week follow-up rule).
   video_count_updated_at?: string | null;
   video_codes: VideoCode[];
@@ -263,6 +266,8 @@ export async function addCreator(data: Record<string, any>) {
     payment_status: data.payment_status || 'videos_in_progress',
     onboarded_on: data.onboarded_on || null,
     contract_url: (data.contract_url || '').trim(),
+    // Contract §2 completion window; null = automatic (see contractPdf.ts).
+    deliverable_days: data.deliverable_days ? parseInt(data.deliverable_days, 10) || null : null,
     video_codes: Array.isArray(data.video_codes) ? data.video_codes : [],
     monthly: data.monthly && typeof data.monthly === 'object' ? data.monthly : {},
     products: Array.isArray(data.products) ? data.products : [],
@@ -280,6 +285,96 @@ export async function updateCreator(id: string, patch: Record<string, any>) {
 
 export async function deleteCreator(id: string) {
   const { error } = await supabase.from('handler_collab_creators').delete().eq('id', id);
+  if (error) throw error;
+}
+
+/* ── creator contract signing links (migration 20260822090000) ──
+   One shareable link per creator deal. The handler generates it from the
+   Contract column; the creator opens /sign/<token>, reads the very PDF snapshot
+   stored in `payload`, and signs once (frozen server-side afterwards). The
+   handler can deactivate/reactivate the link and is notified on signature. */
+export interface ContractSignLink {
+  id: string;
+  creator_id: string;
+  brand_id: string;
+  token: string;
+  active: boolean;
+  payload: Record<string, any>;
+  created_at: string;
+  signed_at: string | null;
+  signer_name: string | null;
+  signer_signature: string | null;
+}
+
+function newContractToken(): string {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// All signing links for the given brands (RLS scopes to brands the caller can
+// see). Signature blobs are skipped here — the list only needs the state.
+export async function loadContractLinks(brandIds: string[]): Promise<ContractSignLink[]> {
+  if (!brandIds.length) return [];
+  const { data, error } = await supabase
+    .from('handler_contract_signatures')
+    .select('id, creator_id, brand_id, token, active, created_at, signed_at, signer_name')
+    .in('brand_id', brandIds);
+  if (error) throw error;
+  return (data || []) as ContractSignLink[];
+}
+
+export async function getContractLink(creatorId: string): Promise<ContractSignLink | null> {
+  const { data, error } = await supabase
+    .from('handler_contract_signatures')
+    .select('*')
+    .eq('creator_id', creatorId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as ContractSignLink) || null;
+}
+
+// Create the link (auto-generated token) or, when one already exists, refresh
+// the snapshot the creator will sign. A SIGNED link is never touched — the
+// signed copy must stay exactly what was signed.
+export async function upsertContractLink(
+  creatorId: string,
+  brandId: string,
+  payload: Record<string, any>,
+): Promise<ContractSignLink> {
+  const existing = await getContractLink(creatorId);
+  if (existing) {
+    if (existing.signed_at) return existing;
+    const { data, error } = await supabase
+      .from('handler_contract_signatures')
+      .update({ payload })
+      .eq('id', existing.id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data as ContractSignLink;
+  }
+  const { data: u } = await supabase.auth.getUser();
+  const { data, error } = await supabase
+    .from('handler_contract_signatures')
+    .insert({
+      creator_id: creatorId,
+      brand_id: brandId,
+      token: newContractToken(),
+      payload,
+      created_by: u?.user?.id ?? null,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return data as ContractSignLink;
+}
+
+export async function setContractLinkActive(id: string, active: boolean): Promise<void> {
+  const { error } = await supabase
+    .from('handler_contract_signatures')
+    .update({ active })
+    .eq('id', id);
   if (error) throw error;
 }
 

@@ -1321,3 +1321,66 @@ a.pc-vx-prod:hover{ text-decoration:none; filter:brightness(.97); }
   .pc-logs-search{ margin-left:0; max-width:none; flex:1 1 100%; }
   .pc-log-time{ margin-left:0; }
 }
+
+/* ═══════════════════════════════════════════════════════════
+   Creator contract signing — handler link controls (Contract
+   column + share modal) and the public /sign/:token page.
+═══════════════════════════════════════════════════════════ */
+/* signing-link button: dashed until a link exists, accent while active,
+   muted when deactivated, green once the creator has signed */
+.pc-contract-btn.pc-signlink{ color:var(--pc-text-2); border-style:dashed; font-size:15px; }
+.pc-contract-btn.pc-signlink:hover{ background:var(--pc-card-2); border-color:#CFCFCF; }
+.pc-contract-btn.pc-signlink.sent{ color:var(--pc-accent); border-style:solid; border-color:#C4D6F0; background:var(--pc-accent-light); }
+.pc-contract-btn.pc-signlink.off{ color:var(--pc-text-3); border-style:solid; border-color:var(--pc-divider); background:var(--pc-card-2); }
+.pc-contract-btn.pc-signlink.signed{ color:var(--pc-success-fg); border-style:solid; border-color:#BFE0C2; background:var(--pc-success-bg); }
+
+.pc-linkrow{ display:flex; align-items:center; gap:8px; margin-top:6px; }
+.pc-linkrow .pc-input{ flex:1; min-width:0; font-size:12.5px; }
+.pc-signed-box{
+  display:flex; align-items:center; gap:12px; padding:12px 14px; border-radius:14px;
+  background:var(--pc-success-bg); color:var(--pc-success-fg); font-size:13.5px;
+}
+.pc-signed-box i{ font-size:22px; }
+.pc-signed-sub{ font-size:12px; opacity:.85; font-weight:600; }
+.pc-signstate{
+  display:flex; align-items:center; gap:10px; padding:11px 14px; border-radius:14px;
+  font-size:13px; font-weight:600; background:var(--pc-card-2); color:var(--pc-text-2);
+}
+.pc-signstate.on{ background:var(--pc-accent-light); color:var(--pc-accent); }
+
+/* ── public signing page ── */
+.pc-sign-page{ max-width:920px; margin:0 auto; padding:32px 18px 90px; display:flex; flex-direction:column; gap:18px; }
+.pc-sign-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+.pc-sign-head h1{ margin:2px 0 0; font-size:26px; font-weight:800; letter-spacing:-.4px; }
+.pc-sign-brand{ font-size:12.5px; font-weight:800; letter-spacing:.6px; text-transform:uppercase; color:var(--pc-accent); }
+.pc-sign-sub{ font-size:13.5px; color:var(--pc-text-2); margin-top:4px; }
+.pc-sign-badge{
+  display:inline-flex; align-items:center; gap:7px; padding:8px 14px; border-radius:999px;
+  background:var(--pc-success-bg); color:var(--pc-success-fg); font-size:13px; font-weight:800;
+}
+.pc-sign-card{
+  background:var(--pc-card); border:1px solid var(--pc-divider); border-radius:var(--pc-radius-sm);
+  box-shadow:var(--pc-shadow); overflow:hidden;
+}
+.pc-sign-cardhead{
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  padding:14px 18px; border-bottom:1px solid var(--pc-divider); font-size:13.5px; font-weight:800;
+}
+.pc-sign-body{ padding:18px; display:flex; flex-direction:column; gap:16px; }
+.pc-sign-pdf{ width:100%; height:70vh; min-height:420px; border:0; display:block; background:var(--pc-card-2); }
+.pc-sign-pdf-fallback{ display:flex; align-items:center; justify-content:center; color:var(--pc-text-2); font-size:13px; }
+.pc-sign-agree{ display:flex; align-items:flex-start; gap:10px; font-size:13px; line-height:1.5; cursor:pointer; }
+.pc-sign-agree input{ margin-top:3px; width:17px; height:17px; flex:none; accent-color:var(--pc-accent); }
+.pc-sign-submit{ align-self:flex-start; padding:12px 26px; font-size:14px; }
+.pc-sign-fine{ font-size:12px; color:var(--pc-text-2); line-height:1.5; }
+.pc-sign-upload{ display:inline-flex; align-items:center; justify-content:center; outline:1px solid #b2b2b2; cursor:pointer; }
+.pc-sign-done{ display:flex; align-items:flex-start; gap:14px; padding:18px; }
+.pc-sign-done i{ font-size:26px; color:var(--pc-success-fg); }
+.pc-sign-msg{ text-align:center; padding:44px 24px; }
+.pc-sign-msg h2{ margin:10px 0 6px; font-size:20px; font-weight:800; }
+.pc-sign-msg p{ color:var(--pc-text-2); font-size:13.5px; margin:0 0 6px; }
+@media (max-width:640px){
+  .pc-sign-page{ padding:20px 12px 70px; }
+  .pc-sign-head h1{ font-size:21px; }
+  .pc-sign-pdf{ height:56vh; min-height:320px; }
+}

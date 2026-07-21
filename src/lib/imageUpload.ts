@@ -28,6 +28,29 @@ export async function uploadReportImage(file: File, opts: { brandId?: string; re
   return data.publicUrl;
 }
 
+// Rasterize an uploaded SVG signature to a PNG data URL (jsPDF can't embed SVG
+// directly). Shared by the handler's contract template and the public creator
+// signing page.
+export function svgToPngDataUrl(file: File | Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const w = 600;
+        const ratio = img.width > 0 && img.height > 0 ? img.height / img.width : 0.3;
+        const h = Math.max(60, Math.round(w * ratio));
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/png'));
+      } catch (e) { reject(e); } finally { URL.revokeObjectURL(url); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('unreadable SVG')); };
+    img.src = url;
+  });
+}
+
 // Profile photos live in the 'avatars' bucket (public-read), each user writing
 // only inside their own uid-prefixed folder (RLS — see migration 20260709090000).
 const AVATAR_BUCKET = 'avatars';

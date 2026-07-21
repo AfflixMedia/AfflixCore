@@ -15,6 +15,7 @@ import Resources from './pages/Resources';
 import NotificationsPage from './pages/Notifications';
 import Profile from './pages/Profile';
 import SharedReports from './pages/SharedReports';
+import SignContract from './pages/SignContract';
 import Reporting from './pages/Reporting';
 import BudgetManager from './pages/BudgetManager';
 import CompanyBudget from './pages/CompanyBudget';
@@ -68,6 +69,8 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<SignUp />} />
       <Route path="/share/:token" element={<SharedReports />} />
+      {/* Public creator contract signing link (Paid Collab) */}
+      <Route path="/sign/:token" element={<SignContract />} />
       <Route
         path="/"
         element={

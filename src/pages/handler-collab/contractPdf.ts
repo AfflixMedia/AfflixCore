@@ -12,6 +12,7 @@ export type ContractInput = {
   username: string;          // TikTok username, no leading @
   amount: number;            // deal USD
   videosCount: number;       // 0 = unknown → neutral wording
+  deliverableDays?: number | null; // §2 completion window; null/0 = automatic (10 for <6 videos, else 14)
   paymentMethod?: string;    // unused — contract always states "PayPal/Zelle"
   effectiveDate?: string | null; // ISO YYYY-MM-DD (onboarding date); null = today
   productNames?: string[];   // featured product(s); [] = "<brand> products"
@@ -20,6 +21,11 @@ export type ContractInput = {
   // Handler's contract-template settings (signature block only):
   repName?: string;              // Brand Representative name
   signatureDataUrl?: string | null; // PNG data URL, drawn/embedded on the Signature line
+  // Creator's e-signature (public /sign/:token page). Only set once the creator
+  // has signed — an unsigned copy keeps the blank Signature / Date lines.
+  creatorSignatureDataUrl?: string | null;
+  creatorSignedName?: string | null; // typed full name, printed on the Name line
+  creatorSignedAt?: string | null;   // ISO timestamp of the signature
 };
 
 type Seg = { t: string; b?: boolean; url?: string }; // url → words render blue + clickable
@@ -40,7 +46,10 @@ function fmtContractDate(iso?: string | null): string {
   return `${p(d.getMonth() + 1)} / ${p(d.getDate())} / ${d.getFullYear()}`;
 }
 
-export async function downloadCreatorContract(input: ContractInput) {
+// Build the agreement PDF in memory. `downloadCreatorContract` saves it;
+// the public signing page renders/downloads the same document, so a creator
+// always signs exactly what they read.
+export async function buildCreatorContract(input: ContractInput): Promise<{ doc: any; filename: string }> {
   const { jsPDF } = await import('jspdf');
   const doc = new jsPDF({ unit: 'pt', format: 'letter' });
   const W = doc.internal.pageSize.getWidth();
@@ -195,10 +204,12 @@ export async function downloadCreatorContract(input: ContractInput) {
   para([{ t: 'Creator is required to follow the' }, { t: 'content brief (guide).', url: guideUrl }], { indent: 22, bullet: 'dot', after: 2 });
   para([{ t: "Keep the videos publicly available on the Creator's TikTok account." }], { indent: 22, bullet: 'dot', after: 2 });
   {
-    // Completion deadline scales with deal size: ≤4 videos → 10 days, 5+ → 14 days
-    // (skipped when the count is unknown, to keep the neutral wording clean).
-    const deadlineDays = count < 6 ? 10 : 14;
-    if (count > 0) para([{ t: 'Complete the deliverables within' }, { t: `${numWords(deadlineDays)} (${deadlineDays}) days`, b: true }, { t: 'after the sample has been delivered.' }], { indent: 22, bullet: 'dot', after: 2 });
+    // Completion deadline: the handler's per-deal override when set, else it
+    // scales with deal size (<6 videos → 10 days, 6+ → 14). An explicit override
+    // prints even when the video count is unknown.
+    const override = Math.round(Number(input.deliverableDays) || 0);
+    const deadlineDays = override > 0 ? override : (count < 6 ? 10 : 14);
+    if (count > 0 || override > 0) para([{ t: 'Complete the deliverables within' }, { t: `${numWords(deadlineDays)} (${deadlineDays}) days`, b: true }, { t: 'after the sample has been delivered.' }], { indent: 22, bullet: 'dot', after: 2 });
   }
   para([{ t: 'After all' }, { t: `${nShort} videos`, b: true }, { t: 'have been posted, provide the Brand with:' }], { indent: 22, bullet: 'dot', after: 2 });
   para([{ t: 'The links to all' }, { t: `${nShort} published TikTok videos.`, b: true }], { indent: 44, bullet: 'circle', after: 2 });
@@ -266,13 +277,33 @@ export async function downloadCreatorContract(input: ContractInput) {
 
   ensure(170);
   rule();
+  const signedName = (input.creatorSignedName || '').trim();
   para([{ t: 'Creator', b: true }], { size: 12, after: 8 });
   para([{ t: 'Username:', b: true }, { t: username || '____________________' }], { after: 6 });
-  para([{ t: 'Name:', b: true }, { t: input.creatorName || '______________________' }], { after: 6 });
-  para([{ t: 'Signature:', b: true }, { t: '____________________' }], { after: 6 });
-  para([{ t: 'Date:', b: true }, { t: '______________________' }]);
+  para([{ t: 'Name:', b: true }, { t: signedName || input.creatorName || '______________________' }], { after: 6 });
+  if (input.creatorSignatureDataUrl) {
+    signatureLine(input.creatorSignatureDataUrl);
+    para([{ t: 'Date:', b: true }, { t: fmtContractDate(input.creatorSignedAt ? String(input.creatorSignedAt).slice(0, 10) : null) }], { after: 4 });
+    para([{ t: 'Signed electronically via the Afflix Media contract link.', }], { size: 9 });
+  } else {
+    para([{ t: 'Signature:', b: true }, { t: '____________________' }], { after: 6 });
+    para([{ t: 'Date:', b: true }, { t: '______________________' }]);
+  }
 
   const safe = (s: string) => s.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
-  const who = input.creatorName || username || 'Creator';
-  doc.save(`${safe(who)} x ${safe(brand)} - Contract.pdf`);
+  const who = signedName || input.creatorName || username || 'Creator';
+  const suffix = input.creatorSignatureDataUrl ? 'Signed Contract' : 'Contract';
+  return { doc, filename: `${safe(who)} x ${safe(brand)} - ${suffix}.pdf` };
+}
+
+export async function downloadCreatorContract(input: ContractInput) {
+  const { doc, filename } = await buildCreatorContract(input);
+  doc.save(filename);
+}
+
+// Object URL of the same document — used by the public signing page to show the
+// creator the real contract inline before they sign. Caller revokes the URL.
+export async function creatorContractObjectUrl(input: ContractInput): Promise<string> {
+  const { doc } = await buildCreatorContract(input);
+  return URL.createObjectURL(doc.output('blob'));
 }
