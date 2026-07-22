@@ -30,7 +30,12 @@ serve(async (req) => {
       .eq('token', token)
       .maybeSingle();
     if (!row) return json({ error: 'This signing link is not valid.' }, 404);
-    if (!row.active) return json({ error: 'This signing link has been deactivated by the brand.' }, 410);
+    // Deactivating stops SIGNING, not access to an executed agreement: a signed
+    // contract stays readable/downloadable for the creator (and is the link the
+    // brand-side read views open). Only an unsigned deactivated link is closed.
+    if (!row.active && !row.signed_at) {
+      return json({ error: 'This signing link has been deactivated by the brand.' }, 410);
+    }
 
     const { data: creator } = await admin
       .from('handler_collab_creators')

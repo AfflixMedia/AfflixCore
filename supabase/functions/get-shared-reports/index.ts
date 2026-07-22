@@ -213,7 +213,14 @@ serve(async (req) => {
     if (brands.length > 0 && (includePaidCollab || needPcForSection)) {
       const allowedIds = brands.map((b: any) => b.id);
       const { data: hcRows } = await admin.from('handler_collab_creators').select('*').in('brand_id', allowedIds);
-      handler_creators = hcRows ?? [];
+      // Creator contract e-signatures — the read views link to the signed copy
+      // at /sign/<token>. Only the state travels, never the signature image.
+      const { data: sigRows } = await admin.from('handler_contract_signatures')
+        .select('creator_id, token, signed_at, signer_name').in('brand_id', allowedIds);
+      const sigByCreator = new Map((sigRows ?? []).map((s: any) => [s.creator_id, s]));
+      handler_creators = (hcRows ?? []).map((c: any) => ({
+        ...c, signed_contract: sigByCreator.get(c.id) ?? null,
+      }));
       // Months + discussion threads are only for the full paid-collab tab.
       if (includePaidCollab) {
         const [{ data: hmRows }, { data: pccRows }] = await Promise.all([

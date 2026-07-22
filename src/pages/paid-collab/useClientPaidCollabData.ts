@@ -62,7 +62,14 @@ export function useClientPaidCollabData() {
       const { data: cRows, error: cErr } = await supabase
         .from('handler_collab_creators').select('*').in('brand_id', bs.map(b => b.id));
       if (cErr) { setErr(cErr.message); setLoading(false); return; }
-      
+
+      // Contract e-signatures — read views link to the signed copy at /sign/<token>.
+      const { data: sigRows } = await supabase
+        .from('handler_contract_signatures')
+        .select('creator_id, token, signed_at, signer_name')
+        .in('brand_id', bs.map(b => b.id));
+      const sigByCreator = new Map((sigRows || []).map((s: any) => [s.creator_id, s]));
+
       const cs = (cRows || []).map(c => {
         const monthKey = c.onboarded_on ? c.onboarded_on.substring(0, 7) : null;
         let progId = progs.find(p => p.brand_id === c.brand_id && p.name === `Month ${monthKey}`)?.id;
@@ -90,8 +97,10 @@ export function useClientPaidCollabData() {
           pending_visible_to_client: !!c.pending_visible_to_client,
           completed_on: c.completed_on || null,
           onboard_date: c.onboarded_on || null,
-          // Signed-contract link (pasted by the handler) — shown to everyone with brand access.
+          // Signed contract — the creator's e-signature (else the legacy pasted
+          // link) — shown to everyone with brand access.
           contract_url: c.contract_url || null,
+          signed_contract: sigByCreator.get(c.id) || null,
           // Client "marked payment as done" soft flag (set via set_client_paidcollab_paid).
           client_paid_confirmed_at: c.client_paid_confirmed_at || null,
           client_paid_confirmed_name: c.client_paid_confirmed_name || null,

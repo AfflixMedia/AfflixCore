@@ -568,7 +568,8 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
           videos_count: newCount, zelle: data.zelle, paypal: data.paypal,
           phone: data.phone, email: data.email, category: data.category,
           onboarded_on: data.onboarded_on,
-          contract_url: (data.contract_url || '').trim(),
+          // contract_url is legacy (manually pasted links, pre e-signing) — the
+          // editor no longer touches it, so it is deliberately left untouched here.
           // blank = automatic deadline rule in the contract PDF
           deliverable_days: data.deliverable_days ? parseInt(data.deliverable_days, 10) || null : null,
           products: Array.isArray(data.products) ? data.products : [],
@@ -749,12 +750,6 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
     try { await store.updateCreator(id, { pending_visible_to_client: visible }); }
     catch (e) { alert(`Couldn't update visibility: ${e.message}`); reload(); }
   }, [patchCreatorLocal, reload]);
-  // Signed-contract link (pasted from the Contract column once the creator signs).
-  const setCreatorContractLink = useCallback(async (id, contract_url) => {
-    patchCreatorLocal(id, { contract_url });
-    try { await store.updateCreator(id, { contract_url }); }
-    catch (e) { alert(`Couldn't save contract link: ${e.message}`); reload(); }
-  }, [patchCreatorLocal, reload]);
   // Contract template modal (representative name + signature for the PDFs)
   const [contractTplOpen, setContractTplOpen] = useState(false);
 
@@ -803,7 +798,6 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
             <CreatorsView rows={allCreatorsList}
               onEdit={(c) => setCreatorEditor({ mode: 'edit', brandId: c.brand_id, creator: c })}
               onSetStatus={setCreatorStatus} onToggleVisible={setCreatorPendingVisible}
-              onSetContractLink={setCreatorContractLink}
               contractLinkFor={contractLinkFor} onContractLinkChange={onContractLinkChange}
               creatorNoteCount={creatorNoteCount} onCreatorNotes={openCreatorNotes} />
           ) : tab === 'performance' ? (
@@ -830,8 +824,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
                 patchCreatorLocal={patchCreatorLocal}
                 onSetStatus={setCreatorStatus}
                 onToggleVisible={setCreatorPendingVisible}
-                onSetContractLink={setCreatorContractLink}
-                contractLinkFor={contractLinkFor} onContractLinkChange={onContractLinkChange}
+                  contractLinkFor={contractLinkFor} onContractLinkChange={onContractLinkChange}
                 commentCount={comments.filter(c => c.brand_id === drillId).length}
                 onComments={() => openComments(drillId, 'brand', '')}
                 creatorNoteCount={creatorNoteCount} onCreatorNotes={openCreatorNotes}
@@ -1487,50 +1480,26 @@ function BrandRow({ r, onOpen, onEditBudget, onNotes, noteCount = 0, onBrandNote
   );
 }
 
-// Contract column actions: download the filled agreement PDF, plus the
-// signed-copy link — pasted once the creator returns the signed contract
-// (e.g. a Drive URL); afterwards the icon opens it (edit via the creator modal).
-function ContractActions({ c, onContract, onContractLink, buildPayload = null, link = null, onLinkChange = null }) {
+// Contract column: one button — the creator's signing link. Everything the old
+// PDF / paste-link icons did now lives in its modal (download the PDF, copy the
+// link, activate/deactivate, see who signed), and the signed copy is served from
+// /sign/<token> instead of a manually pasted Drive URL.
+function ContractActions({ c, buildPayload = null, link = null, onLinkChange = null }) {
   const [shareOpen, setShareOpen] = useState(false);
   const signState = link?.signed_at ? 'signed' : link ? (link.active ? 'sent' : 'off') : '';
+  if (!buildPayload) return null;
   return (
     <span className="pc-contract-actions">
-      {buildPayload && (
-        <button type="button" className={`pc-contract-btn pc-signlink ${signState}`}
-          title={link?.signed_at ? `Signed by ${link.signer_name || 'the creator'}` : link ? 'Signing link' : 'Create signing link'}
-          aria-label="Contract signing link"
-          onClick={e => { e.stopPropagation(); setShareOpen(true); }}>
-          <i className={`bi ${link?.signed_at ? 'bi-patch-check-fill' : 'bi-vector-pen'}`} />
-        </button>
-      )}
+      <button type="button" className={`pc-contract-btn pc-signlink ${signState}`}
+        title={link?.signed_at ? `Signed by ${link.signer_name || 'the creator'}` : link ? 'Contract & signing link' : 'Create the contract signing link'}
+        aria-label="Contract signing link"
+        onClick={e => { e.stopPropagation(); setShareOpen(true); }}>
+        <i className={`bi ${link?.signed_at ? 'bi-patch-check-fill' : 'bi-vector-pen'}`} />
+      </button>
       {shareOpen && (
         <ContractShareModal c={c} buildPayload={buildPayload} initialLink={link}
           onChange={onLinkChange} onClose={() => setShareOpen(false)} />
       )}
-      {onContract && (
-        <button type="button" className="pc-contract-btn" title="Download contract (PDF)" aria-label="Download contract PDF"
-          onClick={e => { e.stopPropagation(); onContract(); }}>
-          <i className="bi bi-file-earmark-pdf" />
-        </button>
-      )}
-      {c.contract_url ? (
-        <a className="pc-contract-btn pc-clink has" href={c.contract_url} target="_blank" rel="noopener noreferrer"
-          title="Open signed contract" aria-label="Open signed contract" onClick={e => e.stopPropagation()}>
-          <i className="bi bi-link-45deg" />
-        </a>
-      ) : onContractLink ? (
-        <button type="button" className="pc-contract-btn pc-clink" title="Paste signed contract link" aria-label="Paste signed contract link"
-          onClick={e => {
-            e.stopPropagation();
-            const raw = window.prompt('Paste the link to the signed contract (e.g. Google Drive):', '');
-            if (raw === null) return;
-            const t = raw.trim();
-            if (!t) return;
-            onContractLink(/^https?:\/\//i.test(t) ? t : `https://${t}`);
-          }}>
-          <i className="bi bi-link-45deg" />
-        </button>
-      ) : null}
     </span>
   );
 }
@@ -1606,20 +1575,24 @@ function ContractShareModal({ c, buildPayload, initialLink, onChange, onClose })
     setBusy(false);
   }
 
-  async function downloadSigned() {
-    if (!link?.signed_at) return;
+  // Download the agreement — the executed copy once signed (the list query omits
+  // the signature blob, so refetch the full row), otherwise the blank one.
+  async function download() {
     setBusy(true); setErr('');
     try {
-      // The list query omits the signature blob — refetch the full row.
-      const full = await store.getContractLink(c.id);
       const { downloadCreatorContract } = await import('./contractPdf');
-      await downloadCreatorContract({
-        ...(full?.payload || {}),
-        creatorSignatureDataUrl: full?.signer_signature || null,
-        creatorSignedName: full?.signer_name || '',
-        creatorSignedAt: full?.signed_at || null,
-      });
-    } catch (e) { setErr(e.message || 'Could not build the signed PDF'); }
+      if (link?.signed_at) {
+        const full = await store.getContractLink(c.id);
+        await downloadCreatorContract({
+          ...(full?.payload || {}),
+          creatorSignatureDataUrl: full?.signer_signature || null,
+          creatorSignedName: full?.signer_name || '',
+          creatorSignedAt: full?.signed_at || null,
+        });
+      } else {
+        await downloadCreatorContract(link?.payload || await buildPayload());
+      }
+    } catch (e) { setErr(e.message || 'Could not build the PDF'); }
     setBusy(false);
   }
 
@@ -1676,9 +1649,9 @@ function ContractShareModal({ c, buildPayload, initialLink, onChange, onClose })
               {link.active ? 'Deactivate link' : 'Activate link'}
             </button>
           )}
-          {link?.signed_at && (
-            <button className="pc-btn pc-btn-ghost" onClick={downloadSigned} disabled={busy}>Download signed PDF</button>
-          )}
+          <button className="pc-btn pc-btn-ghost" onClick={download} disabled={busy || loading}>
+            {link?.signed_at ? 'Download signed PDF' : 'Download PDF'}
+          </button>
           <button className="pc-btn pc-btn-primary" onClick={onClose}>Done</button>
         </div>
       </div>
@@ -1739,15 +1712,10 @@ async function contractPayloadFor(c, brandName, opts = {}) {
   };
 }
 
-async function downloadContractFor(c, brandName, opts = {}) {
-  const { downloadCreatorContract } = await import('./contractPdf');
-  await downloadCreatorContract(await contractPayloadFor(c, brandName, opts));
-}
-
 /* ════════════════════════════════════════════════════════════
    Drilldown
 ════════════════════════════════════════════════════════════ */
-function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCreator, onDeleteCreator, onEditBudget, onDeleteBrand, onNotes, notesText, patchCreatorLocal, onSetStatus, onToggleVisible, onSetContractLink, contractLinkFor, onContractLinkChange, commentCount, onComments, creatorNoteCount, onCreatorNotes }) {
+function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCreator, onDeleteCreator, onEditBudget, onDeleteBrand, onNotes, notesText, patchCreatorLocal, onSetStatus, onToggleVisible, contractLinkFor, onContractLinkChange, commentCount, onComments, creatorNoteCount, onCreatorNotes }) {
   const [openId, setOpenId] = useState(null);
   const bm = row?.bm || {};
   const products = focusProductList(bm);
@@ -1834,11 +1802,9 @@ function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCr
                   patchCreatorLocal={patchCreatorLocal} onSetStatus={onSetStatus} onToggleVisible={onToggleVisible}
                   noteCount={creatorNoteCount ? creatorNoteCount(c) : 0}
                   onNotes={onCreatorNotes ? () => onCreatorNotes(c) : null}
-                  onContract={() => downloadContractFor(c, brand.name, { focusProducts: products, contentGuideUrl: bm.content_guide_url })}
                   buildContractPayload={() => contractPayloadFor(c, brand.name, { focusProducts: products, contentGuideUrl: bm.content_guide_url })}
                   contractLink={contractLinkFor ? contractLinkFor(c) : null}
-                  onContractLinkChange={onContractLinkChange}
-                  onContractLink={onSetContractLink ? (url) => onSetContractLink(c.id, url) : null} />
+                  onContractLinkChange={onContractLinkChange} />
               ))}
             </React.Fragment>
           ))}
@@ -1848,13 +1814,10 @@ function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCr
   );
 }
 
-function CreatorRow({ c, idx, open, onToggle, onEdit, onDelete, patchCreatorLocal, onSetStatus, onToggleVisible, noteCount = 0, onNotes = null, onContract = null, onContractLink = null, buildContractPayload = null, contractLink = null, onContractLinkChange = null }) {
+function CreatorRow({ c, idx, open, onToggle, onEdit, onDelete, patchCreatorLocal, onSetStatus, onToggleVisible, noteCount = 0, onNotes = null, buildContractPayload = null, contractLink = null, onContractLinkChange = null }) {
   const accounts = tiktokAccounts(c.tiktok_handle);
   const filled = Array.isArray(c.video_codes) ? c.video_codes.filter(v => v?.video).length : 0;
-  const contractBtn = (onContract || onContractLink || buildContractPayload)
-    ? <ContractActions c={c} onContract={onContract} onContractLink={onContractLink}
-      buildPayload={buildContractPayload} link={contractLink} onLinkChange={onContractLinkChange} />
-    : null;
+  const contractBtn = <ContractActions c={c} buildPayload={buildContractPayload} link={contractLink} onLinkChange={onContractLinkChange} />;
   const keepBtn = onNotes ? (
     <button className={`pc-keepnote-btn pc-keepnote-mini ${noteCount > 0 ? 'has' : ''}`}
       onClick={e => { e.stopPropagation(); onNotes(); }}
@@ -1937,7 +1900,7 @@ function PayoutCell({ paypal, zelle }) {
 /* ════════════════════════════════════════════════════════════
    Creators tab — every creator (per brand) for the month
 ════════════════════════════════════════════════════════════ */
-function CreatorsView({ rows, onEdit, onSetStatus, onToggleVisible, onSetContractLink, contractLinkFor, onContractLinkChange, creatorNoteCount, onCreatorNotes }) {
+function CreatorsView({ rows, onEdit, onSetStatus, onToggleVisible, contractLinkFor, onContractLinkChange, creatorNoteCount, onCreatorNotes }) {
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(() => new Set());
   const [copied, setCopied] = useState('');
@@ -2017,11 +1980,9 @@ function CreatorsView({ rows, onEdit, onSetStatus, onToggleVisible, onSetContrac
               <div className="pc-cv-monthhead"><span>{monthLabel(g.key)}</span><span className="pc-cv-monthcount">{g.items.length}</span></div>
               {g.items.map((c, i) => <CreatorGlobalRow key={c.id} c={c} idx={i + 1} onEdit={() => onEdit(c)} onSetStatus={onSetStatus} onToggleVisible={onToggleVisible} selected={sel.has(c.id)} onToggleSelect={() => toggle(c.id)}
                 noteCount={creatorNoteCount ? creatorNoteCount(c) : 0} onNotes={onCreatorNotes ? () => onCreatorNotes(c) : null}
-                onContract={() => downloadContractFor(c, c._brandName)}
                 buildContractPayload={() => contractPayloadFor(c, c._brandName)}
                 contractLink={contractLinkFor ? contractLinkFor(c) : null}
-                onContractLinkChange={onContractLinkChange}
-                onContractLink={onSetContractLink ? (url) => onSetContractLink(c.id, url) : null} />)}
+                onContractLinkChange={onContractLinkChange} />)}
             </React.Fragment>
           ))}
         </div>
@@ -2038,12 +1999,9 @@ function CreatorsView({ rows, onEdit, onSetStatus, onToggleVisible, onSetContrac
   );
 }
 
-function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, onToggleVisible, selected, onToggleSelect, noteCount = 0, onNotes = null, onContract = null, onContractLink = null, buildContractPayload = null, contractLink = null, onContractLinkChange = null }) {
+function CreatorGlobalRow({ c, idx, onEdit, onSetStatus, onToggleVisible, selected, onToggleSelect, noteCount = 0, onNotes = null, buildContractPayload = null, contractLink = null, onContractLinkChange = null }) {
   const accounts = tiktokAccounts(c.tiktok_handle);
-  const contractBtn = (onContract || onContractLink || buildContractPayload)
-    ? <ContractActions c={c} onContract={onContract} onContractLink={onContractLink}
-      buildPayload={buildContractPayload} link={contractLink} onLinkChange={onContractLinkChange} />
-    : null;
+  const contractBtn = <ContractActions c={c} buildPayload={buildContractPayload} link={contractLink} onLinkChange={onContractLinkChange} />;
   const keepBtn = onNotes ? (
     <button className={`pc-keepnote-btn pc-keepnote-mini ${noteCount > 0 ? 'has' : ''}`}
       onClick={e => { e.stopPropagation(); onNotes(); }}
@@ -3259,7 +3217,6 @@ function CreatorEditor({ editor, month, directory = [], categories = [], brandPr
     amount: c.amount != null ? String(c.amount || '') : '', videos_count: c.videos_count != null ? String(c.videos_count || '') : '',
     paypal: c.paypal || '', zelle: c.zelle || '',
     onboarded_on: c.onboarded_on || defaultDateForMonth(month),
-    contract_url: c.contract_url || '',
     // Contract §2 completion window (days after sample delivery); blank = auto.
     deliverable_days: c.deliverable_days != null ? String(c.deliverable_days) : '',
   });
@@ -3402,7 +3359,6 @@ function CreatorEditor({ editor, month, directory = [], categories = [], brandPr
             <div className="pc-field"><label>PayPal</label><input className="pc-input" placeholder="email" value={f.paypal} onChange={e => set('paypal', e.target.value)} /></div>
             <div className="pc-field"><label>Zelle</label><input className="pc-input" placeholder="email / phone" value={f.zelle} onChange={e => set('zelle', e.target.value)} /></div>
           </div>
-          <div className="pc-field"><label>Signed contract link</label><input className="pc-input" placeholder="Drive link to the signed contract" value={f.contract_url} onChange={e => set('contract_url', e.target.value)} /></div>
         </div>
         <div className="pc-modal-actions">
           <button className="pc-btn pc-btn-ghost" onClick={onClose}>Cancel</button>

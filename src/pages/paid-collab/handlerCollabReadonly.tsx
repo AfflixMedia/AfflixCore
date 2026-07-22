@@ -42,6 +42,28 @@ export const clientStatus = (c: HandlerCreator, staff = false) => {
 // True when this creator's payment-pending status is visible to the client.
 export const isPendingVisible = (c: HandlerCreator) => clientStatus(c) === 'pending';
 
+/* ── signed contract ──
+   The creator signs through the handler's share link; every brand-access read
+   view (client portal, share link, Bob/APC/Team Lead/Ads Manager brand tab)
+   links to that signed copy at /sign/<token>, which serves the executed PDF
+   read-only. Rows carry the signature as `signed_contract`, merged in at each
+   fetch site. `contract_url` is the legacy manually-pasted link, kept as a
+   fallback for deals signed before the e-signing flow. */
+export type SignedContract = { token: string; signed_at?: string | null; signer_name?: string | null };
+export const signedContractUrl = (c: any): string => {
+  const t = c?.signed_contract?.token;
+  if (t && c.signed_contract.signed_at) return `${window.location.origin}/sign/${t}`;
+  return c?.contract_url || '';
+};
+export const signedContractTitle = (c: any): string => {
+  const s = c?.signed_contract;
+  if (s?.signed_at) {
+    const who = s.signer_name ? ` by ${s.signer_name}` : '';
+    return `Signed${who} · ${new Date(s.signed_at).toLocaleDateString()}`;
+  }
+  return 'Open signed contract';
+};
+
 export const monthKey = (d?: string | null) => (d ? String(d).slice(0, 7) : '');
 export const fmt$ = (n: number) => `$${Math.round(n || 0).toLocaleString()}`;
 export const getGradient = (name: string) => (name ? AVATAR_GRADIENTS[name.charCodeAt(0) % AVATAR_GRADIENTS.length] : AVATAR_GRADIENTS[0]);
@@ -187,6 +209,7 @@ export function CreatorRowRO({ c, idx, onToggleAuth, onConfirmPaid, staffView }:
   const allAuth = adCount > 0 && authCount === adCount;
   const st = STATUS[clientStatus(c, staffView)] || STATUS.videos_in_progress;
   const prodList = creatorProducts(c);
+  const contractUrl = signedContractUrl(c);
   const initials = (c.name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?';
 
   return (
@@ -205,11 +228,11 @@ export function CreatorRowRO({ c, idx, onToggleAuth, onConfirmPaid, staffView }:
         <div className="pc-cell" data-label="Payout"><PayoutRO paypal={c.paypal} zelle={c.zelle} /></div>
         <div className="pc-cell" data-label="Status"><span className={`pc-badge ${st.cls}`}><span className="dot" />{st.label}</span></div>
         <div className="pc-cell pc-contract-cell" data-label="Contract">
-          {c.contract_url
+          {contractUrl
             ? (
-              <a className="pc-contract-btn pc-clink has" href={c.contract_url} target="_blank" rel="noopener noreferrer"
-                title="Open signed contract" aria-label="Open signed contract" onClick={e => e.stopPropagation()}>
-                <i className="bi bi-link-45deg" />
+              <a className="pc-contract-btn pc-clink has" href={contractUrl} target="_blank" rel="noopener noreferrer"
+                title={signedContractTitle(c)} aria-label="Open signed contract" onClick={e => e.stopPropagation()}>
+                <i className="bi bi-file-earmark-check" />
               </a>
             )
             : <span className="pc-handle">—</span>}
@@ -238,10 +261,10 @@ export function CreatorRowRO({ c, idx, onToggleAuth, onConfirmPaid, staffView }:
           </div>
           <div className="pc-mc-foot">
             <span className={`pc-badge ${st.cls}`}><span className="dot" />{st.label}</span>
-            {c.contract_url && (
-              <a className="pc-contract-btn pc-clink has" href={c.contract_url} target="_blank" rel="noopener noreferrer"
-                title="Open signed contract" aria-label="Open signed contract" onClick={e => e.stopPropagation()}>
-                <i className="bi bi-link-45deg" />
+            {contractUrl && (
+              <a className="pc-contract-btn pc-clink has" href={contractUrl} target="_blank" rel="noopener noreferrer"
+                title={signedContractTitle(c)} aria-label="Open signed contract" onClick={e => e.stopPropagation()}>
+                <i className="bi bi-file-earmark-check" />
               </a>
             )}
             {(c.paypal || c.zelle) && <span className="pc-mc-footmeta"><PayoutRO paypal={c.paypal} zelle={c.zelle} /></span>}
@@ -260,10 +283,13 @@ export function CreatorRowRO({ c, idx, onToggleAuth, onConfirmPaid, staffView }:
                 </div>
               </div>
               <div className="pc-vx-actions">
-                {c.contract_url && (
-                  <a className="pc-vx-contractlink" href={c.contract_url} target="_blank" rel="noopener noreferrer"
-                    title="Open signed contract" onClick={e => e.stopPropagation()}>
-                    <i className="bi bi-file-earmark-check" />Signed contract
+                {contractUrl && (
+                  <a className="pc-vx-contractlink" href={contractUrl} target="_blank" rel="noopener noreferrer"
+                    title={signedContractTitle(c)} onClick={e => e.stopPropagation()}>
+                    <i className="bi bi-file-earmark-check" />
+                    {(c as any).signed_contract?.signer_name
+                      ? `Signed by ${(c as any).signed_contract.signer_name}`
+                      : 'Signed contract'}
                   </a>
                 )}
                 {adCount > 0 && (

@@ -16,6 +16,7 @@ const CREATOR_STATUS_VALUES: CreatorStatus[] = ['active', 'paused', 'done', 'dro
 import { useClientPaidCollabData, Brand } from './useClientPaidCollabData';
 import * as store from '../handler-collab/store';
 import { copyWithToast } from '../../lib/copyToast';
+import { signedContractUrl, signedContractTitle } from './handlerCollabReadonly';
 import '../handler-collab/handlerCollab.css';
 import './creatorsTable.css';
 
@@ -424,12 +425,15 @@ export default function PaidCollabCreators() {
                             ) : <span className="cct-muted">—</span>}
                           </div>
                         </div>
-                        {(c as any).contract_url && (
+                        {signedContractUrl(c) && (
                           <div>
                             <div className="cct-dt-l">Signed contract</div>
                             <div className="cct-dt-v">
-                              <a href={(c as any).contract_url} target="_blank" rel="noopener noreferrer">
-                                <i className="bi bi-file-earmark-check me-1" />Open contract
+                              <a href={signedContractUrl(c)} target="_blank" rel="noopener noreferrer" title={signedContractTitle(c)}>
+                                <i className="bi bi-file-earmark-check me-1" />
+                                {(c as any).signed_contract?.signer_name
+                                  ? `Signed by ${(c as any).signed_contract.signer_name}`
+                                  : 'Open contract'}
                               </a>
                             </div>
                           </div>

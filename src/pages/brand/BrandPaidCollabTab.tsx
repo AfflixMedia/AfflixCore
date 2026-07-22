@@ -53,14 +53,18 @@ export default function BrandPaidCollabTab({ brandId, brandName, canEdit, onPend
       // Apply the follow-up / payment-pending status rules server-side before reading
       // (1-week stall sweep — same call the handler workspace makes on load).
       await applyFollowUps();
-      const [{ data: mRows, error: mErr }, { data: cRows, error: cErr }] = await Promise.all([
+      const [{ data: mRows, error: mErr }, { data: cRows, error: cErr }, { data: sigRows }] = await Promise.all([
         supabase.from('handler_collab_brand_months').select('*').eq('brand_id', brandId),
         supabase.from('handler_collab_creators').select('*').eq('brand_id', brandId),
+        // Contract e-signatures — the read views link to the signed copy.
+        supabase.from('handler_contract_signatures')
+          .select('creator_id, token, signed_at, signer_name').eq('brand_id', brandId),
       ]);
       if (cancelled) return;
       if (mErr || cErr) { setErr((mErr ?? cErr)!.message); setLoading(false); return; }
+      const sigByCreator = new Map((sigRows ?? []).map((s: any) => [s.creator_id, s]));
       setMonths((mRows ?? []) as HandlerBrandMonth[]);
-      setCreators((cRows ?? []) as HandlerCreator[]);
+      setCreators((cRows ?? []).map((c: any) => ({ ...c, signed_contract: sigByCreator.get(c.id) ?? null })) as HandlerCreator[]);
       setLoading(false);
     })();
     return () => { cancelled = true; };
