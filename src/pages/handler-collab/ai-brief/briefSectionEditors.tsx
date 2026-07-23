@@ -1,6 +1,7 @@
 import React from 'react';
 import type { ImageResolver } from './markdown';
 import { driveIdOf } from './markdown';
+import { bodyHasVideoMarkers, bodyHasAngles } from './briefDoc';
 
 /* ════════════════════════════════════════════════════════════
    Structured editors for the brief's special section types.
@@ -36,14 +37,21 @@ interface SharedProps {
   uploadImage?: () => Promise<string | null>;
 }
 
-/** Which structured editor a section wants, or null for generic blocks. */
+/** Which structured editor a section wants, or null for generic blocks.
+    Detected by heading keyword OR the markers inside — same rule the reading
+    layout uses, so the Edit tab and the share page always agree. */
 export function structuredKind(heading: string, md: string): 'videos' | 'angles' | 'rules' | null {
   const h = heading.toLowerCase();
-  if (/\breference|\bvideo/.test(h)) return parseVideos(md).videos.length || !md.trim() ? 'videos' : null;
-  if (/\bangle/.test(h)) return parseAngles(md).angles.length || !md.trim() ? 'angles' : null;
-  if (/do.?s?\s*(&|and|\/)\s*don|^do\b|^don'?t\b/.test(h)) {
-    const r = parseRules(md);
-    return r ? 'rules' : null;
+  // Rules first: a Do/Don't section also has 2+ "###" subheads, which would
+  // otherwise look like angles.
+  if (/do.?s?\s*(&|and|\/)\s*don|^do\b|^don'?t\b/.test(h) || parseRules(md)) {
+    return parseRules(md) ? 'rules' : null;
+  }
+  if (/\breference|\bvideo/.test(h) || bodyHasVideoMarkers(md)) {
+    return parseVideos(md).videos.length || !md.trim() ? 'videos' : null;
+  }
+  if (/\bangle/.test(h) || bodyHasAngles(md)) {
+    return parseAngles(md).angles.length || !md.trim() ? 'angles' : null;
   }
   return null;
 }

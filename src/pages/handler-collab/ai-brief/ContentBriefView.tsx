@@ -1,12 +1,13 @@
 import React from 'react';
 import {
   generateBrief, listBriefs, createBrief, updateBrief, deleteBrief,
-  shareUrl, uploadBriefImage, signBriefImages, type SavedBrief,
+  shareUrl, uploadBriefImage, signBriefImages, normalizeBriefStructure, type SavedBrief,
 } from './briefApi';
 import { renderBriefMarkdown, extractDriveIds } from './markdown';
 import BriefEditor from './BriefEditor';
 import BriefDocView from './BriefDocView';
 import { importDocument, pastedToMarkdown, blankBriefMarkdown, IMPORT_ACCEPT } from './briefImport';
+import { structuredSectionCount, ensureCanonicalSections } from './briefLayout';
 import './aiBrief.css';
 
 /* ════════════════════════════════════════════════════════════
@@ -332,16 +333,42 @@ export default function ContentBriefView({ brands, month }: Props) {
         onProgress: setStatus,
       });
       if (!md.trim()) throw new Error('That file had no readable text in it.');
-      await startWith(md, `Imported ${file.name}`);
+      // AI restructures the imported doc into the canonical section shape so
+      // the video/angle/do-don't layout renders correctly whatever the source
+      // looked like. It only reshapes STRUCTURE — a server guard rejects any
+      // content change and returns the raw import, so this never alters copy.
+      setStatus('Structuring the brief');
+      const { markdown, ai } = await structureImport(md);
+      await startWith(markdown, ai ? `Imported & structured ${file.name}` : `Imported ${file.name}`);
     } catch (e) { setErr((e as Error).message); }
     finally { setImporting(false); setStatus(''); }
+  };
+
+  /**
+   * Import post-processing: AI-normalise, VERIFY the result actually lays out
+   * at least as well as the raw import (structured-section count — if the AI
+   * made things worse we keep the raw version), then append empty scaffolds
+   * for any canonical section the brief lacks so the editor offers the full
+   * spine (brand/product/videos/hooks/overlays/angles/do-don't). Scaffolds are
+   * added deterministically — never by the AI — and stay hidden on the reading
+   * page until filled.
+   */
+  const structureImport = async (raw: string): Promise<{ markdown: string; ai: boolean }> => {
+    const { markdown: normalized, ai } = await normalizeBriefStructure(raw);
+    const useAi = ai && structuredSectionCount(normalized) >= structuredSectionCount(raw);
+    return { markdown: ensureCanonicalSections(useAi ? normalized : raw), ai: useAi };
   };
 
   const usePastedText = async () => {
     const md = pastedToMarkdown(pasteText, pasteHtml.current);
     if (!md.trim()) return;
     setPasteOpen(false); setPasteText(''); pasteHtml.current = '';
-    await startWith(md, 'Brief added from pasted text');
+    setImporting(true); setStatus('Structuring the brief');
+    try {
+      // Same AI restructuring + verify + scaffold pipeline as doc import.
+      const { markdown, ai } = await structureImport(md);
+      await startWith(markdown, ai ? 'Brief added & structured' : 'Brief added from pasted text');
+    } finally { setImporting(false); setStatus(''); }
   };
 
   const onEdit = (v: string) => { setBrief(v); setDirty(true); };

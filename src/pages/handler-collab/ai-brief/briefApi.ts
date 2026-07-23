@@ -39,6 +39,34 @@ export interface BriefHandlers {
  * readable message on auth/config/API failure. Aborting via `signal` resolves
  * quietly with whatever was streamed so far.
  */
+/**
+ * Restructures imported-doc Markdown into the canonical brief shape via the
+ * `normalize-brief` edge function (AI reshapes STRUCTURE only; a server guard
+ * rejects any content change and returns the input untouched). Best-effort: on
+ * any failure it resolves with the original markdown, so an import never breaks.
+ * Returns whether the AI version was used.
+ */
+export async function normalizeBriefStructure(markdown: string): Promise<{ markdown: string; ai: boolean }> {
+  try {
+    const { data: sess } = await supabase.auth.getSession();
+    const token = sess.session?.access_token;
+    const baseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    if (!token || !baseUrl || !anonKey) return { markdown, ai: false };
+
+    const res = await fetch(`${baseUrl}/functions/v1/normalize-brief`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'apikey': anonKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ markdown }),
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok || !body?.markdown) return { markdown, ai: false };
+    return { markdown: String(body.markdown), ai: !!body.ai };
+  } catch {
+    return { markdown, ai: false };
+  }
+}
+
 export async function generateBrief(input: BriefInput, h: BriefHandlers): Promise<void> {
   const { data: sess } = await supabase.auth.getSession();
   const token = sess.session?.access_token;

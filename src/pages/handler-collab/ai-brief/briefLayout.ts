@@ -1,4 +1,6 @@
-import { parseBriefDoc, type BriefSection } from './briefDoc';
+import {
+  parseBriefDoc, bodyHasVideoMarkers, bodyHasDoDont, bodyHasAngles, type BriefSection,
+} from './briefDoc';
 
 /* ════════════════════════════════════════════════════════════
    Brief → structured layout.
@@ -175,17 +177,19 @@ function angleLayout(section: BriefSection): { intro: string; angles: AngleCard[
 
 function rulesLayout(section: BriefSection): RuleColumn[] | null {
   const md = section.blocks.map(b => b.md).join('\n\n');
-  const parts = md.split(/^###\s+/m).slice(1);
-  if (parts.length !== 2) return null;
-  const cols = parts.map(p => {
+  const cols = md.split(/^###\s+/m).slice(1).map(p => {
     const nl = p.indexOf('\n');
     const label = plainText(nl === -1 ? p : p.slice(0, nl));
     const items = (nl === -1 ? '' : p.slice(nl + 1)).split('\n')
       .map(l => l.match(/^[-*+]\s+(.*)$/)?.[1]?.trim()).filter((x): x is string => !!x);
     return { label, items };
   });
-  if (!DO.test(cols[0].label) || !DONT.test(cols[1].label)) return null;
-  return [{ ...cols[0], negative: false }, { ...cols[1], negative: true }];
+  // Find one Do column and one Don't column among the subheads (order-agnostic;
+  // tolerates a stray heading, since the AI/import may vary).
+  const doCol = cols.find(c => DONT.test(c.label) ? false : DO.test(c.label));
+  const dontCol = cols.find(c => DONT.test(c.label));
+  if (!doCol || !dontCol) return null;
+  return [{ ...doCol, negative: false }, { ...dontCol, negative: true }];
 }
 
 /* ── copy lines (hooks / overlays) ─────────────────────────── */
@@ -202,20 +206,23 @@ function lineLayout(section: BriefSection): { intro: string; items: string[] } {
   return { intro: intro.join('\n'), items };
 }
 
-/* ── top-level ─────────────────────────────────────────────── */
-
 function analyzeSection(section: BriefSection, i: number, heading: string): SectionView {
   const base = { id: slugify(heading, i), num: i + 1, heading };
+  // Type comes from the markers inside the section OR its heading keyword — so a
+  // differently-named doc still maps to the right layout (bodyHas* live in
+  // briefDoc, shared with the editor).
+  const md = section.blocks.map(b => b.md).join('\n\n');
 
-  if ((DO.test(heading) || DONT.test(heading) || /do.?s?\s*(&|and|\/)\s*don/i.test(heading))) {
+  const headRules = DO.test(heading) || DONT.test(heading) || /do.?s?\s*(&|and|\/)\s*don/i.test(heading);
+  if (headRules || bodyHasDoDont(md)) {
     const cols = rulesLayout(section);
     if (cols) return { ...base, kind: 'rules', columns: cols };
   }
-  if (VIDEO.test(heading)) {
+  if (VIDEO.test(heading) || bodyHasVideoMarkers(md)) {
     const v = videoLayout(section);
     if (v) return { ...base, kind: 'videos', ...v };
   }
-  if (ANGLE.test(heading)) {
+  if (ANGLE.test(heading) || bodyHasAngles(md)) {
     const a = angleLayout(section);
     if (a) return { ...base, kind: 'angles', ...a };
   }
@@ -223,7 +230,54 @@ function analyzeSection(section: BriefSection, i: number, heading: string): Sect
     const { intro, items } = lineLayout(section);
     if (items.length) return { ...base, kind: 'lines', intro, items, compact: OVERLAY.test(heading) };
   }
-  return { ...base, kind: 'prose', md: section.blocks.map(b => b.md).join('\n\n') };
+  return { ...base, kind: 'prose', md };
+}
+
+/** How many sections resolved to a structured kind (cards/lines/rules). Used
+    to VERIFY an AI-normalised import: if it parses worse than the raw import,
+    the raw version wins. */
+export function structuredSectionCount(markdown: string): number {
+  return analyzeBrief(markdown, '').sections.filter(s => s.kind !== 'prose').length;
+}
+
+/** True when a section has no real content — only scaffolding. The reading
+    page (share + preview) hides these; the editor still shows them to fill. */
+export function isEmptySection(s: SectionView): boolean {
+  switch (s.kind) {
+    case 'prose': return !s.md.trim();
+    case 'videos': return !s.cards.length && !s.intro.trim() && !s.also.length;
+    case 'lines': return !s.items.length && !s.intro.trim();
+    case 'angles': return !s.angles.length && !s.intro.trim();
+    case 'rules': return s.columns.every(c => !c.items.length);
+  }
+}
+
+/**
+ * Appends EMPTY scaffolds for any canonical brief section the document lacks
+ * (brand intro, product intro, reference videos, hooks, text overlays, content
+ * angles, do/don't) so the editor always offers the full spine to fill in.
+ *
+ * Deliberately deterministic — no AI adds these, so nothing can be invented:
+ * the scaffolds carry a heading (and the Do/Don't markers) and zero content,
+ * and the reading page hides them until they hold something.
+ */
+export function ensureCanonicalSections(markdown: string): string {
+  const v = analyzeBrief(markdown, '');
+  const kinds = new Set(v.sections.map(s => s.kind));
+  const heads = v.sections.map(s => s.heading.toLowerCase());
+  const hasHead = (re: RegExp) => heads.some(h => re.test(h));
+
+  const add: string[] = [];
+  if (!hasHead(/brand|about|philosoph|essential|intro|snapshot|company/)) add.push('## Brand Intro\n');
+  if (!hasHead(/product/)) add.push('## Product Intro\n');
+  if (!kinds.has('videos')) add.push('## Reference Videos\n');
+  if (!hasHead(/hook/) && !v.sections.some(s => s.kind === 'lines' && !s.compact)) add.push('## Hooks\n');
+  if (!hasHead(/overlay|caption/)) add.push('## Text Overlays\n');
+  if (!kinds.has('angles') && !hasHead(/angle/)) add.push('## Content Angles\n');
+  if (!kinds.has('rules')) add.push("## Do's and Don'ts\n\n### Do\n\n### Don't\n");
+
+  if (!add.length) return markdown;
+  return markdown.trimEnd() + '\n\n' + add.join('\n');
 }
 
 export function analyzeBrief(markdown: string, fallbackTitle: string): BriefView {

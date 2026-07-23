@@ -5,7 +5,7 @@ import 'driver.js/dist/driver.css';
 import { renderBriefMarkdown } from './markdown';
 import { driveIdOf } from './markdown';
 import {
-  analyzeBrief, stripNumber, plainText, shortUrl,
+  analyzeBrief, isEmptySection, stripNumber, plainText, shortUrl,
   type SectionView, type RefCard, type AngleCard,
 } from './briefLayout';
 import './briefTheme.css';
@@ -87,7 +87,12 @@ export default function BriefDocView({
   brandName, month, fallbackTitle, body, logoSrc, resolveImage, variant = 'share',
 }: Props) {
   const share = variant === 'share';
-  const view = React.useMemo(() => analyzeBrief(body, fallbackTitle), [body, fallbackTitle]);
+  const view = React.useMemo(() => {
+    const v = analyzeBrief(body, fallbackTitle);
+    // Empty scaffold sections (added at import so the editor offers the full
+    // spine) stay off the reading page until they hold content.
+    return { ...v, sections: v.sections.filter(s => !isEmptySection(s)) };
+  }, [body, fallbackTitle]);
 
   const [q, setQ] = React.useState('');
   const [active, setActive] = React.useState('');

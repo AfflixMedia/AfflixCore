@@ -76,6 +76,18 @@ export const isVideoMarker = (line: string) => /^\*\*\s*video\b[^*]*\*\*:?\s*$/i
 /** A "### Angle N: …" subheading — how briefs delimit content angles. */
 export const isAngleMarker = (line: string) => /^###\s+/.test(line.trim());
 
+/* ── section-type markers ───────────────────────────────────────
+   A section's TYPE is recognised by the markers INSIDE it, not only its
+   heading — so a doc that names its video section "Creative Concepts", or an
+   AI/import that inserts the canonical markers under any heading, still maps to
+   the right layout without renaming headings. Shared by the reading layout
+   (briefLayout) and the editor (briefSectionEditors / this file's splitter). */
+export const bodyHasVideoMarkers = (md: string) => /^\s*\*\*\s*video\b[^*\n]*\*\*/im.test(md);
+export const bodyHasDoDont = (md: string) =>
+  /^###\s+do(?:'?s|s|es)?\b/im.test(md) && /^###\s+don'?ts?\b/im.test(md);
+export const bodyHasAngles = (md: string) =>
+  (md.match(/^###\s+/gm)?.length ?? 0) >= 2 && !bodyHasDoDont(md);
+
 /**
  * Label for a block, for the editor's block bar:
  *   · a "**Video #N**" run → "Video #1"
@@ -173,10 +185,10 @@ export function parseBriefDoc(md: string): BriefDoc {
     const body = buf.join('\n').trim();
     if (heading || body) {
       // Video and angle sections split per unit, so the editor gets one card
-      // per video / per angle instead of one long text block.
+      // per video / per angle. Detected by heading OR by the markers inside.
       const split: SplitKind =
-        /\breference|\bvideo/i.test(heading) ? 'videos' :
-        /\bangle/i.test(heading) ? 'angles' : 'none';
+        (/\breference|\bvideo/i.test(heading) || bodyHasVideoMarkers(body)) ? 'videos' :
+        (/\bangle/i.test(heading) || bodyHasAngles(body)) ? 'angles' : 'none';
       sections.push({ id: uid('s'), heading, blocks: blocksFromMarkdown(body, split) });
     }
     buf = [];
