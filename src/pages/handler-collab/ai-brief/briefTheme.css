@@ -1,0 +1,103 @@
+/* ════════════════════════════════════════════════════════════
+   Ember Clay — the content-brief reading theme (DESIGN.md).
+
+   Dark-mode-first "Claymorphic Modernism": a near-black warm charcoal with a
+   vibrant orange primary, soft molded surfaces (inner highlight + inner shadow
+   + outer glow), Sora display type over Hanken Grotesk body. Used by both the
+   in-app Preview and the public /brief/:token page via <BriefDocView>.
+
+   Everything is scoped under .bd so the dark theme is fully self-contained —
+   it renders correctly inside the light app shell (Preview) and standalone
+   (share link), and never leaks tokens into the rest of the app.
+════════════════════════════════════════════════════════════ */
+
+.bd {
+  /* surfaces */
+  --bg: #17120f;
+  --bg-2: #120d0a;
+  --surface: #201a17;
+  --surface-2: #241e1b;
+  --surface-3: #2f2925;
+  --surface-4: #3a3330;
+  /* ink */
+  --ink: #ece0db;
+  --ink-dim: #ddc1ae;
+  --mute: #a48c7a;
+  --line: #564334;
+  /* brand */
+  --primary: #ff8c00;
+  --primary-bright: #ffb77d;
+  --on-primary: #3a1c00;
+  --primary-glow: rgba(255, 140, 0, .38);
+  --primary-soft: rgba(255, 140, 0, .12);
+  --danger: #ffb4ab;
+  --danger-bg: rgba(147, 0, 10, .28);
+  --ok: #9bd4a4;
+
+  --clay-radius: 1rem;
+
+  /* claymorphic depth: outer lift + molded inner highlight/shadow */
+  --clay:
+    0 18px 40px -20px rgba(0, 0, 0, .8),
+    0 2px 0 0 rgba(255, 255, 255, .015),
+    inset 0 1px 0 0 rgba(255, 220, 195, .06),
+    inset 0 -8px 18px -12px rgba(0, 0, 0, .55);
+  --clay-hover:
+    0 26px 60px -22px rgba(0, 0, 0, .85),
+    0 0 0 1px rgba(255, 140, 0, .18),
+    0 0 40px -6px var(--primary-glow),
+    inset 0 1px 0 0 rgba(255, 220, 195, .08),
+    inset 0 -8px 18px -12px rgba(0, 0, 0, .55);
+  --clay-inset:
+    inset 0 2px 6px -1px rgba(0, 0, 0, .6),
+    inset 0 -1px 0 0 rgba(255, 220, 195, .05);
+
+  --display: "Sora", "Segoe UI", system-ui, sans-serif;
+  --body: "Hanken Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 17px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Ambient ember wash behind the whole document. */
+.bd {
+  background-image:
+    radial-gradient(1100px 620px at 82% -8%, rgba(255, 140, 0, .1), transparent 60%),
+    radial-gradient(900px 520px at -6% 12%, rgba(255, 140, 0, .05), transparent 55%);
+  background-attachment: fixed;
+}
+
+.bd *, .bd *::before, .bd *::after { box-sizing: border-box; }
+.bd img { max-width: 100%; display: block; }
+.bd a { color: inherit; }
+.bd :focus-visible { outline: 2px solid var(--primary-bright); outline-offset: 3px; border-radius: 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .bd *, .bd *::before, .bd *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}
+
+/* reusable clay surface */
+.bd-clay {
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  border: 1px solid rgba(255, 220, 195, .05);
+  border-radius: var(--clay-radius);
+  box-shadow: var(--clay);
+}
+
+/* pill chip */
+.bd-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 13px; border-radius: 999px;
+  font-family: var(--body); font-size: 12.5px; font-weight: 600;
+  letter-spacing: .02em; color: var(--ink-dim);
+  border: 1px solid var(--line);
+  background: rgba(255, 140, 0, .05);
+}
+.bd-chip.hot {
+  color: var(--primary-bright); border-color: rgba(255, 140, 0, .4);
+  background: var(--primary-soft);
+}

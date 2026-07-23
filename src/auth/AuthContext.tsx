@@ -17,6 +17,9 @@ export interface Profile {
   is_internal_handler?: boolean;
   // Bob only: the Super Bob additionally manages Bob accounts (/bobs page).
   is_superbob?: boolean;
+  // Paid Collab Handlers only: may use the AI Content Brief generator.
+  // Granted per handler by the Super Boss (migration 20260826090000).
+  ai_brief_enabled?: boolean;
 }
 
 interface AuthCtx {

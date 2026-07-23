@@ -12,6 +12,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { PayChip, PayoutDetail } from '../paid-collab/handlerCollabReadonly';
 import PaidCollabComments from '../../components/paidcollab/PaidCollabComments';
 import NotesBoard, { BrandNotesDrawer, CreatorNotesDrawer, AllNotesDrawer, NoteEditor } from './NotesBoard';
+import ContentBriefView from './ai-brief/ContentBriefView';
 import { useDraggableFab } from '../../components/AdsNotesFab';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
@@ -234,6 +235,13 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
   const { user, profile } = useAuth();
+  // AI Content Brief access — granted per handler by the Super Boss
+  // (profiles.ai_brief_enabled, migration 20260826090000). Mirrors the
+  // can_use_ai_brief() DB helper, which is the authority for any write.
+  const canUseAiBrief = !!profile && (
+    (profile.role === 'paid_collab_handler' && !!profile.ai_brief_enabled)
+    || (profile.role === 'bob' && !!profile.is_superbob)
+  );
 
   const [month, setMonth] = useState(initialMonth || thisMonthKey());
   const [tab, setTab] = useState('brands'); // brands | creators | reporting
@@ -784,7 +792,12 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
         {err && <div className="pc-banner" style={{ background: 'var(--pc-error-bg)', color: 'var(--pc-error-fg)' }}><span>⚠️</span><span>{err}</span></div>}
 
         <div className="pc-tabs">
-          {[{ id: 'brands', label: 'Brands' }, { id: 'creators', label: 'Creators' }, { id: 'performance', label: 'Performance' }, { id: 'reporting', label: 'Internal Reporting' }, { id: 'discussions', label: 'Discussions' }, { id: 'logs', label: 'Logs' }, { id: 'notes', label: 'Notes' }].map(t => (
+          {[{ id: 'brands', label: 'Brands' }, { id: 'creators', label: 'Creators' }, { id: 'performance', label: 'Performance' }, { id: 'reporting', label: 'Internal Reporting' }, { id: 'discussions', label: 'Discussions' }, { id: 'logs', label: 'Logs' }, { id: 'notes', label: 'Notes' },
+            // AI Content Brief — only for handlers the Super Boss granted access
+            // (profiles.ai_brief_enabled, migration 20260826090000). Super Boss
+            // sees it too so he can check the feature himself.
+            ...(canUseAiBrief ? [{ id: 'brief', label: 'AI Content Brief' }] : []),
+          ].map(t => (
             <button key={t.id} className={`pc-tab ${tab === t.id ? 'active' : ''}`} onClick={() => { setTab(t.id); setDrillId(null); }}>
               {t.label}
               {t.id === 'discussions' && needsReplyCount > 0 && <span className="pc-tab-badge">{needsReplyCount}</span>}
@@ -810,6 +823,9 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
             <LogsView logs={logs} brandById={brandById} />
           ) : tab === 'notes' ? (
             <NotesBoard brands={brands} brandById={brandById} creators={creators} month={month} />
+          ) : (tab === 'brief' && canUseAiBrief) ? (
+            // Falls through to the Brands view if access is revoked mid-session.
+            <ContentBriefView brands={brands} month={month} />
           ) : (
             drillId && drillBrand
               ? <Drilldown

@@ -109,6 +109,13 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
                 <NavLink to="/client-access" title="Client Access">
                   <i className="bi bi-link-45deg" /> <span className="ac-nav-label">Client Access</span>
                 </NavLink>
+                {/* AI Content Brief — Super Boss only (he also grants handlers
+                    access to the same view from the Paid Collab Handlers page). */}
+                {profile?.is_superbob && (
+                  <NavLink to="/content-brief" title="AI Content Brief">
+                    <i className="bi bi-stars" /> <span className="ac-nav-label">AI Content Brief</span>
+                  </NavLink>
+                )}
                 {collapsed ? (
                   <NavLink to="/budget/brands" title="Budget">
                     <i className="bi bi-cash-coin" />

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { Button, Card, Modal, Form, Spinner, Alert } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../auth/AuthContext';
 import { fnError } from '../lib/functionError';
 import Avatar from '../components/Avatar';
 import ChangeRoleModal from '../components/ChangeRoleModal';
@@ -13,6 +14,8 @@ interface Handler {
   created_at: string;
   avatar_url?: string | null;
   is_internal_handler?: boolean;
+  // Super Boss-only grant: access to the AI Content Brief generator.
+  ai_brief_enabled?: boolean;
   brand_ids?: string[];
   brand_names?: string[];
 }
@@ -20,7 +23,13 @@ interface Handler {
 interface BrandLite { id: string; name: string; }
 
 export default function PaidCollabHandlers() {
+  const { profile } = useAuth();
+  // AI Content Brief access is a Super Boss-only grant — regular Bobs see the
+  // chip but get no toggle (the DB trigger enforces the same rule server-side).
+  const isSuperBoss = profile?.role === 'bob' && !!profile.is_superbob;
+
   const [handlers, setHandlers] = useState<Handler[]>([]);
+  const [aiBusyId, setAiBusyId] = useState<string | null>(null);
   const [brands, setBrands] = useState<BrandLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -44,10 +53,22 @@ export default function PaidCollabHandlers() {
 
   const [roleHandler, setRoleHandler] = useState<Handler | null>(null);
 
+  // Super Boss grants / revokes AI Content Brief access for one handler.
+  const toggleAiBrief = async (h: Handler) => {
+    if (!isSuperBoss || aiBusyId) return;
+    const next = !h.ai_brief_enabled;
+    setAiBusyId(h.id); setErr(null);
+    const { error } = await supabase.from('profiles')
+      .update({ ai_brief_enabled: next }).eq('id', h.id);
+    setAiBusyId(null);
+    if (error) { setErr(error.message); return; }
+    setHandlers(prev => prev.map(x => x.id === h.id ? { ...x, ai_brief_enabled: next } : x));
+  };
+
   const load = async () => {
     setLoading(true); setErr(null);
     const [{ data: hRows, error: e1 }, { data: brandRows, error: e2 }, { data: assigns, error: e3 }] = await Promise.all([
-      supabase.from('profiles').select('id,email,full_name,role,created_at,avatar_url,is_internal_handler').eq('role', 'paid_collab_handler').order('created_at', { ascending: false }),
+      supabase.from('profiles').select('id,email,full_name,role,created_at,avatar_url,is_internal_handler,ai_brief_enabled').eq('role', 'paid_collab_handler').order('created_at', { ascending: false }),
       supabase.from('brands').select('id,name').order('name'),
       supabase.from('paid_collab_handler_brands').select('handler_id,brand_id'),
     ]);
@@ -234,6 +255,12 @@ export default function PaidCollabHandlers() {
                         <i className="bi bi-box-arrow-up-right" /> External
                       </span>
                     )}
+                    {h.ai_brief_enabled && (
+                      <span className="ac-chip" style={{ color: '#7c3aed', borderColor: '#7c3aed' }}
+                        title="Has access to the AI Content Brief generator">
+                        <i className="bi bi-stars" /> AI Brief
+                      </span>
+                    )}
                   </div>
                   <div className="mt-2 ac-chip-group">
                     {(h.brand_names ?? []).length === 0 ? (
@@ -253,6 +280,18 @@ export default function PaidCollabHandlers() {
                   </div>
                 </div>
                 <div className="ac-row-actions">
+                  {isSuperBoss && (
+                    <button className="ac-icon-btn" disabled={aiBusyId === h.id}
+                      style={h.ai_brief_enabled ? { color: '#7c3aed' } : undefined}
+                      onClick={() => toggleAiBrief(h)}
+                      title={h.ai_brief_enabled
+                        ? 'Revoke AI Content Brief access'
+                        : 'Grant AI Content Brief access'}>
+                      <i className={aiBusyId === h.id
+                        ? 'bi bi-hourglass-split'
+                        : h.ai_brief_enabled ? 'bi bi-stars' : 'bi bi-magic'} />
+                    </button>
+                  )}
                   <button className="ac-icon-btn"
                     onClick={() => { setPwHandler(h); setNewPw(''); setPwErr(null); setPwOk(false); }}
                     title="Reset password">

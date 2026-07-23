@@ -1,3 +1,4 @@
+import { Suspense, lazy } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Spinner } from 'react-bootstrap';
 import Login from './pages/Login';
@@ -25,6 +26,10 @@ import WeeklyReportView from './pages/WeeklyReportView';
 import MonthlyReports from './pages/MonthlyReports';
 import MonthlyReportEdit from './pages/MonthlyReportEdit';
 import MonthlyReportView from './pages/MonthlyReportView';
+import ContentBriefPage from './pages/handler-collab/ai-brief/ContentBriefPage';
+// Lazy: the public brief page pulls in framer-motion + driver.js for its
+// animated reading layout — kept out of the main app bundle.
+const SharedBrief = lazy(() => import('./pages/handler-collab/ai-brief/SharedBrief'));
 import PaidCollabHome from './pages/paid-collab/PaidCollabHome';
 import PaidCollabPortal from './pages/paid-collab/PaidCollabPortal';
 import PaidCollabBrandView from './pages/paid-collab/PaidCollabBrandView';
@@ -71,6 +76,13 @@ export default function App() {
       <Route path="/share/:token" element={<SharedReports />} />
       {/* Public creator contract signing link (Paid Collab) */}
       <Route path="/sign/:token" element={<SignContract />} />
+      {/* Public read-only content brief. No auth: the token is the credential and
+          the get-shared-brief edge function enforces share_enabled. */}
+      <Route path="/brief/:token" element={
+        <Suspense fallback={<div style={{ minHeight: '100vh', background: '#17120f' }} />}>
+          <SharedBrief />
+        </Suspense>
+      } />
       <Route
         path="/"
         element={
@@ -95,6 +107,9 @@ export default function App() {
         <Route path="teams" element={<ProtectedRoute roles={['bob']}><Teams /></ProtectedRoute>} />
         {/* Bobs management — role-gated to bob here; the page itself additionally requires is_superbob. */}
         <Route path="bobs" element={<ProtectedRoute roles={['bob']}><Bobs /></ProtectedRoute>} />
+        {/* AI Content Brief — Super Boss entry point (handlers get the same view
+            as a tab in /paid-collab). Page additionally requires is_superbob. */}
+        <Route path="content-brief" element={<ProtectedRoute roles={['bob']}><ContentBriefPage /></ProtectedRoute>} />
         <Route path="tasks" element={<ProtectedRoute roles={['bob', 'team_lead', 'apc', 'ads_manager']} allowInternalHandler><Tasks /></ProtectedRoute>} />
         <Route path="paid-collab-clients" element={<ProtectedRoute roles={['bob']}><PaidCollabClients /></ProtectedRoute>} />
         <Route path="paid-collab-handlers" element={<ProtectedRoute roles={['bob']}><PaidCollabHandlers /></ProtectedRoute>} />
