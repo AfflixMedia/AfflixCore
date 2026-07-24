@@ -67,6 +67,26 @@ const INTERNAL_ROLES = ['bob', 'team_lead', 'apc', 'ads_manager'];
 const shareTokenKey = (t) =>
   t.kind === 'all' ? 'all' : t.kind === 'team' ? `team:${t.team}` : `role:${t.role}`;
 
+// Editor label quick-pick source: the saved catalogue (note_labels) PLUS labels
+// already used on the viewer's OWN notes (deduped, case-insensitive), so labels
+// created before the catalogue existed are still selectable when adding a note.
+function mergeLabelChoices(catalog, notes, viewerId) {
+  const seen = new Set();
+  const out = [];
+  (catalog || []).forEach(l => {
+    const k = (l?.name || '').toLowerCase();
+    if (l?.name && !seen.has(k)) { seen.add(k); out.push({ id: l.id, name: l.name }); }
+  });
+  (notes || []).forEach(n => {
+    if (!isOwnNote(n, viewerId)) return;
+    (n.labels || []).forEach(name => {
+      const k = String(name || '').toLowerCase();
+      if (name && !seen.has(k)) { seen.add(k); out.push({ id: `note:${name}`, name }); }
+    });
+  });
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 const AVATAR_GRADIENTS = [
   'linear-gradient(135deg,#6366F1,#8B5CF6)', 'linear-gradient(135deg,#EC4899,#F43F5E)',
   'linear-gradient(135deg,#14B8A6,#06B6D4)', 'linear-gradient(135deg,#F59E0B,#EF4444)',
@@ -241,6 +261,10 @@ export default function NotesBoard({ brands = [], brandById = {}, creators = [],
     live.forEach(n => (n.labels || []).forEach(l => { m[l] = (m[l] || 0) + 1; }));
     return Object.entries(m).map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name));
   }, [live]);
+  // Reusable label choices for the editor's quick-pick: the saved catalogue PLUS
+  // labels already used on MY OWN notes — so previously-used ("pre") labels are
+  // selectable on a new note even before they were ever saved to the catalogue.
+  const labelChoices = useMemo(() => mergeLabelChoices(labelCatalog, notes, viewerId), [labelCatalog, notes, viewerId]);
   const reminderCount = useMemo(
     () => live.filter(n => n.reminder_at && !n.reminder_done).length, [live]);
 
@@ -383,7 +407,7 @@ export default function NotesBoard({ brands = [], brandById = {}, creators = [],
       {editor && (
         <NoteEditor editor={editor} brands={brands} brandById={brandById} creators={creators} month={month}
           viewerId={viewerId} viewerRole={viewerRole} viewerIsSuperbob={viewerIsSuperbob}
-          teamLeads={teamLeads} labelCatalog={labelCatalog} onCreateLabel={onCreateLabel}
+          teamLeads={teamLeads} labelCatalog={labelChoices} onCreateLabel={onCreateLabel}
           onLoadShares={store.loadNoteShares} onSaveShares={store.setNoteShares}
           readOnly={editor.mode === 'edit' && !canEditNote(editor.note)}
           onClose={() => setEditor(null)} onPersist={persistNote}
@@ -652,10 +676,10 @@ export function NoteEditor({ editor, brands, brandById, creators = [], month, on
         </div>
         {catalogSuggestions.length > 0 && (
           <div className="pc-nlabel-pick">
-            <span className="pc-nlabel-pick-hd">Saved labels</span>
+            <span className="pc-nlabel-pick-hd">Your labels</span>
             {catalogSuggestions.map(l => (
               <button key={l.id} type="button" className="pc-nchip pc-nchip-pick"
-                onClick={() => addLabel(l.name, false)}><i className="bi bi-tag" /> {l.name}</button>
+                onClick={() => addLabel(l.name, true)}><i className="bi bi-tag" /> {l.name}</button>
             ))}
           </div>
         )}
@@ -1080,7 +1104,7 @@ export function AllNotesDrawer({ notes = [], brands, brandById, creators = [], m
         <NoteEditor editor={editor} brands={brands} brandById={brandById} creators={creators} month={month}
           overlayClass="pc-overlay-top"
           viewerId={user?.id} viewerRole={viewerRole} viewerIsSuperbob={viewerIsSuperbob}
-          teamLeads={teamLeads} labelCatalog={labelCatalog} onCreateLabel={onCreateLabel}
+          teamLeads={teamLeads} labelCatalog={mergeLabelChoices(labelCatalog, notes, user?.id)} onCreateLabel={onCreateLabel}
           onLoadShares={onLoadShares} onSaveShares={onSaveShares}
           readOnly={editor.mode === 'edit' && !canEditNote(editor.note)}
           lockBrand={!!fixedBrand}
