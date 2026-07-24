@@ -12,6 +12,7 @@ import { Modal, Button, Table, Spinner, Alert, Badge, Row, Col, Form } from 'rea
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../auth/AuthContext';
 import { toISO } from '../../lib/dates';
+import { setReportCurrency, currencySymbol } from '../../lib/currency';
 import type { BrandProduct } from '../../lib/paidCollabSchema';
 import {
   SampleProduct, DailyEntry, currentMonth, monthLabel, daysInMonth, recentMonths,
@@ -21,8 +22,10 @@ import {
 const pctColor = (pct: number) =>
   pct >= 100 ? '#198754' : pct >= 75 ? '#e8862e' : pct >= 40 ? '#fd7e14' : '#dc3545';
 
+// Money in the active brand's region currency ($/£/€). BrandChatBar + GmvModal
+// set it via setReportCurrency(brand.currency) at render.
 const fmtUsd = (v: number) =>
-  `$${Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  `${currencySymbol()}${Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
 function monthBounds(yyyymm: string): { first: string; last: string } {
   const [y, m] = yyyymm.split('-').map(Number);
@@ -91,6 +94,7 @@ export default function BrandChatBar({ brandId, brandName, onTagProduct }: {
   const [modal, setModal] = useState<BarModal>(null);
   const [summary, setSummary] = useState<{ approved: number; goal: number } | null>(null);
   const [gmv, setGmv] = useState<{ adSpend: number; budget: number } | null>(null);
+  const [currency, setCurrency] = useState<string | null>(null);
   const [openTasks, setOpenTasks] = useState(0);
   // Bumped after a task is created/updated in the popup so the dot count refreshes.
   const [taskTick, setTaskTick] = useState(0);
@@ -112,7 +116,7 @@ export default function BrandChatBar({ brandId, brandName, onTagProduct }: {
     (async () => {
       const month = currentMonth();
       const { first, last } = monthBounds(month);
-      const [gRes, dRes, mRes, wRes] = await Promise.all([
+      const [gRes, dRes, mRes, wRes, bRes] = await Promise.all([
         supabase.from('brand_samples_periods')
           .select('total_goal').eq('brand_id', brandId).eq('month', month).maybeSingle(),
         supabase.from('brand_samples_daily')
@@ -124,8 +128,11 @@ export default function BrandChatBar({ brandId, brandName, onTagProduct }: {
         supabase.from('brand_gmv_max_weekly')
           .select('ad_spend').eq('brand_id', brandId)
           .lte('week_start', last).gte('week_end', first),
+        // Brand region currency — money symbol for the strip + GMV popup.
+        supabase.from('brands').select('currency').eq('id', brandId).maybeSingle(),
       ]);
       if (!on) return;
+      if (!bRes.error) setCurrency(((bRes.data as any)?.currency ?? 'USD'));
       if (!gRes.error && !dRes.error) {
         setSummary({
           approved: approvedOf((dRes.data ?? []) as DailyEntry[]),
@@ -162,6 +169,7 @@ export default function BrandChatBar({ brandId, brandName, onTagProduct }: {
 
   if (!isStaff) return null;
 
+  setReportCurrency(currency); // brand region money symbol for fmtUsd below
   const pct = summary && summary.goal > 0
     ? Math.min(100, Math.round((summary.approved / summary.goal) * 100))
     : 0;
@@ -197,7 +205,7 @@ export default function BrandChatBar({ brandId, brandName, onTagProduct }: {
           title="GMV Max ad spend this month — click for details"
           onClick={() => setModal('gmv')}
         >
-          <CircularProgress pct={budgetPct} color={adColor} label={gmv && gmv.budget > 0 ? undefined : '$'} />
+          <CircularProgress pct={budgetPct} color={adColor} label={gmv && gmv.budget > 0 ? undefined : currencySymbol(currency)} />
           <span className="ac-brandbar-stat">
             <i className="bi bi-cash-coin ac-brandbar-mi" style={{ color: adColor }} />
             <span className="ac-brandbar-sub">{gmv ? fmtUsd(gmv.adSpend) : '…'}</span>
@@ -231,7 +239,7 @@ export default function BrandChatBar({ brandId, brandName, onTagProduct }: {
         <ReportsModal brandId={brandId} brandName={brandName} onClose={() => setModal(null)} />
       )}
       {modal === 'gmv' && (
-        <GmvModal brandId={brandId} brandName={brandName} onClose={() => setModal(null)} />
+        <GmvModal brandId={brandId} brandName={brandName} currency={currency} onClose={() => setModal(null)} />
       )}
       {modal === 'tasks' && (
         <TasksModal
@@ -523,7 +531,8 @@ interface GmvWeek {
   ad_spend: number; roi: number; orders: number; gmv: number;
 }
 
-function GmvModal({ brandId, brandName, onClose }: { brandId: string; brandName: string; onClose: () => void }) {
+function GmvModal({ brandId, brandName, currency, onClose }: { brandId: string; brandName: string; currency?: string | null; onClose: () => void }) {
+  setReportCurrency(currency); // brand region money symbol for fmtUsd in this popup
   const [month, setMonth] = useState(currentMonth());
   const [budget, setBudget] = useState(0);
   const [weeks, setWeeks] = useState<GmvWeek[]>([]);

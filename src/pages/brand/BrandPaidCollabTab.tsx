@@ -5,6 +5,7 @@ import { applyFollowUps, setCreatorVideoAuth } from '../handler-collab/store';
 import type { HandlerBrandMonth, HandlerCreator } from '../handler-collab/store';
 import { BrandPerformancePane } from '../handler-collab/HandlerCollabApp';
 import { copyText, showToast } from '../../lib/copyToast';
+import { setReportCurrency } from '../../lib/currency';
 import {
   fmt$, monthKey, monthLabel, focusProductList, deliveredCount, isValidUrl, tiktokAccounts, getGradient,
   Kpi, CreatorRowRO, CreatorListHeadRO,
@@ -14,6 +15,8 @@ interface Props {
   brandId: string;
   brandName: string;
   canEdit: boolean;
+  /** Brand region currency (USD/GBP/EUR) — money symbol shown throughout the tab. */
+  currency?: string | null;
   /** Reports the live count of not-yet-authorised videos (drives the tab-strip dot in BrandDetail). */
   onPendingAuthChange?: (count: number) => void;
 }
@@ -34,7 +37,9 @@ export const isPendingAuthCode = (code: any): boolean =>
      through store.setCreatorMonthly (SECURITY DEFINER RPC, so APCs can write too).
    Creator/budget editing still happens in the handler's own workspace.
 ════════════════════════════════════════════════════════════ */
-export default function BrandPaidCollabTab({ brandId, brandName, canEdit, onPendingAuthChange }: Props) {
+export default function BrandPaidCollabTab({ brandId, brandName, canEdit, currency, onPendingAuthChange }: Props) {
+  // Money symbol for this brand's region — every fmt$ / CreatorRowRO below reads it.
+  setReportCurrency(currency);
   const [months, setMonths] = useState<HandlerBrandMonth[]>([]);
   const [creators, setCreators] = useState<HandlerCreator[]>([]);
   const [loading, setLoading] = useState(true);
@@ -389,7 +394,7 @@ export default function BrandPaidCollabTab({ brandId, brandName, canEdit, onPend
         </button>
       </div>
       {view === 'performance' && canEdit
-        ? <BrandPerformancePane brandId={brandId} brandName={brandName} canEdit={canEdit} />
+        ? <BrandPerformancePane brandId={brandId} brandName={brandName} canEdit={canEdit} currency={currency} />
         : view === 'auth' ? authPane : overview}
     </div>
   );

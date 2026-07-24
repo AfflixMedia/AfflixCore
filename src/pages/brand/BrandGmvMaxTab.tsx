@@ -3,6 +3,7 @@ import { Card, Form, Button, Row, Col, Table, Modal, Spinner, Alert } from 'reac
 import { supabase } from '../../lib/supabase';
 import { addDays, formatRange, toISO, fromISO } from '../../lib/dates';
 import { BrandProduct } from '../../lib/paidCollabSchema';
+import { currencySymbol } from '../../lib/currency';
 import NumberInput from '../../components/NumberInput';
 
 /** Days between two ISO dates (b - a). */
@@ -64,7 +65,8 @@ const emptyMonth = (brandId: string, month: string): MonthRow => ({
   brand_id: brandId, month, allocated_budget: 0, spend_to_date: 0,
 });
 
-export default function BrandGmvMaxTab({ brandId, canEdit }: { brandId: string; canEdit: boolean }) {
+export default function BrandGmvMaxTab({ brandId, canEdit, currency }: { brandId: string; canEdit: boolean; currency?: string | null }) {
+  const sym = currencySymbol(currency); // brand region money symbol ($/£/€)
   const [month, setMonth] = useState<string>(currentMonth());
   const [monthRow, setMonthRow] = useState<MonthRow>(emptyMonth(brandId, month));
   const [weeks, setWeeks] = useState<WeekRow[]>([]);
@@ -362,10 +364,10 @@ export default function BrandGmvMaxTab({ brandId, canEdit }: { brandId: string; 
             </Col>
           </Row>
           <Row className="g-3 mt-1">
-            <Col md={3}><MiniStat label="Allocated" value={`$${monthRow.allocated_budget.toLocaleString()}`} /></Col>
-            <Col md={3}><MiniStat label="Spend" value={`$${totalSpend.toLocaleString()}`} /></Col>
-            <Col md={3}><MiniStat label="Remaining" value={`$${remaining.toLocaleString()}`} variant={remaining < 0 ? 'danger' : 'success'} /></Col>
-            <Col md={3}><MiniStat label="GMV (sum of weeks)" value={`$${totalGmv.toLocaleString()}`} /></Col>
+            <Col md={3}><MiniStat label="Allocated" value={`${sym}${monthRow.allocated_budget.toLocaleString()}`} /></Col>
+            <Col md={3}><MiniStat label="Spend" value={`${sym}${totalSpend.toLocaleString()}`} /></Col>
+            <Col md={3}><MiniStat label="Remaining" value={`${sym}${remaining.toLocaleString()}`} variant={remaining < 0 ? 'danger' : 'success'} /></Col>
+            <Col md={3}><MiniStat label="GMV (sum of weeks)" value={`${sym}${totalGmv.toLocaleString()}`} /></Col>
           </Row>
         </Card.Body>
       </Card>
@@ -417,11 +419,11 @@ export default function BrandGmvMaxTab({ brandId, canEdit }: { brandId: string; 
                           </td>
                           <td className="fw-semibold">{w.week_start}</td>
                           <td><small className="text-muted">{formatRange(w.week_start, w.week_end)}</small></td>
-                          <td className="text-end">${n(w.ad_spend).toLocaleString()}</td>
+                          <td className="text-end">{sym}{n(w.ad_spend).toLocaleString()}</td>
                           <td className="text-end">{n(w.roi).toFixed(2)}</td>
                           <td className="text-end">{n(w.orders).toLocaleString()}</td>
-                          <td className="text-end">${n(w.cpo).toLocaleString()}</td>
-                          <td className="text-end">${n(w.gmv).toLocaleString()}</td>
+                          <td className="text-end">{sym}{n(w.cpo).toLocaleString()}</td>
+                          <td className="text-end">{sym}{n(w.gmv).toLocaleString()}</td>
                           <td className="small text-muted">{w.notes}</td>
                           {canEdit && (
                             <td className="text-end" onClick={e => e.stopPropagation()}>
@@ -467,11 +469,11 @@ export default function BrandGmvMaxTab({ brandId, canEdit }: { brandId: string; 
                                     })}
                                     <tr className="fw-semibold">
                                       <td colSpan={2} className="text-end">Week total</td>
-                                      <td className="text-end">${draft.reduce((s, r) => s + n(r.ad_spend), 0).toLocaleString()}</td>
+                                      <td className="text-end">{sym}{draft.reduce((s, r) => s + n(r.ad_spend), 0).toLocaleString()}</td>
                                       <td className="text-end">{(() => { const sp = draft.reduce((s, r) => s + n(r.ad_spend), 0); const g = draft.reduce((s, r) => s + n(r.gmv), 0); return sp > 0 ? (g / sp).toFixed(2) : '0.00'; })()}</td>
                                       <td className="text-end">{draft.reduce((s, r) => s + n(r.orders), 0).toLocaleString()}</td>
-                                      <td className="text-end">{(() => { const sp = draft.reduce((s, r) => s + n(r.ad_spend), 0); const o = draft.reduce((s, r) => s + n(r.orders), 0); return o > 0 ? `$${(sp / o).toLocaleString(undefined, { maximumFractionDigits: 2 })}` : '$0'; })()}</td>
-                                      <td className="text-end">${draft.reduce((s, r) => s + n(r.gmv), 0).toLocaleString()}</td>
+                                      <td className="text-end">{(() => { const sp = draft.reduce((s, r) => s + n(r.ad_spend), 0); const o = draft.reduce((s, r) => s + n(r.orders), 0); return o > 0 ? `${sym}${(sp / o).toLocaleString(undefined, { maximumFractionDigits: 2 })}` : `${sym}0`; })()}</td>
+                                      <td className="text-end">{sym}{draft.reduce((s, r) => s + n(r.gmv), 0).toLocaleString()}</td>
                                     </tr>
                                   </tbody>
                                 </Table>

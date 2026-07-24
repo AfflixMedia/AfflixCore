@@ -7,6 +7,7 @@ export interface Brand {
   name: string;
   client: string;
   client_status: string | null;
+  currency?: string | null;
   payment_popup_default?: any;
 }
 
@@ -32,27 +33,30 @@ export function useClientPaidCollabData() {
       // Brands now come from public.brands: paid-collab-enabled (scope 'paid_creator')
       // and RLS-scoped to those assigned to this client via paid_collab_client_brands.
       const { data: bRows, error: bErr } = await supabase
-        .from('brands').select('id,name,client').contains('scope', ['paid_creator']).order('name');
+        .from('brands').select('id,name,client,currency').contains('scope', ['paid_creator']).order('name');
       if (bErr) { setErr(bErr.message); setLoading(false); return; }
 
       const bs = (bRows || []).map(b => ({
         id: b.id,
         name: b.name,
         client: b.client,
-        client_status: null
+        client_status: null,
+        currency: (b as any).currency ?? 'USD',
       }));
       setBrands(bs);
       if (bs.length === 0) { setLoading(false); return; }
+      // Each synthesized "program" (brand-month) inherits the brand's region currency.
+      const brandCurrency = new Map(bs.map(b => [b.id, b.currency || 'USD']));
 
       const { data: pRows, error: pErr } = await supabase
         .from('handler_collab_brand_months').select('*').in('brand_id', bs.map(b => b.id));
       if (pErr) { setErr(pErr.message); setLoading(false); return; }
-      
+
       const progs = (pRows || []).map(p => ({
         id: p.id,
         brand_id: p.brand_id,
         name: `Month ${p.month}`,
-        currency: 'USD',
+        currency: brandCurrency.get(p.brand_id) || 'USD',
         total_budget: p.budget,
         ended_at: null,
       } as unknown as PaidProgram));

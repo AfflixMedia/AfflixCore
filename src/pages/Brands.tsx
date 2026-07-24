@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button, Card, Modal, Form, Spinner, Alert, Row, Col, InputGroup } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
-import { CURRENCIES } from '../lib/currency';
+import { REGIONS, regionToCurrency, currencyToRegion, Region } from '../lib/currency';
 import { useAuth } from '../auth/AuthContext';
 import Avatar from '../components/Avatar';
 
@@ -16,6 +16,7 @@ interface Brand {
   shop_code: string | null;
   notes: string | null;
   currency: string;
+  region: string;
   created_at: string;
 }
 interface ClientLite { id: string; name: string; }
@@ -58,7 +59,7 @@ const empty = {
   client_status: 'in_progress' as ClientStatus,
   shop_code: '',
   notes: '',
-  currency: 'USD',
+  region: 'US' as Region,
   monthly_fee: 0,
   paid_current_month: false,
 };
@@ -224,7 +225,7 @@ export default function Brands() {
       client_status: b.client_status,
       shop_code: b.shop_code ?? '',
       notes: b.notes ?? '',
-      currency: b.currency ?? 'USD',
+      region: (b.region as Region) || currencyToRegion(b.currency),
       monthly_fee: isBob ? Number(feeByBrand[b.id] ?? 0) : 0,
       paid_current_month: false,
     });
@@ -263,7 +264,10 @@ export default function Brands() {
       client_status: form.client_status,
       shop_code: form.shop_code.trim() || null,
       notes: form.notes.trim() || null,
-      currency: form.currency || 'USD',
+      // Region is the user's pick; currency is derived so every money formatter
+      // (reports, paid collab, contracts) shows the right symbol for the region.
+      region: form.region || 'US',
+      currency: regionToCurrency(form.region),
     };
     const fee = Number.isFinite(form.monthly_fee) ? form.monthly_fee : 0;
     let brandId = editId;
@@ -581,11 +585,11 @@ export default function Brands() {
                 </Form.Select>
               </Form.Group>
               <Form.Group className="col-md-3">
-                <Form.Label>Currency</Form.Label>
-                <Form.Select value={form.currency} onChange={e => setForm({ ...form, currency: e.target.value })}>
-                  {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
+                <Form.Label>Region</Form.Label>
+                <Form.Select value={form.region} onChange={e => setForm({ ...form, region: e.target.value as Region })}>
+                  {REGIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                 </Form.Select>
-                <Form.Text className="text-muted">Used to format all report values for this brand.</Form.Text>
+                <Form.Text className="text-muted">Sets the currency symbol shown for this brand everywhere.</Form.Text>
               </Form.Group>
               {/* Monthly fee + paid-status — Bob only. APCs never see or
                   submit budget data. */}

@@ -5,12 +5,14 @@
 // creator username, videos count, deal amount, payment method, dates and
 // the featured product line.
 // jspdf is imported lazily so it stays out of the main bundle.
+import { currencySymbol } from '../../lib/currency';
 
 export type ContractInput = {
   brandName: string;
   creatorName?: string;
   username: string;          // TikTok username, no leading @
-  amount: number;            // deal USD
+  amount: number;            // deal amount (in `currency`)
+  currency?: string | null;  // brand region currency (USD/GBP/EUR); default USD
   videosCount: number;       // 0 = unknown → neutral wording
   deliverableDays?: number | null; // §2 completion window; null/0 = automatic (10 for <6 videos, else 14)
   paymentMethod?: string;    // unused — contract always states "PayPal/Zelle"
@@ -60,7 +62,9 @@ export async function buildCreatorContract(input: ContractInput): Promise<{ doc:
   const brand = (input.brandName || 'Brand').trim();
   const username = (input.username || '').trim();
   const count = Math.max(0, Math.round(input.videosCount || 0));
-  const amountTxt = `USD $${Math.round(input.amount || 0).toLocaleString()}`;
+  // Deal amount in the brand's region currency, e.g. "USD $1,234" / "GBP £1,234" / "EUR €1,234".
+  const cur = (input.currency || 'USD').toUpperCase();
+  const amountTxt = `${cur} ${currencySymbol(cur)}${Math.round(input.amount || 0).toLocaleString()}`;
   const method = 'PayPal / Zelle'; // always both, regardless of the deal's saved payout details
   const dateTxt = fmtContractDate(input.effectiveDate);
   // Product / guide links, resolved up-front so §1's product names and §2's

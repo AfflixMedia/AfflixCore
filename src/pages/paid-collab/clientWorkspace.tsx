@@ -7,8 +7,9 @@ import {
   deliveredCount, gmvSum, isPendingVisible, focusProductList,
   Kpi, CreatorListHeadRO, CreatorStatusGroupsRO, prAddDays, prRangeShort,
 } from './handlerCollabReadonly';
+import { setReportCurrency } from '../../lib/currency';
 
-export interface BrandLite { id: string; name: string; client: string | null }
+export interface BrandLite { id: string; name: string; client: string | null; currency?: string | null }
 
 export const KPI_LABEL: Record<string, string> = {
   active_creators: 'Active creators', videos_posted: 'Videos posted', pipeline: 'In pipeline', gmv: 'GMV generated', ad: 'Ad spend',
@@ -28,7 +29,7 @@ export function useClientWorkspaceData() {
     (async () => {
       setLoading(true); setErr(null);
       const { data: bRows, error: bErr } = await supabase
-        .from('brands').select('id,name,client').contains('scope', ['paid_creator']).order('name');
+        .from('brands').select('id,name,client,currency').contains('scope', ['paid_creator']).order('name');
       if (bErr) { setErr(bErr.message); setLoading(false); return; }
       const bs = (bRows || []) as BrandLite[];
       setBrands(bs);
@@ -107,6 +108,7 @@ export function ProgramsView({ months, creators, brandById, showBrand, openProgr
     const usage = budget > 0 ? Math.round((allocated / budget) * 100) : 0;
     const cpv = videos > 0 ? allocated / videos : 0;
     const products = m ? focusProductList(m.focus_product_url) : [];
+    setReportCurrency(brand?.currency); // money symbol for this brand's region
     return (
       <div>
         <button className="pc-back" onClick={() => setOpenProgram(null)}>‹ All programs</button>
@@ -166,9 +168,9 @@ export function ProgramsView({ months, creators, brandById, showBrand, openProgr
             </div>
             <div className="pc-kpi-sub">{r.creators} creator{r.creators === 1 ? '' : 's'} · {r.delivered}/{r.videos} videos</div>
           </div>
-          <div style={{ textAlign: 'right' }}><div style={{ fontWeight: 700 }}>{fmt$(r.budget)}</div><div className="pc-kpi-sub">budget</div></div>
-          <div style={{ textAlign: 'right' }}><div style={{ fontWeight: 700 }}>{fmt$(r.allocated)}</div><div className="pc-kpi-sub">allocated</div></div>
-          <div style={{ textAlign: 'right' }}><div style={{ fontWeight: 700 }} className="pc-green">{r.gmv ? fmt$(r.gmv) : '—'}</div><div className="pc-kpi-sub">GMV</div></div>
+          <div style={{ textAlign: 'right' }}><div style={{ fontWeight: 700 }}>{fmt$(r.budget, r.brand?.currency)}</div><div className="pc-kpi-sub">budget</div></div>
+          <div style={{ textAlign: 'right' }}><div style={{ fontWeight: 700 }}>{fmt$(r.allocated, r.brand?.currency)}</div><div className="pc-kpi-sub">allocated</div></div>
+          <div style={{ textAlign: 'right' }}><div style={{ fontWeight: 700 }} className="pc-green">{r.gmv ? fmt$(r.gmv, r.brand?.currency) : '—'}</div><div className="pc-kpi-sub">GMV</div></div>
           <span className="pc-chev">›</span>
         </div>
       ))}

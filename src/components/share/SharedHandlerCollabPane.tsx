@@ -7,6 +7,7 @@ import {
   deliveredCount, gmvSum, isPendingVisible, Kpi, CreatorListHeadRO, CreatorStatusGroupsRO,
   PerformanceReport, prAddDays, prRangeShort,
 } from '../../pages/paid-collab/handlerCollabReadonly';
+import { setReportCurrency } from '../../lib/currency';
 
 /* ════════════════════════════════════════════════════════════
    "New Paid Collab" tab on the public share view — read-only, current handler-collab
@@ -14,7 +15,7 @@ import {
    drilldown look), plus a Performance sub-tab with a GMV/Ad-spend/ROAS chart. Data is
    pre-fetched by get-shared-reports (public users have no RLS access).
 ════════════════════════════════════════════════════════════ */
-interface BrandLite { id: string; name: string; client: string | null }
+interface BrandLite { id: string; name: string; client: string | null; currency?: string | null }
 
 export default function SharedHandlerCollabPane({ brand, months, creators, comments = [], publicName, onAddComment, onConfirmPaid }: {
   brand: BrandLite; months: HandlerBrandMonth[]; creators: HandlerCreator[];
@@ -24,6 +25,8 @@ export default function SharedHandlerCollabPane({ brand, months, creators, comme
   // Client confirms they processed a creator's payment — flags it + pings the team.
   onConfirmPaid?: (creatorId: string, confirmed: boolean) => Promise<void>;
 }) {
+  // Money in this brand's region currency ($/£/€) — every fmt$ below reads it.
+  setReportCurrency(brand.currency);
   const [section, setSection] = useState<'programs' | 'performance' | 'discussions'>('programs');
   const [openMonth, setOpenMonth] = useState<string | null>(null);
   // Programs month filter — current month / previous month / all (mirrors the weekly tab).

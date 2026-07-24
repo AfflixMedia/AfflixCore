@@ -6,6 +6,7 @@ import {
 } from 'recharts';
 import type { HandlerCreator } from '../handler-collab/store';
 import { copyWithToast, payoutKind } from '../../lib/copyToast';
+import { currencySymbol, setReportCurrency } from '../../lib/currency';
 import '../handler-collab/handlerCollab.css';
 
 /* ════════════════════════════════════════════════════════════
@@ -65,7 +66,10 @@ export const signedContractTitle = (c: any): string => {
 };
 
 export const monthKey = (d?: string | null) => (d ? String(d).slice(0, 7) : '');
-export const fmt$ = (n: number) => `$${Math.round(n || 0).toLocaleString()}`;
+// Whole-number money in the brand's currency. `code` is optional: single-brand
+// views call setReportCurrency(brand.currency) at render and just use fmt$(n);
+// multi-brand rows pass the row's currency explicitly.
+export const fmt$ = (n: number, code?: string | null) => `${currencySymbol(code)}${Math.round(n || 0).toLocaleString()}`;
 export const getGradient = (name: string) => (name ? AVATAR_GRADIENTS[name.charCodeAt(0) % AVATAR_GRADIENTS.length] : AVATAR_GRADIENTS[0]);
 export const initial = (name: string) => { const s = (name || '').trim(); return s ? s[0].toUpperCase() : '?'; };
 export const isValidUrl = (s?: string) => !!s && (s.startsWith('http://') || s.startsWith('https://'));
@@ -470,7 +474,7 @@ export function CreatorStatusGroupsRO({ creators, onToggleAuth, onConfirmPaid, s
    Shared by the public share link's "Performance" tab and the client portal
    dashboard — both pass a brand + that brand's creators (current handler-collab model).
 ════════════════════════════════════════════════════════════ */
-export interface PerfBrand { id: string; name: string; client: string | null }
+export interface PerfBrand { id: string; name: string; client: string | null; currency?: string | null }
 
 const PR_STATUS: Record<string, { label: string; cls: string; color: string }> = {
   videos_in_progress: { label: 'In progress', cls: 'prog', color: '#1259C3' },
@@ -489,6 +493,8 @@ export function PerformanceReport({ brand, creators, onDiscuss }: {
   const [mode, setMode] = useState<'monthly' | 'weekly'>('weekly');
   const [weekSel, setWeekSel] = useState<string | null>(null);
   const isWeekly = mode === 'weekly';
+  // Money in this brand's currency ($/£/€). Set during render so fmt$ below uses it.
+  setReportCurrency(brand.currency);
 
   const weekKeys = useMemo(() => {
     const s = new Set<string>();

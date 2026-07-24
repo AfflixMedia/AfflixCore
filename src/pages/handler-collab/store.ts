@@ -35,6 +35,8 @@ export interface HandlerBrand {
   id: string;     // public.brands.id (brands are no longer a separate list)
   name: string;
   client: string;
+  currency?: string | null;  // region currency (USD/GBP/EUR) — money symbol
+  region?: string | null;
 }
 
 export interface HandlerBrandMonth {
@@ -146,7 +148,7 @@ export async function loadAll() {
   // Brands come from public.brands, RLS-scoped to those assigned to the handler
   // (via paid_collab_handler_brands) — no paid_creator scope requirement.
   const { data: bRows, error: bErr } = await supabase
-    .from('brands').select('id,name,client').order('name');
+    .from('brands').select('id,name,client,currency,region').order('name');
   if (bErr) throw bErr;
   const brands = (bRows || []) as HandlerBrand[];
   const ids = brands.map(b => b.id);

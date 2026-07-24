@@ -7,6 +7,7 @@ import {
 } from 'recharts';
 import { supabase } from '../../lib/supabase';
 import { uploadSignature, svgToPngDataUrl } from '../../lib/imageUpload';
+import { currencySymbol, setReportCurrency } from '../../lib/currency';
 import * as store from './store';
 import { useAuth } from '../../auth/AuthContext';
 import { PayChip, PayoutDetail } from '../paid-collab/handlerCollabReadonly';
@@ -39,8 +40,17 @@ const AVATAR_GRADIENTS = [
 ];
 
 /* ── helpers ── */
-function fmt$(n) { return `$${Math.round(n || 0).toLocaleString()}`; }
+// Whole-number money in the active currency. Single-brand views set the symbol
+// once per render via setReportCurrency(brand.currency); multi-brand views set
+// the "uniform" currency (or pass an explicit `code`). See lib/currency.ts.
+function fmt$(n, code) { return `${currencySymbol(code)}${Math.round(n || 0).toLocaleString()}`; }
 function fmtNum(n) { return Math.round(n || 0).toLocaleString(); }
+// The shared currency for a set of brands: their common one if uniform, else USD
+// (mixing region currencies in one total is meaningless, so fall back to $).
+function uniformCurrency(brands) {
+  const codes = new Set((brands || []).map(b => (b && b.currency) || 'USD'));
+  return codes.size === 1 ? [...codes][0] : 'USD';
+}
 function getGradient(name) {
   if (!name) return AVATAR_GRADIENTS[0];
   return AVATAR_GRADIENTS[name.charCodeAt(0) % AVATAR_GRADIENTS.length];
@@ -505,7 +515,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
 
   // Creators tab — EVERY creator (per brand, every month), each tagged with its month
   const allCreatorsList = useMemo(() => creators
-    .map(c => ({ ...c, _brandName: brandById[c.brand_id]?.name || '—', _monthKey: monthKey(c.onboarded_on) }))
+    .map(c => ({ ...c, _brandName: brandById[c.brand_id]?.name || '—', _brandCurrency: brandById[c.brand_id]?.currency || 'USD', _monthKey: monthKey(c.onboarded_on) }))
     // month groups newest-first; within a month, most-recently-onboarded on top (then newest record), not alphabetical
     .sort((a, b) => String(b._monthKey).localeCompare(String(a._monthKey))
       || String(b.onboarded_on || '').localeCompare(String(a.onboarded_on || ''))
@@ -514,6 +524,11 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
 
   const drillRow = brandRows.find(r => r.id === drillId) || null;
   const drillBrand = brandById[drillId] || null;
+  // Money symbol for this render: the drilled-in brand's currency, else the
+  // handler's uniform currency (multi-brand overview/aggregate tabs). Sub-views
+  // that pick their own brand internally (BrandMatrix, ReportingView, PerfBrandList)
+  // re-set this at their own render.
+  setReportCurrency(drillId && drillBrand ? drillBrand.currency : uniformCurrency(brands));
   const drillCreators = useMemo(() => {
     if (!drillId) return [];
     return creators
@@ -1719,6 +1734,7 @@ async function contractPayloadFor(c, brandName, opts = {}) {
     creatorName: c.name || '',
     username: accounts[0] ? accounts[0].handle.replace(/^@/, '') : (c.name || ''),
     amount: Number(c.amount) || 0,
+    currency: opts.currency || 'USD',
     videosCount: parseInt(c.videos_count, 10) || 0,
     deliverableDays: c.deliverable_days || null,
     effectiveDate: c.onboarded_on || null,
@@ -1732,6 +1748,7 @@ async function contractPayloadFor(c, brandName, opts = {}) {
    Drilldown
 ════════════════════════════════════════════════════════════ */
 function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCreator, onDeleteCreator, onEditBudget, onDeleteBrand, onNotes, notesText, patchCreatorLocal, onSetStatus, onToggleVisible, contractLinkFor, onContractLinkChange, commentCount, onComments, creatorNoteCount, onCreatorNotes }) {
+  setReportCurrency(brand && brand.currency); // single brand → its money symbol
   const [openId, setOpenId] = useState(null);
   const bm = row?.bm || {};
   const products = focusProductList(bm);
@@ -1818,7 +1835,7 @@ function Drilldown({ brand, row, month, creators, onBack, onAddCreator, onEditCr
                   patchCreatorLocal={patchCreatorLocal} onSetStatus={onSetStatus} onToggleVisible={onToggleVisible}
                   noteCount={creatorNoteCount ? creatorNoteCount(c) : 0}
                   onNotes={onCreatorNotes ? () => onCreatorNotes(c) : null}
-                  buildContractPayload={() => contractPayloadFor(c, brand.name, { focusProducts: products, contentGuideUrl: bm.content_guide_url })}
+                  buildContractPayload={() => contractPayloadFor(c, brand.name, { focusProducts: products, contentGuideUrl: bm.content_guide_url, currency: brand.currency })}
                   contractLink={contractLinkFor ? contractLinkFor(c) : null}
                   onContractLinkChange={onContractLinkChange} />
               ))}
@@ -1996,7 +2013,7 @@ function CreatorsView({ rows, onEdit, onSetStatus, onToggleVisible, contractLink
               <div className="pc-cv-monthhead"><span>{monthLabel(g.key)}</span><span className="pc-cv-monthcount">{g.items.length}</span></div>
               {g.items.map((c, i) => <CreatorGlobalRow key={c.id} c={c} idx={i + 1} onEdit={() => onEdit(c)} onSetStatus={onSetStatus} onToggleVisible={onToggleVisible} selected={sel.has(c.id)} onToggleSelect={() => toggle(c.id)}
                 noteCount={creatorNoteCount ? creatorNoteCount(c) : 0} onNotes={onCreatorNotes ? () => onCreatorNotes(c) : null}
-                buildContractPayload={() => contractPayloadFor(c, c._brandName)}
+                buildContractPayload={() => contractPayloadFor(c, c._brandName, { currency: c._brandCurrency })}
                 contractLink={contractLinkFor ? contractLinkFor(c) : null}
                 onContractLinkChange={onContractLinkChange} />)}
             </React.Fragment>
@@ -2119,6 +2136,7 @@ function ReportingView({ brands, brandById, creators, month, comments = [], onOp
   const [weekSel, setWeekSel] = useState(null); // null = all weeks of the month
   const [brandSel, setBrandSel] = useState(''); // '' = all brands, else brand_id
   const isWeekly = mode === 'weekly';
+  setReportCurrency(brandSel ? (brandById[brandSel] && brandById[brandSel].currency) : uniformCurrency(brands));
   const brandCommentCount = brandSel ? comments.filter(c => c.brand_id === brandSel).length : 0;
 
   // Everything below is computed over the chosen brand scope (all brands by default).
@@ -2515,6 +2533,7 @@ function PerformanceView({ brands, creators, brandById, month, reportWeeks, repo
 }
 
 function PerfBrandList({ brands, byBrand, mode, setMode, onOpen }) {
+  setReportCurrency(uniformCurrency(brands)); // multi-brand list → common currency or $
   const [q, setQ] = useState('');
   const sumFn = mode === 'weekly' ? sumWeekly : sumMonthly;
   let rows = brands.map(b => {
@@ -2575,6 +2594,7 @@ function PerfBrandList({ brands, byBrand, mode, setMode, onOpen }) {
 }
 
 function BrandMatrix({ brand, creators, mode, setMode, month, brandReportWeeks, brandAnchor, onCreateWeek, onBack, onSaveMonthly, monthNav = null }) {
+  setReportCurrency(brand && brand.currency); // single brand → its money symbol
   const isWeekly = mode === 'weekly';
   const [creating, setCreating] = useState(false);
   const canon = useMemo(() => {
@@ -2779,7 +2799,7 @@ function BrandMatrix({ brand, creators, mode, setMode, month, brandReportWeeks, 
    via store.setCreatorMonthly (a SECURITY DEFINER RPC → APCs can write too). Editing
    is gated by `canEdit`; the host only mounts this when the viewer may edit.
 ════════════════════════════════════════════════════════════ */
-export function BrandPerformancePane({ brandId, brandName, canEdit = false }) {
+export function BrandPerformancePane({ brandId, brandName, canEdit = false, currency = null }: any) {
   const { user } = useAuth();
   const [creators, setCreators] = useState([]);
   const [month, setMonth] = useState(thisMonthKey());
@@ -2855,7 +2875,7 @@ export function BrandPerformancePane({ brandId, brandName, canEdit = false }) {
     <div className="pc-app" style={{ minHeight: 0, background: 'transparent' }}>
       {err && <div className="pc-banner" style={{ background: 'var(--pc-error-bg)', color: 'var(--pc-error-fg)' }}><span>⚠️</span><span>{err}</span></div>}
       <BrandMatrix
-        brand={{ id: brandId, name: brandName }}
+        brand={{ id: brandId, name: brandName, currency }}
         creators={creators}
         mode={mode} setMode={setMode}
         month={month}

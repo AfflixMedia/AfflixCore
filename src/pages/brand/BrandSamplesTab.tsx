@@ -6,6 +6,7 @@ import {
 } from 'recharts';
 import { supabase } from '../../lib/supabase';
 import { toISO } from '../../lib/dates';
+import { currencySymbol } from '../../lib/currency';
 import NumberInput from '../../components/NumberInput';
 
 export interface SampleProduct {
@@ -94,7 +95,8 @@ export function productGoalFor(p: SampleProduct, month: string): number | null {
 
 const SECTION_HEADING_STYLE: React.CSSProperties = { textTransform: 'none', letterSpacing: 0 };
 
-export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string; canEdit: boolean }) {
+export default function BrandSamplesTab({ brandId, canEdit, currency }: { brandId: string; canEdit: boolean; currency?: string | null }) {
+  const sym = currencySymbol(currency); // brand region money symbol ($/£/€)
   const [month, setMonth] = useState<string>(currentMonth());
   const [products, setProducts] = useState<SampleProduct[]>([]);
   const [periodGoal, setPeriodGoal] = useState<number>(0);
@@ -728,7 +730,7 @@ export default function BrandSamplesTab({ brandId, canEdit }: { brandId: string;
                             />
                           ) : (
                             hasValue
-                              ? <span className="fw-semibold">${gmvRow!.affiliate_gmv!.toLocaleString()}</span>
+                              ? <span className="fw-semibold">{sym}{gmvRow!.affiliate_gmv!.toLocaleString()}</span>
                               : <span className="text-muted small fst-italic">Not set</span>
                           )}
                         </td>

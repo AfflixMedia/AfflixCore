@@ -24,6 +24,8 @@ interface Brand {
   client_id: string | null;
   share_enabled: boolean;
   client_status: string | null;
+  currency: string | null;
+  region: string | null;
 }
 
 type TabKey = 'resources' | 'reporting' | 'approvals' | 'gmv-max' | 'samples' | 'paid-collab' | 'products' | 'billing' | 'payments';
@@ -103,7 +105,7 @@ export default function BrandDetail() {
         { data: wApprovals }, { data: mApprovals }, { data: decidedRows },
         { data: leadRows }, { data: apcRows },
       ] = await Promise.all([
-        supabase.from('brands').select('id,name,client,client_id,share_enabled,client_status').eq('id', id).maybeSingle(),
+        supabase.from('brands').select('id,name,client,client_id,share_enabled,client_status,currency,region').eq('id', id).maybeSingle(),
         isApc
           ? supabase.from('apc_brands').select('brand_id').eq('apc_id', profile?.id ?? '').eq('brand_id', id ?? '')
           : isTeamLead
@@ -481,10 +483,10 @@ export default function BrandDetail() {
       {currentTab === 'resources'   && <BrandResourcesTab brandId={brand.id} brandName={brand.name} canEdit={canEditResources} />}
       {currentTab === 'reporting'   && <BrandReportingTab brand={brand} isBob={isBob} canEdit={canEditReporting} onShareEnabledChanged={onShareEnabledChanged} />}
       {currentTab === 'approvals'   && <BrandApprovalsTab brandId={brand.id} brandName={brand.name} />}
-      {currentTab === 'gmv-max'     && <BrandGmvMaxTab brandId={brand.id} canEdit={canEditGmvMax} />}
-      {currentTab === 'samples'     && <BrandSamplesTab brandId={brand.id} canEdit={canEditSamples} />}
+      {currentTab === 'gmv-max'     && <BrandGmvMaxTab brandId={brand.id} canEdit={canEditGmvMax} currency={brand.currency} />}
+      {currentTab === 'samples'     && <BrandSamplesTab brandId={brand.id} canEdit={canEditSamples} currency={brand.currency} />}
       {currentTab === 'products'    && <BrandProductsTab brandId={brand.id} canEdit={canEditProducts} />}
-      {currentTab === 'paid-collab' && <BrandPaidCollabTab brandId={brand.id} brandName={brand.name} canEdit={canEditPaidCollab} onPendingAuthChange={setPendingAuthCount} />}
+      {currentTab === 'paid-collab' && <BrandPaidCollabTab brandId={brand.id} brandName={brand.name} canEdit={canEditPaidCollab} currency={brand.currency} onPendingAuthChange={setPendingAuthCount} />}
       {currentTab === 'payments'    && <PaymentControlsTab brandId={brand.id} brandName={brand.name} canEdit={isBob && brandActive} />}
       {currentTab === 'billing'     && <BrandBillingTab brandId={brand.id} />}
     </div>

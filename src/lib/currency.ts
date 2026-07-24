@@ -29,8 +29,44 @@ export const CURRENCIES: { code: string; label: string }[] = [
   { code: 'JPY', label: 'JPY — Japanese Yen (¥)' },
 ];
 
+/* ── Brand region ──
+   A brand belongs to one of three regions; the region fixes the currency (and
+   therefore the money symbol) shown for that brand EVERYWHERE in the app —
+   reports, paid collab, share links, contracts. `brands.region` is the field
+   the user picks; `brands.currency` is kept in sync (region → currency) so the
+   existing report currency machinery keeps working unchanged. Default: US. */
+export type Region = 'US' | 'UK' | 'EURO';
+
+export const REGIONS: { value: Region; label: string; currency: string; symbol: string }[] = [
+  { value: 'US',   label: 'US — US Dollar ($)',    currency: 'USD', symbol: '$' },
+  { value: 'UK',   label: 'UK — British Pound (£)', currency: 'GBP', symbol: '£' },
+  { value: 'EURO', label: 'EURO — Euro (€)',        currency: 'EUR', symbol: '€' },
+];
+
+const REGION_CURRENCY: Record<Region, string> = { US: 'USD', UK: 'GBP', EURO: 'EUR' };
+
+/** Region → ISO currency code (defaults to USD for anything unknown). */
+export function regionToCurrency(region?: string | null): string {
+  const r = (region || 'US').toUpperCase();
+  return REGION_CURRENCY[r as Region] ?? 'USD';
+}
+
+/** ISO currency code → region (GBP→UK, EUR→EURO, everything else → US). */
+export function currencyToRegion(code?: string | null): Region {
+  const c = (code || 'USD').toUpperCase();
+  if (c === 'GBP') return 'UK';
+  if (c === 'EUR') return 'EURO';
+  return 'US';
+}
+
+/** The money symbol for a brand's region ($ / £ / €). */
+export function regionSymbol(region?: string | null): string {
+  return currencySymbol(regionToCurrency(region));
+}
+
 const _symCache: Record<string, string> = {};
-export function currencySymbol(code: string = _code): string {
+export function currencySymbol(code?: string | null): string {
+  code = (code || _code);
   if (_symCache[code]) return _symCache[code];
   try {
     // Pin the locale to en-US so symbols are stable regardless of the viewer's
@@ -50,4 +86,11 @@ export function formatMoney(n: number, opts?: { compact?: boolean; maximumFracti
   const abs = Math.abs(n);
   if (opts?.compact && abs >= 10000) return `${sym}${(n / 1000).toFixed(1).replace(/\.0$/, '')}k`;
   return `${sym}${n.toLocaleString(undefined, { maximumFractionDigits: opts?.maximumFractionDigits ?? 2 })}`;
+}
+
+// Whole-number money in the active currency — the paid-collab "$1,234" style
+// (no decimals). Pass an explicit `code` for multi-brand rows; omit it to use the
+// currency last set via setReportCurrency() (single-brand views set it at render).
+export function fmtWhole(n: number, code?: string | null): string {
+  return `${currencySymbol(code)}${Math.round(n || 0).toLocaleString()}`;
 }

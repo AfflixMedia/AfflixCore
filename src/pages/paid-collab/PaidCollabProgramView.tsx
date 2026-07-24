@@ -9,13 +9,14 @@ import {
   fmt$, getGradient, initial, monthKey, monthLabel, focusProductList,
   deliveredCount, Kpi, CreatorListHeadRO, CreatorStatusGroupsRO,
 } from './handlerCollabReadonly';
+import { setReportCurrency } from '../../lib/currency';
 
 /**
  * One program = one brand-month (new schema). Renders the SAME visual as the handler
  * Workspace brand drilldown (pc-* styling) but READ-ONLY. RLS (user_has_brand_access)
  * blocks access if the viewer isn't assigned the brand.
  */
-interface Brand { id: string; name: string; client: string }
+interface Brand { id: string; name: string; client: string; currency?: string | null }
 
 export default function PaidCollabProgramView() {
   const { programId } = useParams<{ programId: string }>();
@@ -38,7 +39,7 @@ export default function PaidCollabProgramView() {
       if (!m) { setErr('Program not found or you do not have access.'); setLoading(false); return; }
       const month = m as HandlerBrandMonth;
       const [{ data: b, error: bErr }, { data: cRows, error: cErr }] = await Promise.all([
-        supabase.from('brands').select('id,name,client').eq('id', month.brand_id).maybeSingle(),
+        supabase.from('brands').select('id,name,client,currency').eq('id', month.brand_id).maybeSingle(),
         supabase.from('handler_collab_creators').select('*').eq('brand_id', month.brand_id),
       ]);
       if (cancelled) return;
@@ -76,6 +77,7 @@ export default function PaidCollabProgramView() {
   }
   if (!brand || !bm) return null;
 
+  setReportCurrency(brand.currency); // money symbol for this brand's region
   const budget = Number(bm.budget) || 0;
   const usage = budget > 0 ? Math.round((agg.allocated / budget) * 100) : 0;
   const products = focusProductList(bm.focus_product_url);
