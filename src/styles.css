@@ -527,6 +527,8 @@ a:hover { color: var(--ac-primary-2); }
   border-color: var(--ac-bg-card-2);
 }
 .ac-chip-group { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Compact chip — tag-sized, to sit inline with small/muted meta text. */
+.ac-chip.ac-chip-sm { padding: 2px 8px; font-size: .72rem; gap: 3px; }
 
 .ac-shop-code {
   font-family: 'JetBrains Mono', 'Menlo', 'Consolas', monospace;
@@ -542,6 +544,50 @@ a:hover { color: var(--ac-primary-2); }
   transition: background .15s ease;
 }
 .ac-shop-code:hover { background: rgba(232,134,46,.10); border-color: rgba(232,134,46,.25); color: var(--ac-primary); }
+
+/* Region chip — a brand's market ($ US / £ UK / € EURO). Informational (not
+   clickable): a tinted currency-symbol badge + the region name, with a
+   per-region accent driven by data-region. Shown on brand cards + detail header. */
+.ac-region-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px 3px 3px;
+  border-radius: var(--ac-radius-pill, 999px);
+  background: var(--rg-bg, rgba(20,22,32,.05));
+  border: 1px solid var(--rg-border, rgba(20,22,32,.10));
+  color: var(--rg-fg, var(--ac-text-dark));
+  font-family: var(--ac-font-heading);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.ac-region-sym {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; flex: 0 0 20px;
+  border-radius: 50%;
+  background: var(--rg-accent, #64748b);
+  color: #fff;
+  font-size: .72rem; font-weight: 800; line-height: 1;
+  box-shadow: 0 1px 2px rgba(20,22,32,.18);
+}
+.ac-region-name {
+  font-size: .68rem; font-weight: 800; letter-spacing: .5px;
+  text-transform: uppercase;
+  padding-right: 2px;
+}
+.ac-region-chip--sm { padding: 2px 8px 2px 2px; gap: 5px; }
+.ac-region-chip--sm .ac-region-sym { width: 17px; height: 17px; flex-basis: 17px; font-size: .64rem; }
+.ac-region-chip--sm .ac-region-name { font-size: .62rem; }
+
+.ac-region-chip[data-region="US"]   { --rg-accent: #059669; --rg-bg: rgba(5,150,105,.09);  --rg-border: rgba(5,150,105,.24);  --rg-fg: #047857; }
+.ac-region-chip[data-region="UK"]   { --rg-accent: #4f46e5; --rg-bg: rgba(79,70,229,.09);  --rg-border: rgba(79,70,229,.24);  --rg-fg: #4338ca; }
+.ac-region-chip[data-region="EURO"] { --rg-accent: #2563eb; --rg-bg: rgba(37,99,235,.09);  --rg-border: rgba(37,99,235,.24);  --rg-fg: #1d4ed8; }
+
+/* Brand Detail header — identity stack: name + owners (Team Lead / APC) on the
+   top row, then client + status, then region + compact scope tags. Right side
+   stays purely for navigation. */
+.ac-bd-head-left { min-width: 0; max-width: 100%; }
+.ac-bd-back { margin-top: 4px; flex: 0 0 auto; }   /* optical-align with the h2 cap-height */
+.ac-bd-ident { min-width: 0; }
+.ac-bd-ident h2 { line-height: 1.15; }
 
 /* Brand-card owner chips: the Team Lead + APC the brand is assigned to */
 .ac-brand-owners { display: flex; flex-wrap: wrap; gap: 6px; }

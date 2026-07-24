@@ -3,8 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { Button, Card, Modal, Form, Spinner, Alert, Row, Col, InputGroup } from 'react-bootstrap';
 import { supabase } from '../lib/supabase';
 import { REGIONS, regionToCurrency, currencyToRegion, Region } from '../lib/currency';
+import { ScopeKey, SCOPE_OPTIONS, SCOPE_LABEL, SCOPE_ICON } from '../lib/brandScope';
 import { useAuth } from '../auth/AuthContext';
 import Avatar from '../components/Avatar';
+import RegionChip from '../components/RegionChip';
 
 interface Brand {
   id: string;
@@ -26,17 +28,6 @@ interface ApcLite { id: string; email: string; full_name: string | null; team_le
 type ClientStatus = 'onboarding' | 'in_progress' | 'paused' | 'closed';
 
 const STATUS_ORDER: ClientStatus[] = ['onboarding', 'in_progress', 'paused', 'closed'];
-
-type ScopeKey = 'affiliate' | 'ads' | 'paid_creator' | 'shop';
-
-const SCOPE_OPTIONS: { key: ScopeKey; label: string; icon: string }[] = [
-  { key: 'affiliate',         label: 'Affiliates',         icon: 'bi-link-45deg' },
-  { key: 'paid_creator',      label: 'Paid Collabs',       icon: 'bi-people' },
-  { key: 'ads',               label: 'GMV Max',            icon: 'bi-graph-up-arrow' },
-  { key: 'shop',              label: 'Shop Monitoring',    icon: 'bi-shop' },
-];
-const SCOPE_LABEL: Record<string, string> = Object.fromEntries(SCOPE_OPTIONS.map(o => [o.key, o.label]));
-const SCOPE_ICON:  Record<string, string> = Object.fromEntries(SCOPE_OPTIONS.map(o => [o.key, o.icon]));
 
 const STATUS_LABEL: Record<ClientStatus, string> = {
   onboarding:  'Onboarding',
@@ -489,6 +480,7 @@ export default function Brands() {
 
                   <div className="d-flex align-items-center gap-2 flex-wrap mb-2">
                     <StatusBadge status={b.client_status} />
+                    <RegionChip region={b.region} size="sm" />
                     {b.shop_code && (
                       <span className="ac-shop-code" title="Shop code"
                         onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(b.shop_code!); }}>

@@ -13,6 +13,8 @@ import BrandProductsTab from './brand/BrandProductsTab';
 import BrandBillingTab from './brand/BrandBillingTab';
 import PaymentControlsTab from '../components/paidcollab/PaymentControlsTab';
 import Avatar from '../components/Avatar';
+import RegionChip from '../components/RegionChip';
+import { SCOPE_LABEL, SCOPE_ICON } from '../lib/brandScope';
 
 /** Minimal person shape for the brand's Team Lead / APC header chips. */
 interface OwnerLite { id: string; name: string; avatar: string | null; }
@@ -26,6 +28,7 @@ interface Brand {
   client_status: string | null;
   currency: string | null;
   region: string | null;
+  scope: string[] | null;
 }
 
 type TabKey = 'resources' | 'reporting' | 'approvals' | 'gmv-max' | 'samples' | 'paid-collab' | 'products' | 'billing' | 'payments';
@@ -105,7 +108,7 @@ export default function BrandDetail() {
         { data: wApprovals }, { data: mApprovals }, { data: decidedRows },
         { data: leadRows }, { data: apcRows },
       ] = await Promise.all([
-        supabase.from('brands').select('id,name,client,client_id,share_enabled,client_status,currency,region').eq('id', id).maybeSingle(),
+        supabase.from('brands').select('id,name,client,client_id,share_enabled,client_status,currency,region,scope').eq('id', id).maybeSingle(),
         isApc
           ? supabase.from('apc_brands').select('brand_id').eq('apc_id', profile?.id ?? '').eq('brand_id', id ?? '')
           : isTeamLead
@@ -295,42 +298,51 @@ export default function BrandDetail() {
   return (
     <div className="ac-themed">
       <div className="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
-        <div className="d-flex align-items-center gap-2">
-          <Button size="sm" variant="outline-secondary" onClick={() => nav('/brands')} title="Back to brands">
+        <div className="d-flex align-items-start gap-2 ac-bd-head-left">
+          <Button size="sm" variant="outline-secondary" className="ac-bd-back" onClick={() => nav('/brands')} title="Back to brands">
             <i className="bi bi-arrow-left" />
           </Button>
-          <div>
-            <h2 className="mb-0">{brand.name}</h2>
-            <div className="text-muted small">
-              {brand.client}
+          <div className="ac-bd-ident">
+            {/* Row 1: brand name + who runs it (Team Lead / APC) on the same line */}
+            <div className="d-flex align-items-center gap-2 flex-wrap">
+              <h2 className="mb-0">{brand.name}</h2>
+              {owners.lead && (
+                <span className="ac-owner-chip" title={`Team Lead: ${owners.lead.name}`}>
+                  <Avatar name={owners.lead.name} src={owners.lead.avatar} size="sm" variant="dark" />
+                  <span className="ac-owner-name">{owners.lead.name}</span>
+                  <span className="ac-owner-role">TL</span>
+                </span>
+              )}
+              {owners.apc && (
+                <span className="ac-owner-chip" title={`APC: ${owners.apc.name}`}>
+                  <Avatar name={owners.apc.name} src={owners.apc.avatar} size="sm" />
+                  <span className="ac-owner-name">{owners.apc.name}</span>
+                  <span className="ac-owner-role">APC</span>
+                </span>
+              )}
+            </div>
+            {/* Row 2: client + live status badges (small) */}
+            <div className="text-muted small mt-1 d-flex align-items-center gap-2 flex-wrap">
+              {brand.client && <span><i className="bi bi-building me-1" />{brand.client}</span>}
               {!brandActive && (
-                <Badge bg="dark" className="ms-2"><i className="bi bi-archive me-1" />Inactive</Badge>
+                <Badge bg="dark"><i className="bi bi-archive me-1" />Inactive</Badge>
               )}
               {brand.share_enabled
-                ? <Badge bg="success" className="ms-2"><i className="bi bi-globe me-1" />Sharing on</Badge>
-                : <Badge bg="secondary" className="ms-2"><i className="bi bi-lock me-1" />Sharing off</Badge>}
+                ? <Badge bg="success"><i className="bi bi-globe me-1" />Sharing on</Badge>
+                : <Badge bg="secondary"><i className="bi bi-lock me-1" />Sharing off</Badge>}
             </div>
-            {/* Who runs this brand: its Team Lead + APC. */}
-            {(owners.lead || owners.apc) && (
-              <div className="ac-brand-owners mt-2">
-                {owners.lead && (
-                  <span className="ac-owner-chip" title={`Team Lead: ${owners.lead.name}`}>
-                    <Avatar name={owners.lead.name} src={owners.lead.avatar} size="sm" variant="dark" />
-                    <span className="ac-owner-name">{owners.lead.name}</span>
-                    <span className="ac-owner-role">TL</span>
-                  </span>
-                )}
-                {owners.apc && (
-                  <span className="ac-owner-chip" title={`APC: ${owners.apc.name}`}>
-                    <Avatar name={owners.apc.name} src={owners.apc.avatar} size="sm" />
-                    <span className="ac-owner-name">{owners.apc.name}</span>
-                    <span className="ac-owner-role">APC</span>
-                  </span>
-                )}
-              </div>
-            )}
+            {/* Row 3: region ($/£/€) + compact scope tags */}
+            <div className="d-flex align-items-center gap-2 flex-wrap mt-2">
+              <RegionChip region={brand.region} size="sm" />
+              {(Array.isArray(brand.scope) ? brand.scope : []).map(k => (
+                <span key={k} className="ac-chip ac-chip-sm">
+                  <i className={`bi ${SCOPE_ICON[k] ?? 'bi-tag'}`} /> {SCOPE_LABEL[k] ?? k}
+                </span>
+              ))}
+            </div>
           </div>
         </div>
+        
 
         {/* Brand switcher + prev / next navigation — keeps the current tab so
             you can walk through brands without losing context. The funnel filters
