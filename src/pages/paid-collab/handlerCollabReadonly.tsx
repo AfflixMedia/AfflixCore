@@ -26,6 +26,9 @@ export const STATUS = {
   follow_up: { label: 'Follow-up Required', cls: 'followup' },
   pending: { label: 'Payment Pending', cls: 'pending' },
   paid: { label: 'Payment Sent', cls: 'sent' },
+  // Internal-only end-state — only ever rendered on staff surfaces (the Brand
+  // Detail view-mode tab); client/share surfaces strip terminated rows out.
+  terminated: { label: 'Terminated', cls: 'terminated' },
 } as Record<string, { label: string; cls: string }>;
 
 // Status as shown outside the handler workspace. All read views mask a
@@ -42,6 +45,16 @@ export const clientStatus = (c: HandlerCreator, staff = false) => {
 };
 // True when this creator's payment-pending status is visible to the client.
 export const isPendingVisible = (c: HandlerCreator) => clientStatus(c) === 'pending';
+
+// "Terminated" is an INTERNAL-ONLY end-state the handler sets on a cancelled
+// deal — it must never surface in a client-facing / read-only view (client
+// portal, Brand Detail view mode, or the public share link). Every read
+// surface strips these rows (from both the rendered list AND its aggregate
+// KPIs) before display; withoutTerminated is the shared filter, applied at
+// each data source and, as a safety net, inside the read-only components below.
+export const isTerminated = (c: { payment_status?: string | null }) => c?.payment_status === 'terminated';
+export const withoutTerminated = <T extends { payment_status?: string | null }>(list: T[]): T[] =>
+  (list || []).filter(c => c?.payment_status !== 'terminated');
 
 /* ── signed contract ──
    The creator signs through the handler's share link; every brand-access read
@@ -447,8 +460,11 @@ export function CreatorStatusGroupsRO({ creators, onToggleAuth, onConfirmPaid, s
   staffView?: boolean;
 }) {
   let n = 0;
+  // Safety net: terminated deals are internal-only and never render here (callers
+  // also strip them at the data source, so their KPIs match this list).
+  const shown = withoutTerminated(creators);
   const groups = STATUS_GROUP_ORDER
-    .map(val => ({ val, st: STATUS[val], items: creators.filter(c => statusGroupKey(c, staffView) === val) }))
+    .map(val => ({ val, st: STATUS[val], items: shown.filter(c => statusGroupKey(c, staffView) === val) }))
     .filter(g => g.items.length > 0);
   return (
     <>
@@ -486,7 +502,7 @@ export const prRangeShort = (s: string, e: string) => { const a = new Date(s + '
 const prRangeLong = (s: string, e: string) => { const f = (k: string) => new Date(k + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); return `${f(s)} – ${f(e)}`; };
 const prMonthShort = (k: string) => { const [y, m] = k.split('-'); return new Date(+y, +m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: '2-digit' }); };
 
-export function PerformanceReport({ brand, creators, onDiscuss }: {
+export function PerformanceReport({ brand, creators: allCreators, onDiscuss }: {
   brand: PerfBrand; creators: HandlerCreator[];
   onDiscuss?: (tt: string, tk: string) => void;
 }) {
@@ -495,6 +511,9 @@ export function PerformanceReport({ brand, creators, onDiscuss }: {
   const isWeekly = mode === 'weekly';
   // Money in this brand's currency ($/£/€). Set during render so fmt$ below uses it.
   setReportCurrency(brand.currency);
+  // Terminated deals are internal-only — excluded from this client-facing report
+  // (drives every KPI/trend/chart below, so counts stay consistent with the rows).
+  const creators = useMemo(() => withoutTerminated(allCreators), [allCreators]);
 
   const weekKeys = useMemo(() => {
     const s = new Set<string>();

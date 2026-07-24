@@ -298,6 +298,7 @@
 .pc-ct-group.progress .pc-ct-group-label{ color:var(--pc-info-fg); }
 .pc-ct-group.followup .pc-ct-group-label{ color:var(--pc-error-fg); }
 .pc-ct-group.sent .pc-ct-group-label{ color:var(--pc-success-fg); }
+.pc-ct-group.terminated .pc-ct-group-label{ color:#475569; }
 
 /* inline status dropdown (custom, portal menu) */
 .pc-badge-btn{ border:0; cursor:pointer; transition:filter .15s, transform .12s var(--pc-ease); }
@@ -313,6 +314,7 @@
 .pc-statusdot.pending{ background:var(--pc-warn-fg); }
 .pc-statusdot.progress{ background:var(--pc-info-fg); }
 .pc-statusdot.followup{ background:var(--pc-error-fg); }
+.pc-statusdot.terminated{ background:#64748B; }
 
 /* "Payment Pending" client-visibility toggle (handler workspace only) */
 .pc-visbtn{
@@ -842,6 +844,7 @@ a.pc-payoutline-val:hover{ text-decoration:underline; }
 .pc-badge.pending{ background:var(--pc-warn-bg); color:var(--pc-warn-fg); }
 .pc-badge.progress{ background:var(--pc-info-bg); color:var(--pc-info-fg); }
 .pc-badge.followup{ background:var(--pc-error-bg); color:var(--pc-error-fg); }
+.pc-badge.terminated{ background:#EEF1F4; color:#475569; }
 
 /* ── Creator expand / video editor ── */
 .pc-expand{ background:var(--pc-card-2); border-bottom:1px solid var(--pc-divider); padding:13px 16px 17px; animation:pc-slide .26s var(--pc-ease); }
@@ -1332,6 +1335,7 @@ a.pc-vx-prod:hover{ text-decoration:none; filter:brightness(.97); }
 .pc-log-st{ display:inline-flex; align-items:center; height:20px; padding:0 8px; border-radius:var(--pc-pill); font-size:11px; font-weight:700; white-space:nowrap; vertical-align:middle; background:var(--pc-card-2); color:var(--pc-text-2); }
 .pc-log-st.progress{ background:var(--pc-accent-light); color:var(--pc-accent); }
 .pc-log-st.followup{ background:var(--pc-error-bg); color:var(--pc-error-fg); }
+.pc-log-st.terminated{ background:#EEF1F4; color:#475569; }
 .pc-log-st.pending{ background:var(--pc-warn-bg); color:var(--pc-warn-fg); }
 .pc-log-st.sent{ background:var(--pc-success-bg); color:var(--pc-success-fg); }
 .pc-log-meta{ display:flex; align-items:center; gap:8px; margin-top:3px; font-size:11.5px; color:var(--pc-text-3); flex-wrap:wrap; }

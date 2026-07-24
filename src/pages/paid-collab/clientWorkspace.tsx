@@ -40,7 +40,8 @@ export function useClientWorkspaceData() {
         supabase.from('handler_collab_brand_months').select('*').in('brand_id', ids),
       ]);
       if (cErr || mErr) { setErr((cErr ?? mErr)!.message); setLoading(false); return; }
-      setCreators((cRows || []) as HandlerCreator[]);
+      // Terminated deals are internal-only — never shown to the client.
+      setCreators(((cRows || []) as HandlerCreator[]).filter(c => c.payment_status !== 'terminated'));
       setMonths((mRows || []) as HandlerBrandMonth[]);
       try { setComments(await store.loadComments(ids)); } catch { /* discussions optional */ }
       setLoading(false);

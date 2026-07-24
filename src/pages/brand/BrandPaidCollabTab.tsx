@@ -69,24 +69,31 @@ export default function BrandPaidCollabTab({ brandId, brandName, canEdit, curren
       if (mErr || cErr) { setErr((mErr ?? cErr)!.message); setLoading(false); return; }
       const sigByCreator = new Map((sigRows ?? []).map((s: any) => [s.creator_id, s]));
       setMonths((mRows ?? []) as HandlerBrandMonth[]);
+      // This tab is staff-only (Bob/APC/Team Lead/Ads Manager) — terminated deals
+      // stay visible here (the "Terminated" badge renders via the STATUS map). Only
+      // the client-facing surfaces (portal, share link, report §13) hide them.
       setCreators((cRows ?? []).map((c: any) => ({ ...c, signed_contract: sigByCreator.get(c.id) ?? null })) as HandlerCreator[]);
       setLoading(false);
     })();
     return () => { cancelled = true; };
   }, [brandId]);
 
+  // Terminated deals are cancelled — excluded from all budget/activity math
+  // (mirrors the handler workspace) while still shown in the list below.
+  const activeCreators = useMemo(() => creators.filter(c => c.payment_status !== 'terminated'), [creators]);
+
   const totals = useMemo(() => {
     let budget = 0;
     months.forEach(m => { budget += Number(m.budget) || 0; });
     let allocated = 0, paid = 0, videos = 0, delivered = 0;
-    creators.forEach(c => {
+    activeCreators.forEach(c => {
       allocated += Number(c.amount) || 0;
       if (c.payment_status === 'paid') paid += Number(c.amount) || 0;
       videos += Number(c.videos_count) || 0;
       delivered += deliveredCount(c);
     });
     return { budget, allocated, paid, videos, delivered };
-  }, [months, creators]);
+  }, [months, activeCreators]);
 
   // Patch one video's auth flag in local state (optimistic UI).
   const applyAuth = useCallback((creatorId: string, index: number, val: boolean) => {
@@ -179,7 +186,7 @@ export default function BrandPaidCollabTab({ brandId, brandName, canEdit, curren
   // Creators belong to the month they were onboarded in (same rule as the list below).
   const monthStats = useMemo(() => {
     const map: Record<string, { allocated: number; paid: number; creators: number }> = {};
-    creators.forEach(c => {
+    activeCreators.forEach(c => {
       const k = monthKey(c.onboarded_on);
       const s = map[k] || (map[k] = { allocated: 0, paid: 0, creators: 0 });
       const amt = Number(c.amount) || 0;
@@ -188,7 +195,7 @@ export default function BrandPaidCollabTab({ brandId, brandName, canEdit, curren
       s.creators += 1;
     });
     return map;
-  }, [creators]);
+  }, [activeCreators]);
 
   // Creators grouped by onboarded month (newest first), like the workspace.
   const groups = useMemo(() => {
@@ -215,7 +222,7 @@ export default function BrandPaidCollabTab({ brandId, brandName, canEdit, curren
     <>
       <div className="pc-kpis pc-kpis-5">
         <Kpi label="Budget" color="#1259C3" value={fmt$(totals.budget)} sub={`${months.length} month${months.length === 1 ? '' : 's'}`} />
-        <Kpi label="Allocated" color="#8B5CF6" value={fmt$(totals.allocated)} sub={`${creators.length} creator${creators.length === 1 ? '' : 's'}`} />
+        <Kpi label="Allocated" color="#8B5CF6" value={fmt$(totals.allocated)} sub={`${activeCreators.length} creator${activeCreators.length === 1 ? '' : 's'}`} />
         <Kpi label="Paid" color="#2E7D32" value={fmt$(totals.paid)} sub={`${totals.allocated > 0 ? Math.round((totals.paid / totals.allocated) * 100) : 0}% paid out`} />
         <Kpi label="Videos" color="#0EA5E9" value={`${totals.delivered}/${totals.videos}`} sub={`${totals.videos > 0 ? Math.round((totals.delivered / totals.videos) * 100) : 0}% completed`} />
         <Kpi label="Cost / Video" color="#E65100" value={costPerVideo ? fmt$(costPerVideo) : '—'} sub="per delivered video" />

@@ -218,9 +218,11 @@ serve(async (req) => {
       const { data: sigRows } = await admin.from('handler_contract_signatures')
         .select('creator_id, token, signed_at, signer_name').in('brand_id', allowedIds);
       const sigByCreator = new Map((sigRows ?? []).map((s: any) => [s.creator_id, s]));
-      handler_creators = (hcRows ?? []).map((c: any) => ({
-        ...c, signed_contract: sigByCreator.get(c.id) ?? null,
-      }));
+      // "Terminated" is an internal-only deal state — never expose it on a public
+      // share link (paid-collab tab or the v3 §13 roster).
+      handler_creators = (hcRows ?? [])
+        .filter((c: any) => c.payment_status !== 'terminated')
+        .map((c: any) => ({ ...c, signed_contract: sigByCreator.get(c.id) ?? null }));
       // Months + discussion threads are only for the full paid-collab tab.
       if (includePaidCollab) {
         const [{ data: hmRows }, { data: pccRows }] = await Promise.all([

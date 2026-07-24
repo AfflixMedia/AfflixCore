@@ -63,9 +63,11 @@ export function useClientPaidCollabData() {
       setPrograms(progs);
       if (progs.length === 0) { setCreators([]); setVideos([]); setLoading(false); return; }
 
-      const { data: cRows, error: cErr } = await supabase
+      const { data: cRowsRaw, error: cErr } = await supabase
         .from('handler_collab_creators').select('*').in('brand_id', bs.map(b => b.id));
       if (cErr) { setErr(cErr.message); setLoading(false); return; }
+      // Terminated deals are internal-only — never shown to the client.
+      const cRows = (cRowsRaw || []).filter(c => c.payment_status !== 'terminated');
 
       // Contract e-signatures — read views link to the signed copy at /sign/<token>.
       const { data: sigRows } = await supabase

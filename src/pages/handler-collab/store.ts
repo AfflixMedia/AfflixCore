@@ -12,7 +12,9 @@ import { supabase } from '../../lib/supabase';
 // start in progress with a fresh 7-day window, even at zero videos; auto-managed
 // by the handler_collab_creators_auto_status trigger + the
 // handler_collab_apply_follow_ups() sweep — migrations 20260806090000 + 20260820090000).
-export type PaymentStatus = 'videos_in_progress' | 'follow_up' | 'pending' | 'paid';
+// 'terminated' is a manual, internal-only end-state (cancelled deal): never
+// auto-managed, and stripped from every client-facing / read-only surface.
+export type PaymentStatus = 'videos_in_progress' | 'follow_up' | 'pending' | 'paid' | 'terminated';
 
 export interface VideoCode {
   video: string;

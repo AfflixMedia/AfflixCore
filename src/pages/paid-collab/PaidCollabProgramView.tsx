@@ -46,7 +46,9 @@ export default function PaidCollabProgramView() {
       if (bErr || cErr) { setErr((bErr ?? cErr)!.message); setLoading(false); return; }
       setBm(month);
       setBrand((b as Brand) ?? null);
-      setCreators(((cRows ?? []) as HandlerCreator[]).filter(c => monthKey(c.onboarded_on) === month.month));
+      // Terminated deals are internal-only — never shown to the client.
+      setCreators(((cRows ?? []) as HandlerCreator[])
+        .filter(c => c.payment_status !== 'terminated' && monthKey(c.onboarded_on) === month.month));
       setLoading(false);
     })();
     return () => { cancelled = true; };

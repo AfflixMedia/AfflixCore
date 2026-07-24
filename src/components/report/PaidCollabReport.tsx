@@ -2,7 +2,7 @@ import { Form } from 'react-bootstrap';
 import type { HandlerCreator } from '../../pages/handler-collab/store';
 import {
   CreatorListHeadRO, CreatorStatusGroupsRO, Kpi,
-  clientStatus, isPendingVisible, monthKey, monthLabel, fmt$, STATUS,
+  clientStatus, isPendingVisible, withoutTerminated, monthKey, monthLabel, fmt$, STATUS,
 } from '../../pages/paid-collab/handlerCollabReadonly';
 import type { PaidCollabData } from '../../lib/reportSchemaV3';
 import RichTextEditor from '../RichTextEditor';
@@ -21,7 +21,9 @@ function monthsOf(creators: HandlerCreator[]): string[] {
 // Apply the report's month + pending-only filters to the live roster.
 // (Brand scoping is the caller's job — pass an already brand-scoped roster.)
 export function filterCreators(creators: HandlerCreator[], data: PaidCollabData): HandlerCreator[] {
-  let out = data.month ? creators.filter(c => creatorMonth(c) === data.month) : creators;
+  // Terminated deals are internal-only — never part of a report's paid-collab
+  // section (staff view, share link, or the editor's "will appear" list).
+  let out = withoutTerminated(data.month ? creators.filter(c => creatorMonth(c) === data.month) : creators);
   if (data.pending_only) out = out.filter(isPendingVisible);
   return out;
 }

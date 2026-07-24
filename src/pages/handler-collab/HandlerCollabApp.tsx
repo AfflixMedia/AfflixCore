@@ -144,18 +144,22 @@ function fmtDate(dateStr) {
 // for 1 week (server sweep) → auto "Payment Pending" once all videos are added →
 // user marks "Paid" from the inline dropdown after sending payment. The zero-video /
 // first-video / stall rules live in the DB (trigger + handler_collab_apply_follow_ups).
+// "Terminated" is a manual, INTERNAL-ONLY end-state (cancelled deal): it is never
+// auto-touched, only the handler sets it here, and it is hidden from every
+// client-facing / read-only surface (client portal, Brand Detail view mode, share link).
 const STATUS_OPTIONS = [
   { value: 'videos_in_progress', label: 'Videos in Progress', cls: 'progress' },
   { value: 'follow_up', label: 'Follow-up Required', cls: 'followup' },
   { value: 'pending', label: 'Payment Pending', cls: 'pending' },
   { value: 'paid', label: 'Payment Sent', cls: 'sent' },
+  { value: 'terminated', label: 'Terminated', cls: 'terminated' },
 ];
 const DEFAULT_STATUS = 'videos_in_progress';
 function deriveStatus(c) {
   return STATUS_OPTIONS.find(s => s.value === c.payment_status) || STATUS_OPTIONS[0];
 }
 // Drilldown groups creators by payment status in this top→bottom order.
-const STATUS_GROUP_ORDER = ['pending', 'follow_up', 'videos_in_progress', 'paid'];
+const STATUS_GROUP_ORDER = ['pending', 'follow_up', 'videos_in_progress', 'paid', 'terminated'];
 function focusProductList(bm) {
   const raw = bm?.focus_product_url || '';
   if (!raw) return [];
@@ -435,8 +439,14 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
     const agg = {}; // brand_id -> metrics
     creators.forEach(c => {
       if (monthKey(c.onboarded_on) !== month) return;
-      if (!agg[c.brand_id]) agg[c.brand_id] = { creators: 0, allocated: 0, paid: 0, videos: 0, delivered: 0 };
+      if (!agg[c.brand_id]) agg[c.brand_id] = { creators: 0, allocated: 0, paid: 0, videos: 0, delivered: 0, present: 0 };
       const a = agg[c.brand_id];
+      // `present` counts every creator this month (incl. terminated) so a brand
+      // whose only activity was a cancelled deal still shows in past months.
+      a.present += 1;
+      // Terminated deals are cancelled — excluded from all budget/activity math
+      // (allocated, paid, videos, delivered, creator count) while still listed below.
+      if (c.payment_status === 'terminated') return;
       a.creators += 1;
       a.allocated += Number(c.amount) || 0;
       a.videos += parseInt(c.videos_count, 10) || 0;
@@ -445,7 +455,7 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
     });
 
     let rows = brands.map(b => {
-      const a = agg[b.id] || { creators: 0, allocated: 0, paid: 0, videos: 0, delivered: 0 };
+      const a = agg[b.id] || { creators: 0, allocated: 0, paid: 0, videos: 0, delivered: 0, present: 0 };
       const bmRow = bmByKey[`${b.id}|${month}`];
       const bm = bmRow || {};
       const budget = Number(bm.budget) || 0;
@@ -453,8 +463,8 @@ function Dashboard({ initialBrandId = null, initialMonth = null }) {
         id: b.id, brand: b.name, ...a, bm, budget,
         // Current & future months: every assigned brand auto-appears with zero stats
         // (no manual "add to month" needed). Past months: only brands that actually had
-        // data (creators or a saved budget) — keeps history clean.
-        show: month >= thisMonthKey() || a.creators > 0 || !!bmRow,
+        // data (any creator — incl. terminated — or a saved budget) — keeps history clean.
+        show: month >= thisMonthKey() || a.present > 0 || !!bmRow,
         remaining: budget - a.allocated,
         usage: budget > 0 ? (a.allocated / budget) * 100 : 0,
         costPerVideo: a.videos > 0 ? a.allocated / a.videos : 0,
@@ -2814,6 +2824,8 @@ export function BrandPerformancePane({ brandId, brandName, canEdit = false, curr
       const { data, error } = await supabase
         .from('handler_collab_creators').select('*').eq('brand_id', brandId);
       if (error) throw error;
+      // View-mode surface (Bob/APC/Team Lead/Ads Manager) — terminated deals stay
+      // visible here (only the client-facing surfaces hide them).
       setCreators(data || []);
       const rw = await store.loadBrandReportWeeks([brandId]).catch(() => ({}));
       setReportWeeks(rw[brandId] || []);
