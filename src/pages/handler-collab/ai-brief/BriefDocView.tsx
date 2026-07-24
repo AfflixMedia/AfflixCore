@@ -207,6 +207,11 @@ export default function BriefDocView({
                   ))}
                 </div>
               )}
+              {/* Content that shared the section but isn't part of the video
+                  run (angles, ideas…) renders after the cards, never in them. */}
+              {!!s.tail.trim() && (
+                <div className="bd-md" dangerouslySetInnerHTML={{ __html: md(s.tail) }} />
+              )}
             </>
           );
         }

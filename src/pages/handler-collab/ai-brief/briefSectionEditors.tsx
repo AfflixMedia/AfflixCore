@@ -44,7 +44,7 @@ export function structuredKind(heading: string, md: string): 'videos' | 'angles'
   const h = heading.toLowerCase();
   // Rules first: a Do/Don't section also has 2+ "###" subheads, which would
   // otherwise look like angles.
-  if (/do.?s?\s*(&|and|\/)\s*don|^do\b|^don'?t\b/.test(h) || parseRules(md)) {
+  if (/do.?s?\s*(&|and|\/)\s*don|^do\b|^don['\u2019]?t\b/.test(h) || parseRules(md)) {
     return parseRules(md) ? 'rules' : null;
   }
   if (/\breference|\bvideo/.test(h) || bodyHasVideoMarkers(md)) {
@@ -101,23 +101,37 @@ function ImageField({ imgRef, onChange, resolveImg, refFor, uploadImage }:
 /* ── reference videos ────────────────────────────────────────── */
 
 interface VideoItem { imgRef: string; desc: string; link: string }
-interface VideosData { intro: string; videos: VideoItem[]; also: { label: string; url: string }[] }
+interface VideosData { intro: string; videos: VideoItem[]; also: { label: string; url: string }[]; tail: string }
+
+/** A heading or bold-only label line — different content sharing the section. */
+const isLabelLine = (line: string) =>
+  /^#{1,6}\s+/.test(line) || (/^\*\*[^*]+\*\*:?$/.test(line) && !/^\*\*\s*video\b/i.test(line));
+
+/** A bullet that only carries the reference link ("Format Example: <url>"). */
+const linkBullet = (text: string) =>
+  /\b(format|example|watch|full video|reference|link)\b/i.test(text) ? urlIn(text) : '';
 
 export function parseVideos(md: string): VideosData {
   const lines = md.replace(/\r\n/g, '\n').split('\n');
   const videos: VideoItem[] = [];
   const also: { label: string; url: string }[] = [];
   const introLines: string[] = [];
+  const tailLines: string[] = [];
   let cur: VideoItem | null = null;
   let pendingImg = '';
   let inAlso = false;
+  let inTail = false;
 
   for (const raw of lines) {
     const line = raw.trim();
+    if (inTail) { tailLines.push(raw); continue; }
     if (!line) continue;
     const img = line.match(IMG_LINE);
     if (img) { if (cur && !cur.imgRef && !inAlso) cur.imgRef = img[1]; else pendingImg = img[1]; continue; }
     if (/^\*\*\s*video\b[^*]*\*\*:?$/i.test(line)) { cur = { imgRef: pendingImg, desc: '', link: '' }; videos.push(cur); pendingImg = ''; continue; }
+    // A heading / bold label after the video run starts OTHER content that
+    // shares the section — kept apart so it never bloats a video description.
+    if (videos.length && isLabelLine(line) && !/^\*\*format example/i.test(line)) { inTail = true; tailLines.push(raw); continue; }
     if (videos.length && /^[*_][^*_].*[*_]:?$/.test(line)) { inAlso = true; continue; }
 
     const bullet = line.match(/^[-*+]\s+(.*)$/);
@@ -127,13 +141,19 @@ export function parseVideos(md: string): VideosData {
       if (u) { const label = (bullet ? bullet[1] : line).split(/\[|\(?https?:/)[0].replace(/\*\*/g, '').replace(/[:*]\s*$/, '').trim(); also.push({ label, url: u }); }
       continue;
     }
-    if (bullet) { if (cur) cur.desc += (cur.desc ? '\n' : '') + bullet[1].trim(); else introLines.push(line); continue; }
+    if (bullet) {
+      if (!cur) { introLines.push(line); continue; }
+      const lb = linkBullet(bullet[1]);
+      if (lb && !cur.link) { cur.link = lb; continue; }
+      cur.desc += (cur.desc ? '\n' : '') + bullet[1].trim();
+      continue;
+    }
     if (cur && url && !cur.link) { cur.link = url; continue; }
     if (!cur) introLines.push(line);
     else cur.desc += (cur.desc ? '\n' : '') + line.replace(/^\*\*|\*\*$/g, '').trim();
   }
   if (pendingImg) { const bare = videos.find(v => !v.imgRef); if (bare) bare.imgRef = pendingImg; }
-  return { intro: introLines.join('\n'), videos, also };
+  return { intro: introLines.join('\n'), videos, also, tail: tailLines.join('\n').trim() };
 }
 
 export function serializeVideos(d: VideosData): string {
@@ -150,6 +170,8 @@ export function serializeVideos(d: VideosData): string {
     out.push('*Also study:*');
     out.push(d.also.filter(a => a.url.trim()).map(a => a.label.trim() ? `- **${a.label.trim()}:** ${a.url.trim()}` : `- ${a.url.trim()}`).join('\n'));
   }
+  // Non-video content that shares the section survives the form round-trip.
+  if (d.tail.trim()) out.push(d.tail.trim());
   return out.join('\n\n');
 }
 
@@ -209,6 +231,13 @@ export function VideosSectionEditor({ md, onChange, ...shared }:
       )}
 
       <AlsoEditor also={data.also} onChange={also => push({ ...data, also })} />
+
+      {!!data.tail.trim() && (
+        <label className="pc-aib-sfield">
+          <span>Other content in this section <em>(shown after the video cards — cut &amp; paste it into its own section if it belongs elsewhere)</em></span>
+          <textarea rows={6} value={data.tail} onChange={e => push({ ...data, tail: e.target.value })} />
+        </label>
+      )}
     </div>
   );
 }
@@ -345,7 +374,7 @@ export function parseRules(md: string): RulesData | null {
     const label = (nl === -1 ? p : p.slice(0, nl)).replace(/\*\*/g, '').trim();
     const items = (nl === -1 ? '' : p.slice(nl + 1)).split('\n')
       .map(l => l.match(/^[-*+]\s+(.*)$/)?.[1]?.trim()).filter((x): x is string => !!x);
-    if (/^don'?t/i.test(label)) dontItems = items;
+    if (/^don['\u2019]?t/i.test(label)) dontItems = items;
     else if (/^do/i.test(label)) doItems = items;
   }
   if (doItems === null && dontItems === null) return null;

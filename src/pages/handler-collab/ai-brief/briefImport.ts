@@ -158,13 +158,22 @@ function extractTitle(root: HTMLElement): string {
     styled.remove();
     return t;
   }
-  // No Title style: a lone heading before any other text is still the title.
-  const first = Array.from(root.children).find(el => (el.textContent || '').trim() || el.querySelector('img'));
-  if (first && /^H[12]$/.test(first.tagName) && root.querySelectorAll('h1,h2,h3').length > 1) {
-    const t = (first.textContent || '').replace(/\s+/g, ' ').trim();
-    keepImages(first);
-    first.remove();
-    return t;
+  // No Title style: a lone heading before any other TEXT is still the title.
+  // A cover image often sits above it (its own paragraph), so image-only
+  // elements are skipped when looking — they stay in the body.
+  const first = Array.from(root.children).find(el => (el.textContent || '').trim());
+  if (first && /^H[1-3]$/.test(first.tagName)) {
+    // Only the document's TITLE sits strictly above every other heading level;
+    // a doc that opens straight with a same-level section keeps it as content.
+    const lvl = Number(first.tagName[1]);
+    const rest = Array.from(root.querySelectorAll('h1,h2,h3,h4,h5,h6'))
+      .filter(h => h !== first).map(h => Number(h.tagName[1]));
+    if (rest.length && Math.min(...rest) > lvl) {
+      const t = (first.textContent || '').replace(/\s+/g, ' ').trim();
+      keepImages(first);
+      first.remove();
+      return t;
+    }
   }
   return '';
 }

@@ -21,8 +21,8 @@ const COPYABLE = /\b(hook|overlay|caption|script line|one-liner|cta|call to acti
 const OVERLAY = /\b(overlay|caption)/i;
 const VIDEO = /\breference|\bvideo/i;
 const ANGLE = /\bangle/i;
-const DO = /^do(?:'?s)?\b/i;
-const DONT = /^(don'?ts?|dont)\b/i;
+const DO = /^do(?:['\u2019]?s)?\b/i;
+const DONT = /^(don['\u2019]?ts?|dont)\b/i;
 
 export const stripNumber = (s: string) => s.replace(/^\s*\d+[.)]\s*/, '').trim();
 
@@ -51,7 +51,7 @@ export interface AlsoLink { label: string; url: string }
 
 export type SectionView =
   | { id: string; num: number; heading: string; kind: 'prose'; md: string }
-  | { id: string; num: number; heading: string; kind: 'videos'; intro: string; cards: RefCard[]; also: AlsoLink[] }
+  | { id: string; num: number; heading: string; kind: 'videos'; intro: string; cards: RefCard[]; also: AlsoLink[]; tail: string }
   | { id: string; num: number; heading: string; kind: 'lines'; intro: string; items: string[]; compact: boolean }
   | { id: string; num: number; heading: string; kind: 'angles'; intro: string; angles: AngleCard[] }
   | { id: string; num: number; heading: string; kind: 'rules'; columns: RuleColumn[] };
@@ -87,17 +87,29 @@ function cardTitle(bullets: string[], n: number): { title: string; bullets: stri
  * shape and lifts it into cards. The screenshot may sit above the marker (the
  * .docx shape) or after it. Returns null on < 2 cards → caller renders prose.
  */
-function videoLayout(section: BriefSection): { intro: string; cards: RefCard[]; also: AlsoLink[] } | null {
+/** A line that clearly STARTS DIFFERENT CONTENT after the video run: a heading
+    of any depth, or a bold-only label line ("**Content Angles & Hooks:**"). */
+const isSectionLabelLine = (line: string) =>
+  /^#{1,6}\s+/.test(line) || (/^\*\*[^*]+\*\*:?$/.test(line) && !/^\*\*\s*video\b/i.test(line));
+
+/** A bullet that only carries the reference link ("Format Example: <url>"). */
+const linkBullet = (text: string) =>
+  /\b(format|example|watch|full video|reference|link)\b/i.test(text) ? urlIn(text) : '';
+
+function videoLayout(section: BriefSection): { intro: string; cards: RefCard[]; also: AlsoLink[]; tail: string } | null {
   const lines = section.blocks.map(b => b.md).join('\n\n').split('\n');
   const cards: { imgRef: string; bullets: string[]; link: string }[] = [];
   const also: AlsoLink[] = [];
   const introLines: string[] = [];
+  const tailLines: string[] = [];
   let cur: { imgRef: string; bullets: string[]; link: string } | null = null;
   let pendingImg = '';
   let inAlso = false;
+  let inTail = false;
 
   for (const raw of lines) {
     const line = raw.trim();
+    if (inTail) { tailLines.push(raw); continue; }
     if (!line) continue;
 
     const img = line.match(IMG_LINE);
@@ -110,6 +122,10 @@ function videoLayout(section: BriefSection): { intro: string; cards: RefCard[]; 
       cards.push(cur); pendingImg = '';
       continue;
     }
+    // Once the video run ends, anything introduced by a heading / bold label
+    // (angles, ideas, do-don'ts sharing the section) is NOT card content — it
+    // renders after the cards instead of bloating the last video's bullets.
+    if (cards.length && isSectionLabelLine(line)) { inTail = true; tailLines.push(raw); continue; }
     if (cards.length && /^[*_][^*_].*[*_]:?$/.test(line)) { inAlso = true; continue; }
 
     const bullet = line.match(/^[-*+]\s+(.*)$/);
@@ -122,7 +138,14 @@ function videoLayout(section: BriefSection): { intro: string; cards: RefCard[]; 
       }
       continue;
     }
-    if (bullet) { if (cur) cur.bullets.push(bullet[1].trim()); else introLines.push(line); continue; }
+    if (bullet) {
+      if (!cur) { introLines.push(line); continue; }
+      // "- Format Example: <url>" inside the list IS the card link.
+      const lb = linkBullet(bullet[1]);
+      if (lb && !cur.link) { cur.link = lb; continue; }
+      cur.bullets.push(bullet[1].trim());
+      continue;
+    }
     if (cur && url) { if (!cur.link) cur.link = url; continue; }
     if (!cur) introLines.push(line); else cur.bullets.push(line.replace(/^\*\*|\*\*$/g, '').trim());
   }
@@ -134,6 +157,7 @@ function videoLayout(section: BriefSection): { intro: string; cards: RefCard[]; 
   return {
     intro: introLines.join('\n'),
     also,
+    tail: tailLines.join('\n').trim(),
     cards: usable.map((c, i) => {
       const { title, bullets } = cardTitle(c.bullets, i + 1);
       const handle = tiktokHandle(c.link);
@@ -245,11 +269,106 @@ export function structuredSectionCount(markdown: string): number {
 export function isEmptySection(s: SectionView): boolean {
   switch (s.kind) {
     case 'prose': return !s.md.trim();
-    case 'videos': return !s.cards.length && !s.intro.trim() && !s.also.length;
+    case 'videos': return !s.cards.length && !s.intro.trim() && !s.also.length && !s.tail.trim();
     case 'lines': return !s.items.length && !s.intro.trim();
     case 'angles': return !s.angles.length && !s.intro.trim();
     case 'rules': return s.columns.every(c => !c.items.length);
   }
+}
+
+/**
+ * Promotes the tail of a video section into its own "##" section when it
+ * starts with a label ("**Content Angles & Hooks:**" or a deeper heading) —
+ * Word docs often run the next topic straight on after the video table.
+ * One promotion per video section; the label becomes the heading, everything
+ * after it becomes the new section's body, verbatim.
+ */
+export function promoteVideoTailSections(markdown: string): string {
+  const lines = markdown.replace(/\r\n/g, '\n').split('\n');
+  const out: string[] = [];
+  let inVideoSection = false;
+  let sawMarker = false;
+  let sawCardContent = false;
+  let promoted = false;
+
+  const isVideoMarkerLine = (l: string) => /^\*\*\s*video\b[^*]*\*\*:?\s*$/i.test(l.trim());
+  const labelOf = (l: string): string | null => {
+    const t = l.trim();
+    const deep = t.match(/^#{3,6}\s+(.*)$/);
+    if (deep) return plainText(deep[1]);
+    const bold = t.match(/^\*\*([^*]+)\*\*:?$/);
+    if (bold && !/^\s*(video\b|format\b)/i.test(bold[1])) return plainText(bold[1]).replace(/:$/, '');
+    return null;
+  };
+
+  for (const raw of lines) {
+    if (/^##\s+/.test(raw)) {
+      inVideoSection = false; sawMarker = false; sawCardContent = false; promoted = false;
+      out.push(raw);
+      continue;
+    }
+    if (isVideoMarkerLine(raw)) { inVideoSection = true; sawMarker = true; sawCardContent = false; out.push(raw); continue; }
+    if (inVideoSection && sawMarker && raw.trim()) sawCardContent = true;
+
+    if (inVideoSection && sawMarker && sawCardContent && !promoted) {
+      const label = labelOf(raw);
+      if (label) {
+        out.push(`## ${label}`);
+        promoted = true;
+        inVideoSection = false;
+        continue;
+      }
+    }
+    out.push(raw);
+  }
+  return out.join('\n');
+}
+
+/**
+ * Merges sibling "## DOs" + "## DON'Ts" SECTIONS into the one canonical
+ * "## Do's and Don'ts" section with `### Do` / `### Don't` subheads — the shape
+ * the two-column rules block and the two-panel editor read. Word docs often
+ * write them as separate same-level headings (optionally under an empty
+ * "Dos and Don'ts" umbrella heading, whose name is kept). Pure re-tagging of
+ * the stored Markdown: every item survives verbatim.
+ */
+export function mergeDoDontSections(markdown: string): string {
+  const lines = markdown.replace(/\r\n/g, '\n').split('\n');
+  type Sec = { heading: string; body: string[] };
+  const pre: string[] = [];
+  const secs: Sec[] = [];
+  let cur: Sec | null = null;
+  for (const line of lines) {
+    const h = line.match(/^##\s+(.*)$/);
+    if (h) { cur = { heading: h[1].trim(), body: [] }; secs.push(cur); continue; }
+    if (cur) cur.body.push(line); else pre.push(line);
+  }
+
+  const clean = (h: string) => stripNumber(h).replace(/\*\*/g, '').trim();
+  const isUmbrella = (s: Sec) =>
+    /do.?s?\s*(&|and|\/)\s*don/i.test(clean(s.heading)) && !s.body.join('\n').trim();
+
+  const merged: Sec[] = [];
+  for (let i = 0; i < secs.length; i++) {
+    const s = secs[i];
+    const next = secs[i + 1];
+    if (next && DO.test(clean(s.heading)) && !DONT.test(clean(s.heading)) && DONT.test(clean(next.heading))) {
+      // An empty "Dos and Don'ts" umbrella emitted just before lends its name.
+      let heading = "Do's and Don'ts";
+      if (merged.length && isUmbrella(merged[merged.length - 1])) heading = merged.pop()!.heading;
+      merged.push({
+        heading,
+        body: ['', '### Do', '', s.body.join('\n').trim(), '', "### Don't", '', next.body.join('\n').trim()],
+      });
+      i++;
+      continue;
+    }
+    merged.push(s);
+  }
+  if (merged.length === secs.length) return markdown;   // nothing to merge
+
+  const out = [...pre, ...merged.flatMap(s => [`## ${s.heading}`, ...s.body])];
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
 }
 
 /**

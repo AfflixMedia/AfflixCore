@@ -7,7 +7,9 @@ import { renderBriefMarkdown, extractDriveIds } from './markdown';
 import BriefEditor from './BriefEditor';
 import BriefDocView from './BriefDocView';
 import { importDocument, pastedToMarkdown, blankBriefMarkdown, IMPORT_ACCEPT } from './briefImport';
-import { structuredSectionCount, ensureCanonicalSections } from './briefLayout';
+import {
+  structuredSectionCount, ensureCanonicalSections, mergeDoDontSections, promoteVideoTailSections,
+} from './briefLayout';
 import './aiBrief.css';
 
 /* ════════════════════════════════════════════════════════════
@@ -356,7 +358,12 @@ export default function ContentBriefView({ brands, month }: Props) {
   const structureImport = async (raw: string): Promise<{ markdown: string; ai: boolean }> => {
     const { markdown: normalized, ai } = await normalizeBriefStructure(raw);
     const useAi = ai && structuredSectionCount(normalized) >= structuredSectionCount(raw);
-    return { markdown: ensureCanonicalSections(useAi ? normalized : raw), ai: useAi };
+    // Deterministic re-tagging on whatever won (all content-preserving):
+    // split the topic that runs on after a video table into its own section,
+    // merge sibling "## DOs"/"## DON'Ts" into the canonical rules section,
+    // then scaffold any canonical section still missing.
+    const tagged = mergeDoDontSections(promoteVideoTailSections(useAi ? normalized : raw));
+    return { markdown: ensureCanonicalSections(tagged), ai: useAi };
   };
 
   const usePastedText = async () => {

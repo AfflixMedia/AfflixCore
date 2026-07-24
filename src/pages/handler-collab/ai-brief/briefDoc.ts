@@ -84,7 +84,7 @@ export const isAngleMarker = (line: string) => /^###\s+/.test(line.trim());
    (briefLayout) and the editor (briefSectionEditors / this file's splitter). */
 export const bodyHasVideoMarkers = (md: string) => /^\s*\*\*\s*video\b[^*\n]*\*\*/im.test(md);
 export const bodyHasDoDont = (md: string) =>
-  /^###\s+do(?:'?s|s|es)?\b/im.test(md) && /^###\s+don'?ts?\b/im.test(md);
+  /^###\s+do(?:['\u2019]?s|s|es)?\b/im.test(md) && /^###\s+don['\u2019]?ts?\b/im.test(md);
 export const bodyHasAngles = (md: string) =>
   (md.match(/^###\s+/gm)?.length ?? 0) >= 2 && !bodyHasDoDont(md);
 
