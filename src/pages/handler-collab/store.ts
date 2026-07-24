@@ -550,13 +550,32 @@ export interface HandlerNote {
   reminder_at: string | null;
   reminder_done: boolean;
   reminder_sent_at: string | null;
-  // Super Boss only: Ads Managers can read (not edit) this note.
+  // Super Boss only: Ads Managers can read (not edit) this note (legacy — superseded
+  // by handler_note_shares; the column is kept for back-compat).
   shared_with_ads: boolean;
   created_at: string;
   updated_at: string;
+  // Populated ONLY by list_visible_notes() (the board/fab read path) — the owner's
+  // role/name drive role-based colouring + the "shared by" chip; is_owner gates edits.
+  owner_role?: string;
+  owner_is_superbob?: boolean;
+  owner_name?: string;
+  is_owner?: boolean;
 }
 
 export type NotePatch = Partial<Omit<HandlerNote, 'id' | 'owner_id' | 'created_at' | 'updated_at'>>;
+
+/* ── Note sharing (cross-role) ──
+   A note owned by internal staff can be shared with ROLE groups; Super Boss can
+   also share with EVERYONE or a specific TEAM (a Team Lead + the APCs under them).
+   Recipients get read-only access (resolved by note_shared_with_caller in RLS). */
+export type NoteShareRole = 'super_boss' | 'bob' | 'team_lead' | 'apc' | 'ads_manager';
+export type NoteShareTarget =
+  | { kind: 'all' }
+  | { kind: 'role'; role: NoteShareRole }
+  | { kind: 'team'; team: string };
+
+export interface NoteLabel { id: string; name: string; color: string | null; owner_id: string; }
 
 /* A note's creator_id points at ONE handler_collab_creators row (a deal), but
    the UI groups creator notes by "the same creator" across months WITHIN a
@@ -617,4 +636,81 @@ export async function fireDueNoteReminders(): Promise<number> {
   const { data, error } = await supabase.rpc('fire_due_note_reminders');
   if (error) throw error;
   return (data as number) || 0;
+}
+
+/* Board/fab read path: every note the caller OWNS or is SHARED, with owner
+   metadata (role/name/is_owner) folded in for colouring + the shared-by chip.
+   Replaces loadNotes() for the boards — also scopes Bob to own+shared (his
+   read-all RLS would otherwise flood the board). */
+export async function loadVisibleNotes(): Promise<HandlerNote[]> {
+  const { data, error } = await supabase.rpc('list_visible_notes');
+  if (error) throw error;
+  return ((data as any[]) || []) as HandlerNote[];
+}
+
+// Current share targets on a note (owner-only via RLS). Maps DB rows → tokens.
+export async function loadNoteShares(noteId: string): Promise<NoteShareTarget[]> {
+  const { data, error } = await supabase
+    .from('handler_note_shares')
+    .select('target_kind, target_role, target_team')
+    .eq('note_id', noteId);
+  if (error) throw error;
+  return ((data as any[]) || []).map(r => {
+    if (r.target_kind === 'all') return { kind: 'all' } as NoteShareTarget;
+    if (r.target_kind === 'team') return { kind: 'team', team: r.target_team } as NoteShareTarget;
+    return { kind: 'role', role: r.target_role } as NoteShareTarget;
+  });
+}
+
+const shareKey = (t: NoteShareTarget) =>
+  t.kind === 'all' ? 'all' : t.kind === 'team' ? `team:${t.team}` : `role:${t.role}`;
+
+// Diff-replace a note's shares: delete rows no longer wanted, insert the new ones.
+// RLS enforces owner + the Super-Boss-only gate on 'all'/'team'.
+export async function setNoteShares(noteId: string, targets: NoteShareTarget[]): Promise<void> {
+  const current = await loadNoteShares(noteId);
+  const want = new Set(targets.map(shareKey));
+  const have = new Set(current.map(shareKey));
+
+  const toAdd = targets.filter(t => !have.has(shareKey(t)));
+  const toRemove = current.filter(t => !want.has(shareKey(t)));
+
+  for (const t of toRemove) {
+    let q = supabase.from('handler_note_shares').delete()
+      .eq('note_id', noteId).eq('target_kind', t.kind);
+    if (t.kind === 'role') q = q.eq('target_role', t.role);
+    if (t.kind === 'team') q = q.eq('target_team', t.team);
+    const { error } = await q;
+    if (error) throw error;
+  }
+  if (toAdd.length) {
+    const rows = toAdd.map(t => ({
+      note_id: noteId,
+      target_kind: t.kind,
+      target_role: t.kind === 'role' ? t.role : null,
+      target_team: t.kind === 'team' ? t.team : null,
+    }));
+    // Plain insert (the unique index is on coalesce() expressions, so PostgREST
+    // upsert can't target it); a concurrent duplicate (23505) is harmless.
+    const { error } = await supabase.from('handler_note_shares').insert(rows);
+    if (error && error.code !== '23505') throw error;
+  }
+}
+
+// Saved label catalogue (reusable). Scope to one owner for the reuse picker.
+export async function loadNoteLabels(ownerId?: string): Promise<NoteLabel[]> {
+  let q = supabase.from('note_labels').select('id, name, color, owner_id').order('name');
+  if (ownerId) q = q.eq('owner_id', ownerId);
+  const { data, error } = await q;
+  if (error) throw error;
+  return ((data as any[]) || []) as NoteLabel[];
+}
+
+// Save a label to the caller's catalogue. Plain insert (unique index is on
+// lower(name)); a duplicate (23505) just means the label already exists.
+export async function upsertNoteLabel(name: string, color?: string | null): Promise<void> {
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  const { error } = await supabase.from('note_labels').insert({ name: trimmed, color: color ?? null });
+  if (error && error.code !== '23505') throw error;
 }

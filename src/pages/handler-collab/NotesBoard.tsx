@@ -26,20 +26,46 @@ function thisMonthKey() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-// Keep-style soft palette. `bg` is the card fill; the chip on the editor uses the same.
-const NOTE_COLORS = [
-  { key: 'default', bg: '#FFFFFF', label: 'Default' },
-  { key: 'red',     bg: '#FCE8E6', label: 'Coral' },
-  { key: 'orange',  bg: '#FEEFC3', label: 'Sand' },
-  { key: 'yellow',  bg: '#FFF8C4', label: 'Sun' },
-  { key: 'green',   bg: '#E6F4EA', label: 'Sage' },
-  { key: 'teal',    bg: '#E0F2F1', label: 'Mint' },
-  { key: 'blue',    bg: '#E8F0FE', label: 'Sky' },
-  { key: 'purple',  bg: '#F3E8FD', label: 'Lilac' },
-  { key: 'pink',    bg: '#FCE4EC', label: 'Blossom' },
-  { key: 'gray',    bg: '#F1F3F4', label: 'Storm' },
+// Role-based card colours (the manual colour picker is gone). A note you OWN is
+// white; a note shared WITH you is tinted by the role of whoever shared it
+// (owner_role / owner_is_superbob come from list_visible_notes). The legacy
+// per-note `color` column is ignored.
+const ROLE_COLORS = {
+  super_boss:  '#FEEFC3', // sand / gold
+  bob:         '#E8F0FE', // sky
+  team_lead:   '#E6F4EA', // sage
+  apc:         '#F3E8FD', // lilac
+  ads_manager: '#E0F2F1', // mint
+};
+const ROLE_LABEL = {
+  super_boss: 'Super Boss', bob: 'Boss', team_lead: 'Team Lead',
+  apc: 'APC', ads_manager: 'Ads Manager',
+};
+const OWN_BG = '#FFFFFF';
+const FALLBACK_BG = '#F1F3F4';
+// Which role bucket owns this note (super_boss wins over a plain bob owner).
+function ownerRoleKey(n) {
+  if (n?.owner_is_superbob) return 'super_boss';
+  return n?.owner_role || null;
+}
+function isOwnNote(n, viewerId) {
+  return n?.is_owner ?? (!n?.owner_id || (viewerId && n?.owner_id === viewerId));
+}
+function noteColorBg(n, viewerId) {
+  if (isOwnNote(n, viewerId)) return OWN_BG;
+  return ROLE_COLORS[ownerRoleKey(n)] || FALLBACK_BG;
+}
+// The role groups a note can be shared with (also used for the legend).
+const ROLE_TARGETS = [
+  { role: 'super_boss', label: 'Super Boss' },
+  { role: 'bob',        label: 'Boss' },
+  { role: 'team_lead',  label: 'Team Leads' },
+  { role: 'apc',        label: 'APCs' },
+  { role: 'ads_manager', label: 'Ads Managers' },
 ];
-const colorBg = (key) => (NOTE_COLORS.find(c => c.key === key) || NOTE_COLORS[0]).bg;
+const INTERNAL_ROLES = ['bob', 'team_lead', 'apc', 'ads_manager'];
+const shareTokenKey = (t) =>
+  t.kind === 'all' ? 'all' : t.kind === 'team' ? `team:${t.team}` : `role:${t.role}`;
 
 const AVATAR_GRADIENTS = [
   'linear-gradient(135deg,#6366F1,#8B5CF6)', 'linear-gradient(135deg,#EC4899,#F43F5E)',
@@ -75,28 +101,50 @@ function reminderLabel(iso) {
   return d.toLocaleString(undefined, opts);
 }
 
-// ownerOnly: load ONLY the signed-in user's notes (Bob's read-all RLS would
-// otherwise mix everyone's notes into his personal board).
+// The board loads via list_visible_notes() — the signed-in user's OWN notes +
+// notes shared WITH them (own + shared, with owner role/name for colouring), so
+// Bob's read-all RLS no longer floods it.
 // creators: raw handler_collab_creators rows (all months) — enables the
 // "creator-wise" note link (select in the editor, chips, sidebar group).
-export default function NotesBoard({ brands = [], brandById = {}, creators = [], month, ownerOnly = false }) {
-  const { user } = useAuth();
-  // Foreign notes (e.g. a Super Boss note shared with Ads Managers) are
-  // readable via RLS but not writable — render them read-only.
+export default function NotesBoard({ brands = [], brandById = {}, creators = [], month }) {
+  const { user, profile } = useAuth();
+  const viewerId = user?.id;
+  const viewerRole = profile?.role;
+  const viewerIsSuperbob = !!profile?.is_superbob;
+  // A note is editable only by its owner. is_owner comes from list_visible_notes;
+  // fall back to the owner_id comparison for rows loaded another way.
   const canEditNote = useCallback(
-    (n) => !n?.owner_id || !user || n.owner_id === user.id, [user]);
+    (n) => isOwnNote(n, viewerId), [viewerId]);
   const [notes, setNotes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
   const [filter, setFilter] = useState({ kind: 'all' }); // {kind, value?}
   const [search, setSearch] = useState('');
   const [editor, setEditor] = useState(null); // null | { mode, note }
+  const [labelCatalog, setLabelCatalog] = useState([]); // reusable saved labels (mine)
+  const [teamLeads, setTeamLeads] = useState([]);        // for the Super Boss "specific team" share
   const busyRef = useRef(false);
 
   const reload = useCallback(async () => {
-    try { setNotes(await store.loadNotes(ownerOnly ? user?.id : undefined)); setErr(''); }
+    // own + shared-to-me, with owner role/name for colouring + the shared-by chip.
+    try { setNotes(await store.loadVisibleNotes()); setErr(''); }
     catch (e) { setErr(e.message || 'Failed to load notes'); }
-  }, [ownerOnly, user?.id]);
+  }, []);
+
+  // Reusable label catalogue (mine) + Team Leads (Super Boss share picker).
+  const reloadLabels = useCallback(async () => {
+    if (!viewerId) return;
+    try { setLabelCatalog(await store.loadNoteLabels(viewerId)); } catch { /* ignore */ }
+  }, [viewerId]);
+  useEffect(() => { reloadLabels(); }, [reloadLabels]);
+  useEffect(() => {
+    if (!viewerIsSuperbob) return;
+    supabase.from('profiles').select('id, full_name, email').eq('role', 'team_lead').order('full_name')
+      .then(({ data }) => setTeamLeads((data || []).map(p => ({ id: p.id, name: p.full_name || p.email || 'Team Lead' }))));
+  }, [viewerIsSuperbob]);
+  const onCreateLabel = useCallback(async (name) => {
+    try { await store.upsertNoteLabel(name); reloadLabels(); } catch { /* ignore */ }
+  }, [reloadLabels]);
 
   useEffect(() => { (async () => { setLoading(true); await reload(); setLoading(false); })(); }, [reload]);
   useEffect(() => { busyRef.current = !!editor; }, [editor]);
@@ -203,6 +251,7 @@ export default function NotesBoard({ brands = [], brandById = {}, creators = [],
       case 'archive': list = list.filter(n => n.archived); break;
       case 'reminders': list = list.filter(n => !n.archived && n.reminder_at && !n.reminder_done); break;
       case 'pinned': list = list.filter(n => !n.archived && n.pinned); break;
+      case 'shared': list = list.filter(n => !n.archived && !isOwnNote(n, viewerId)); break;
       case 'brand': list = list.filter(n => !n.archived && n.brand_id === filter.value); break;
       case 'creator': list = list.filter(n => !n.archived && n.creator_id && creatorKeyById[n.creator_id] === filter.value); break;
       case 'program': list = list.filter(n => !n.archived && n.month === filter.value); break;
@@ -220,7 +269,9 @@ export default function NotesBoard({ brands = [], brandById = {}, creators = [],
       ? (n) => new Date(n.reminder_at).getTime()
       : (n) => -new Date(n.updated_at).getTime();
     return [...list].sort((a, b) => (b.pinned - a.pinned) || (key(a) - key(b)));
-  }, [notes, filter, search, creatorById, creatorKeyById]);
+  }, [notes, filter, search, creatorById, creatorKeyById, viewerId]);
+
+  const sharedCount = useMemo(() => live.filter(n => !isOwnNote(n, viewerId)).length, [live, viewerId]);
 
   const pinned = visible.filter(n => n.pinned);
   const others = visible.filter(n => !n.pinned);
@@ -244,6 +295,10 @@ export default function NotesBoard({ brands = [], brandById = {}, creators = [],
           onClick={() => setFilter({ kind: 'reminders' })} />
         <SideItem active={filter.kind === 'pinned'} icon="bi-pin-angle" label="Pinned"
           onClick={() => setFilter({ kind: 'pinned' })} />
+        {sharedCount > 0 && (
+          <SideItem active={filter.kind === 'shared'} icon="bi-people" label="Shared with me" count={sharedCount}
+            onClick={() => setFilter({ kind: 'shared' })} />
+        )}
 
         {brandGroups.length > 0 && <div className="pc-nside-head">Brands</div>}
         {brandGroups.map(g => (
@@ -272,6 +327,17 @@ export default function NotesBoard({ brands = [], brandById = {}, creators = [],
         <div className="pc-nside-head">More</div>
         <SideItem active={filter.kind === 'archive'} icon="bi-archive" label="Archive"
           onClick={() => setFilter({ kind: 'archive' })} />
+
+        {/* colour legend — cards are tinted by who shared them */}
+        <div className="pc-nside-head">Colours</div>
+        <div className="pc-nlegend">
+          <div className="pc-nlegend-row"><span className="pc-nlegend-dot" style={{ background: OWN_BG }} /> Mine</div>
+          {ROLE_TARGETS.map(r => (
+            <div key={r.role} className="pc-nlegend-row">
+              <span className="pc-nlegend-dot" style={{ background: ROLE_COLORS[r.role] }} /> {ROLE_LABEL[r.role]}
+            </div>
+          ))}
+        </div>
       </aside>
 
       {/* ── board ── */}
@@ -300,13 +366,13 @@ export default function NotesBoard({ brands = [], brandById = {}, creators = [],
           <>
             {pinned.length > 0 && others.length > 0 && filter.kind === 'all' && <div className="pc-nsection">Pinned</div>}
             <div className="pc-ngrid">
-              {pinned.map(n => <NoteCard key={n.id} n={n} brandById={brandById} creatorById={creatorById} readOnly={!canEditNote(n)}
+              {pinned.map(n => <NoteCard key={n.id} n={n} viewerId={viewerId} brandById={brandById} creatorById={creatorById} readOnly={!canEditNote(n)}
                 onOpen={() => setEditor({ mode: 'edit', note: n })} onPin={() => togglePin(n)}
                 onArchive={() => setArchived(n, true)} onDelete={() => removeNote(n)} onDone={() => doneReminder(n)} />)}
             </div>
             {pinned.length > 0 && others.length > 0 && filter.kind === 'all' && <div className="pc-nsection">Others</div>}
             <div className="pc-ngrid">
-              {others.map(n => <NoteCard key={n.id} n={n} brandById={brandById} creatorById={creatorById} readOnly={!canEditNote(n)}
+              {others.map(n => <NoteCard key={n.id} n={n} viewerId={viewerId} brandById={brandById} creatorById={creatorById} readOnly={!canEditNote(n)}
                 onOpen={() => setEditor({ mode: 'edit', note: n })} onPin={() => togglePin(n)}
                 onArchive={() => setArchived(n, !n.archived)} onDelete={() => removeNote(n)} onDone={() => doneReminder(n)} />)}
             </div>
@@ -316,6 +382,9 @@ export default function NotesBoard({ brands = [], brandById = {}, creators = [],
 
       {editor && (
         <NoteEditor editor={editor} brands={brands} brandById={brandById} creators={creators} month={month}
+          viewerId={viewerId} viewerRole={viewerRole} viewerIsSuperbob={viewerIsSuperbob}
+          teamLeads={teamLeads} labelCatalog={labelCatalog} onCreateLabel={onCreateLabel}
+          onLoadShares={store.loadNoteShares} onSaveShares={store.setNoteShares}
           readOnly={editor.mode === 'edit' && !canEditNote(editor.note)}
           onClose={() => setEditor(null)} onPersist={persistNote}
           onDelete={editor.mode === 'edit' && canEditNote(editor.note) ? () => { setEditor(null); removeNote(editor.note); } : null} />
@@ -334,12 +403,14 @@ function creatorHandle(c) {
 }
 
 /* ── one card ── */
-function NoteCard({ n, brandById, creatorById = {}, onOpen, onPin, onArchive, onDelete, onDone, readOnly = false }) {
+function NoteCard({ n, viewerId, brandById, creatorById = {}, onOpen, onPin, onArchive, onDelete, onDone, readOnly = false }) {
   const overdue = n.reminder_at && !n.reminder_done && new Date(n.reminder_at) <= new Date();
   const brandName = n.brand_id ? brandById[n.brand_id]?.name : null;
   const creatorName = n.creator_id ? creatorById[n.creator_id]?.name : null;
+  // Shared-with-me note: chip names who shared it (owner_name / role).
+  const sharedBy = readOnly ? (n.owner_name || ROLE_LABEL[ownerRoleKey(n)] || 'Shared') : null;
   return (
-    <div className="pc-ncard" style={{ background: colorBg(n.color) }} onClick={onOpen}>
+    <div className="pc-ncard" style={{ background: noteColorBg(n, viewerId) }} onClick={onOpen}>
       {!readOnly && (
         <button className={`pc-npin ${n.pinned ? 'on' : ''}`} title={n.pinned ? 'Unpin' : 'Pin'}
           onClick={e => { e.stopPropagation(); onPin(); }}><i className={`bi ${n.pinned ? 'bi-pin-angle-fill' : 'bi-pin-angle'}`} /></button>
@@ -348,9 +419,9 @@ function NoteCard({ n, brandById, creatorById = {}, onOpen, onPin, onArchive, on
       {htmlToText(n.body) && <div className="pc-nbody ac-rte-view"
         dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(n.body) }} />}
 
-      {(readOnly || n.reminder_at || brandName || creatorName || n.month || (n.labels || []).length > 0) && (
+      {(sharedBy || n.reminder_at || brandName || creatorName || n.month || (n.labels || []).length > 0) && (
         <div className="pc-nchips">
-          {readOnly && <span className="pc-nchip"><i className="bi bi-broadcast" /> Shared with you</span>}
+          {sharedBy && <span className="pc-nchip"><i className="bi bi-person-badge" /> {sharedBy}</span>}
           {!readOnly && n.reminder_at && !n.reminder_done && (
             <button className={`pc-nchip pc-nchip-rem ${overdue ? 'due' : ''}`} title="Mark reminder done"
               onClick={e => { e.stopPropagation(); onDone(); }}>
@@ -375,14 +446,18 @@ function NoteCard({ n, brandById, creatorById = {}, onOpen, onPin, onArchive, on
 }
 
 /* ── create / edit composer (auto-saves, Google Keep-style) ──
-   readOnly: view-only rendering (no persistence) — used for notes the viewer
-   can't write (e.g. an Ads Manager opening a note the Super Boss shared).
-   canShare: show a "Share with Ads Managers" toggle (Super Boss, own notes).
-   lockBrand: brand select disabled (drawer is pinned to one brand).
-   creators: raw handler_collab_creators rows — shows a "Creator" select (one
-   option per creator identity per brand; the newest deal row's id is stored).
-   lockCreator: creator select disabled (drawer is pinned to one creator). */
-export function NoteEditor({ editor, brands, brandById, creators = [], month, onClose, onPersist, onDelete, overlayClass = '', readOnly = false, canShare = false, lockBrand = false, lockCreator = false }) {
+   readOnly: view-only rendering (no persistence) — a note shared WITH the viewer
+   (they can't write it). Colours are role-based (owner's role), not chosen.
+   Sharing: internal staff (bob/team_lead/apc/ads_manager, + Super Boss) get a
+   "Share with" section on their own notes — role groups for everyone, plus
+   Everyone / a specific team for the Super Boss. onLoadShares/onSaveShares
+   persist to handler_note_shares; teamLeads feeds the specific-team picker.
+   labelCatalog / onCreateLabel: reusable saved labels (quick-pick + persist).
+   lockBrand / lockCreator: those selects disabled (drawer pinned to one). */
+export function NoteEditor({ editor, brands, brandById, creators = [], month, onClose, onPersist, onDelete,
+  overlayClass = '', readOnly = false, lockBrand = false, lockCreator = false,
+  viewerId, viewerRole, viewerIsSuperbob = false, teamLeads = [], labelCatalog = [],
+  onCreateLabel, onLoadShares, onSaveShares }) {
   const src = editor.note || {};
   const [f, setF] = useState({
     title: src.title || '',
@@ -393,12 +468,17 @@ export function NoteEditor({ editor, brands, brandById, creators = [], month, on
     month: src.month || '',
     labels: src.labels || [],
     pinned: !!src.pinned,
-    shared_with_ads: !!src.shared_with_ads,
   });
   const [reminderInput, setReminderInput] = useState(toLocalInput(src.reminder_at));
   const [labelInput, setLabelInput] = useState('');
   const [status, setStatus] = useState(''); // '' | 'saving' | 'saved'
+  const [shareTargets, setShareTargets] = useState([]); // NoteShareTarget[]
   const set = (k, v) => setF(prev => ({ ...prev, [k]: v }));
+
+  // Only internal staff may share, and only their OWN notes (new, or owned by the
+  // viewer) — Super Boss oversight editing someone else's note gets no share UI.
+  const isOwnEditing = editor.mode === 'add' || isOwnNote(src, viewerId);
+  const canShare = !readOnly && isOwnEditing && INTERNAL_ROLES.includes(viewerRole) && !!onSaveShares;
 
   // Creator select: one option per creator identity per brand — a creator's
   // deal rows across months collapse into one, keeping the newest row's id.
@@ -450,14 +530,13 @@ export function NoteEditor({ editor, brands, brandById, creators = [], month, on
     labels: f.labels,
     pinned: f.pinned,
     reminder_at: fromLocalInput(reminderInput),
-    ...(canShare ? { shared_with_ads: f.shared_with_ads } : {}),
   });
 
   const flush = useCallback(async () => {
-    if (readOnly) return; // view-only: never persist
+    if (readOnly) return idRef.current; // view-only: never persist
     const payload = buildPayload();
-    if (!payload.title && !htmlToText(payload.body)) return; // never persist a blank note
-    if (savingRef.current) { dirtyRef.current = true; return; }
+    if (!payload.title && !htmlToText(payload.body)) return idRef.current; // never persist a blank note
+    if (savingRef.current) { dirtyRef.current = true; return idRef.current; }
     savingRef.current = true;
     setStatus('saving');
     const newId = await onPersist(payload);
@@ -465,7 +544,26 @@ export function NoteEditor({ editor, brands, brandById, creators = [], month, on
     savingRef.current = false;
     setStatus('saved');
     if (dirtyRef.current) { dirtyRef.current = false; flush(); }
+    return idRef.current;
   }, [f, reminderInput, onPersist]);
+
+  // Load the note's current share targets (owner only, existing note).
+  useEffect(() => {
+    if (!canShare || !idRef.current || !onLoadShares) return;
+    let alive = true;
+    onLoadShares(idRef.current).then(list => { if (alive) setShareTargets(list || []); }).catch(() => {});
+    return () => { alive = false; };
+  }, [canShare]); // eslint-disable-line
+
+  const hasTarget = (t) => shareTargets.some(x => shareTokenKey(x) === shareTokenKey(t));
+  // Toggle a share target; ensure the note exists first (flush), then persist.
+  const toggleTarget = async (t) => {
+    const key = shareTokenKey(t);
+    const next = hasTarget(t) ? shareTargets.filter(x => shareTokenKey(x) !== key) : [...shareTargets, t];
+    setShareTargets(next);
+    const id = idRef.current || await flush();
+    if (id && onSaveShares) { try { await onSaveShares(id, next); } catch { /* ignore */ } }
+  };
 
   // debounced auto-save on any change
   useEffect(() => {
@@ -482,9 +580,13 @@ export function NoteEditor({ editor, brands, brandById, creators = [], month, on
     return () => window.removeEventListener('keydown', onKey);
   }, [close]);
 
-  function addLabel(raw) {
+  // save=true also stores the label in the reusable catalogue (for re-labelling).
+  function addLabel(raw, save = true) {
     const v = (raw ?? labelInput).trim().replace(/^#/, '');
-    if (v && !f.labels.includes(v)) set('labels', [...f.labels, v]);
+    if (v && !f.labels.includes(v)) {
+      set('labels', [...f.labels, v]);
+      if (save && onCreateLabel) onCreateLabel(v);
+    }
     setLabelInput('');
   }
 
@@ -495,7 +597,7 @@ export function NoteEditor({ editor, brands, brandById, creators = [], month, on
     return (
       <div className={`pc-overlay ${overlayClass}`} onClick={onClose}>
         <div className="pc-modal pc-modal-scroll pc-note-modal" onClick={e => e.stopPropagation()}
-          style={{ background: colorBg(src.color) }}>
+          style={{ background: noteColorBg(src, viewerId) }}>
           <div className="pc-modal-body">
             {src.title && <div className="pc-ntitle-in" style={{ pointerEvents: 'none' }}>{src.title}</div>}
             {htmlToText(src.body) && <div className="pc-nbody ac-rte-view" style={{ maxHeight: 'none' }}
@@ -520,10 +622,14 @@ export function NoteEditor({ editor, brands, brandById, creators = [], month, on
     );
   }
 
+  const catalogSuggestions = (labelCatalog || [])
+    .filter(l => !f.labels.includes(l.name))
+    .slice(0, 12);
+
   return (
     <div className={`pc-overlay ${overlayClass}`} onClick={close}>
       <div className="pc-modal pc-modal-scroll pc-note-modal" onClick={e => e.stopPropagation()}
-        style={{ background: colorBg(f.color) }}>
+        style={{ background: OWN_BG }}>
         <div className="pc-modal-body">
         <input className="pc-ntitle-in" placeholder="Title" value={f.title}
           onChange={e => set('title', e.target.value)} autoFocus />
@@ -544,6 +650,15 @@ export function NoteEditor({ editor, brands, brandById, creators = [], month, on
             onKeyDown={e => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addLabel(); } }}
             onBlur={() => labelInput.trim() && addLabel()} />
         </div>
+        {catalogSuggestions.length > 0 && (
+          <div className="pc-nlabel-pick">
+            <span className="pc-nlabel-pick-hd">Saved labels</span>
+            {catalogSuggestions.map(l => (
+              <button key={l.id} type="button" className="pc-nchip pc-nchip-pick"
+                onClick={() => addLabel(l.name, false)}><i className="bi bi-tag" /> {l.name}</button>
+            ))}
+          </div>
+        )}
 
         <div className="pc-nrow">
           <div className="pc-field"><label>Brand</label>
@@ -581,27 +696,42 @@ export function NoteEditor({ editor, brands, brandById, creators = [], month, on
           <div className="pc-nrem-hint">Shows a browser + in-app notification when due. Allow notifications when prompted.</div>
         </div>
 
-        {/* color swatches */}
-        <div className="pc-nswatches">
-          {NOTE_COLORS.map(c => (
-            <button key={c.key} title={c.label}
-              className={`pc-nswatch ${f.color === c.key ? 'on' : ''}`}
-              style={{ background: c.bg }} onClick={() => set('color', c.key)} />
-          ))}
-        </div>
+        {/* share with role groups / teams (internal staff, own notes) */}
+        {canShare && (
+          <div className="pc-nshare">
+            <label className="pc-field-label"><i className="bi bi-people" /> Share with</label>
+            <div className="pc-nshare-chips">
+              {viewerIsSuperbob && (
+                <button type="button" className={`pc-nshare-chip ${hasTarget({ kind: 'all' }) ? 'on' : ''}`}
+                  onClick={() => toggleTarget({ kind: 'all' })}><i className="bi bi-globe2" /> Everyone</button>
+              )}
+              {ROLE_TARGETS.map(r => (
+                <button key={r.role} type="button"
+                  className={`pc-nshare-chip ${hasTarget({ kind: 'role', role: r.role }) ? 'on' : ''}`}
+                  onClick={() => toggleTarget({ kind: 'role', role: r.role })}>{r.label}</button>
+              ))}
+            </div>
+            {viewerIsSuperbob && teamLeads.length > 0 && (
+              <>
+                <label className="pc-field-label" style={{ marginTop: 8 }}><i className="bi bi-diagram-3" /> Or a specific team</label>
+                <div className="pc-nshare-chips">
+                  {teamLeads.map(tl => (
+                    <button key={tl.id} type="button"
+                      className={`pc-nshare-chip ${hasTarget({ kind: 'team', team: tl.id }) ? 'on' : ''}`}
+                      onClick={() => toggleTarget({ kind: 'team', team: tl.id })}>{tl.name}'s team</button>
+                  ))}
+                </div>
+              </>
+            )}
+            <div className="pc-nrem-hint">Recipients can view (not edit); the note shows on their board tinted by your role.</div>
+          </div>
+        )}
         </div>{/* /pc-modal-body */}
 
         <div className="pc-modal-actions">
           <label className="pc-npin-toggle">
             <input type="checkbox" checked={f.pinned} onChange={e => set('pinned', e.target.checked)} /> Pin
           </label>
-          {canShare && (
-            <label className="pc-npin-toggle" title="Ads Managers can read (not edit) this note">
-              <input type="checkbox" checked={f.shared_with_ads}
-                onChange={e => set('shared_with_ads', e.target.checked)} />
-              {' '}<i className="bi bi-broadcast" /> Share with Ads Managers
-            </label>
-          )}
           <span className="pc-nstatus">{status === 'saving' ? 'Saving…' : status === 'saved' ? <><i className="bi bi-check2" /> Saved</> : ''}</span>
           <div style={{ flex: 1 }} />
           {onDelete && <button className="pc-btn pc-btn-ghost pc-btn-danger" onClick={onDelete}><i className="bi bi-trash" />Delete</button>}
@@ -617,6 +747,7 @@ export function NoteEditor({ editor, brands, brandById, creators = [], month, on
    next to the brand name). Click a note to open the same auto-saving editor;
    "New" pre-links the note to this brand. */
 export function BrandNotesDrawer({ brandId, brandName, brands, brandById, creators = [], month, notes = [], onClose, onChanged }) {
+  const { user } = useAuth();
   const [list, setList] = useState(() => notes.filter(n => !n.archived));
   const [editor, setEditor] = useState(null);
   useEffect(() => { setList(notes.filter(n => !n.archived)); }, [notes]);
@@ -677,7 +808,7 @@ export function BrandNotesDrawer({ brandId, brandName, brands, brandById, creato
                   const text = htmlToText(n.body);
                   const overdue = n.reminder_at && !n.reminder_done && new Date(n.reminder_at) <= new Date();
                   return (
-                    <button key={n.id} className="pc-bnitem" style={{ background: colorBg(n.color) }} onClick={() => setEditor({ mode: 'edit', note: n })}>
+                    <button key={n.id} className="pc-bnitem" style={{ background: noteColorBg(n, user?.id) }} onClick={() => setEditor({ mode: 'edit', note: n })}>
                       {n.pinned && <i className="bi bi-pin-angle-fill pc-bnpin" />}
                       {n.title && <div className="pc-bntitle">{n.title}</div>}
                       {text && <div className="pc-bnsnippet">{text}</div>}
@@ -699,7 +830,7 @@ export function BrandNotesDrawer({ brandId, brandName, brands, brandById, creato
       </div>
       {editor && (
         <NoteEditor editor={editor} brands={brands} brandById={brandById} creators={creators} month={month}
-          overlayClass="pc-overlay-top"
+          viewerId={user?.id} overlayClass="pc-overlay-top"
           onClose={() => setEditor(null)} onPersist={persist}
           onDelete={editor.mode === 'edit' ? () => { setEditor(null); remove(editor.note); } : null} />
       )}
@@ -714,6 +845,7 @@ export function BrandNotesDrawer({ brandId, brandName, brands, brandById, creato
    months within the brand); "New" pre-links this deal row + its brand. */
 export function CreatorNotesDrawer({ creator, brands, brandById, creators = [], month, notes = [], onClose, onChanged }) {
   // creator: { id (deal row new notes link to), name, handle, brandId, brandName }
+  const { user } = useAuth();
   const [list, setList] = useState(() => notes.filter(n => !n.archived));
   const [editor, setEditor] = useState(null);
   useEffect(() => { setList(notes.filter(n => !n.archived)); }, [notes]);
@@ -774,7 +906,7 @@ export function CreatorNotesDrawer({ creator, brands, brandById, creators = [], 
                   const text = htmlToText(n.body);
                   const overdue = n.reminder_at && !n.reminder_done && new Date(n.reminder_at) <= new Date();
                   return (
-                    <button key={n.id} className="pc-bnitem" style={{ background: colorBg(n.color) }} onClick={() => setEditor({ mode: 'edit', note: n })}>
+                    <button key={n.id} className="pc-bnitem" style={{ background: noteColorBg(n, user?.id) }} onClick={() => setEditor({ mode: 'edit', note: n })}>
                       {n.pinned && <i className="bi bi-pin-angle-fill pc-bnpin" />}
                       {n.title && <div className="pc-bntitle">{n.title}</div>}
                       {text && <div className="pc-bnsnippet">{text}</div>}
@@ -795,7 +927,7 @@ export function CreatorNotesDrawer({ creator, brands, brandById, creators = [], 
       </div>
       {editor && (
         <NoteEditor editor={editor} brands={brands} brandById={brandById} creators={creators} month={month}
-          overlayClass="pc-overlay-top" lockCreator lockBrand
+          viewerId={user?.id} overlayClass="pc-overlay-top" lockCreator lockBrand
           onClose={() => setEditor(null)} onPersist={persist}
           onDelete={editor.mode === 'edit' ? () => { setEditor(null); remove(editor.note); } : null} />
       )}
@@ -810,9 +942,14 @@ export function CreatorNotesDrawer({ creator, brands, brandById, creators = [], 
    owner_name shown as a chip). Includes a brand-wise filter.
    fixedBrand {id,name}: pin the drawer to ONE brand — only that brand's notes,
    no brand filter, new notes pre-linked (+ brand select locked).
-   canEditNote(n): notes failing it open read-only (e.g. shared boss notes).
-   canShareNote(n): show the "Share with Ads Managers" toggle (Super Boss, own). */
-export function AllNotesDrawer({ notes = [], brands, brandById, creators = [], month, onClose, onChanged, canCreate = true, title = 'All notes', fixedBrand = null, canEditNote = () => true, canShareNote = () => false }) {
+   canEditNote(n): notes failing it open read-only (shared-in notes).
+   viewerRole / viewerIsSuperbob / teamLeads: drive the editor's Share section.
+   labelCatalog / onCreateLabel: reusable saved labels. */
+export function AllNotesDrawer({ notes = [], brands, brandById, creators = [], month, onClose, onChanged,
+  canCreate = true, title = 'All notes', fixedBrand = null, canEditNote = () => true,
+  viewerRole, viewerIsSuperbob = false, teamLeads = [], labelCatalog = [], onCreateLabel,
+  onLoadShares = store.loadNoteShares, onSaveShares = store.setNoteShares }) {
+  const { user } = useAuth();
   const scoped = useCallback(
     (arr) => arr.filter(n => !n.archived && (!fixedBrand || n.brand_id === fixedBrand.id)),
     [fixedBrand]);
@@ -915,15 +1052,15 @@ export function AllNotesDrawer({ notes = [], brands, brandById, creators = [], m
                   const text = htmlToText(n.body);
                   const overdue = n.reminder_at && !n.reminder_done && new Date(n.reminder_at) <= new Date();
                   const brandName = n.brand_id ? brandById[n.brand_id]?.name : null;
+                  const sharedBy = !isOwnNote(n, user?.id) ? (n.owner_name || ROLE_LABEL[ownerRoleKey(n)]) : null;
                   return (
-                    <button key={n.id} className="pc-bnitem" style={{ background: colorBg(n.color) }} onClick={() => setEditor({ mode: 'edit', note: n })}>
+                    <button key={n.id} className="pc-bnitem" style={{ background: noteColorBg(n, user?.id) }} onClick={() => setEditor({ mode: 'edit', note: n })}>
                       {n.pinned && <i className="bi bi-pin-angle-fill pc-bnpin" />}
                       {n.title && <div className="pc-bntitle">{n.title}</div>}
                       {text && <div className="pc-bnsnippet">{text}</div>}
-                      {(n.owner_name || n.shared_with_ads || brandName || n.creator_id || n.reminder_at || n.month || (n.labels || []).length > 0) && (
+                      {(sharedBy || brandName || n.creator_id || n.reminder_at || n.month || (n.labels || []).length > 0) && (
                         <div className="pc-nchips">
-                          {n.owner_name && <span className="pc-nchip"><i className="bi bi-person-badge" /> {n.owner_name}</span>}
-                          {n.shared_with_ads && <span className="pc-nchip"><i className="bi bi-broadcast" /> Shared</span>}
+                          {sharedBy && <span className="pc-nchip"><i className="bi bi-person-badge" /> {sharedBy}</span>}
                           {n.reminder_at && !n.reminder_done && <span className={`pc-nchip pc-nchip-rem ${overdue ? 'due' : ''}`}><i className="bi bi-alarm" /> {reminderLabel(n.reminder_at)}</span>}
                           {brandName && <span className="pc-nchip pc-nchip-brand"><i className="bi bi-shop" /> {brandName}</span>}
                           {n.creator_id && creatorNames[n.creator_id] && <span className="pc-nchip pc-nchip-creator"><i className="bi bi-person" /> {creatorNames[n.creator_id]}</span>}
@@ -942,8 +1079,10 @@ export function AllNotesDrawer({ notes = [], brands, brandById, creators = [], m
       {editor && (
         <NoteEditor editor={editor} brands={brands} brandById={brandById} creators={creators} month={month}
           overlayClass="pc-overlay-top"
+          viewerId={user?.id} viewerRole={viewerRole} viewerIsSuperbob={viewerIsSuperbob}
+          teamLeads={teamLeads} labelCatalog={labelCatalog} onCreateLabel={onCreateLabel}
+          onLoadShares={onLoadShares} onSaveShares={onSaveShares}
           readOnly={editor.mode === 'edit' && !canEditNote(editor.note)}
-          canShare={canShareNote(editor.note)}
           lockBrand={!!fixedBrand}
           onClose={() => setEditor(null)} onPersist={persist}
           onDelete={editor.mode === 'edit' && canEditNote(editor.note) ? () => { setEditor(null); remove(editor.note); } : null} />

@@ -31,7 +31,7 @@ export default function MyNotes() {
 
   return (
     <div className="pc-app" style={{ minHeight: 'auto', background: 'transparent' }}>
-      <NotesBoard brands={brands} brandById={brandById} month={thisMonthKey()} ownerOnly />
+      <NotesBoard brands={brands} brandById={brandById} month={thisMonthKey()} />
     </div>
   );
 }

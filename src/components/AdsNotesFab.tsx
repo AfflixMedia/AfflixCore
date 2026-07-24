@@ -10,19 +10,15 @@ import '../pages/handler-collab/handlerCollab.css';
 // NotesBoard.tsx is @ts-nocheck, so its exports infer `never[]` prop types; treat as any.
 const AllNotesDrawer = AllNotesDrawerImpl as any;
 
-/* Floating notes button — mounted app-wide (Layout). Three audiences:
-   - Ads Manager (everywhere): their own Keep-style notes in the owner-scoped
-     `handler_notes` table + notes a Super Boss shared with them (read-only,
-     policy "handler_notes ads read shared"). On a Brand Detail page the
-     drawer pins to THAT brand: only its notes, new notes pre-linked to it.
-   - Super Boss (Brand Detail, GMV Max tab ONLY): that brand's Ads Manager
-     notes + his own (owner chip per note). He can add notes (auto-linked to
-     the brand) and share his own with Ads Managers ("Share with Ads
-     Managers" toggle → `shared_with_ads`).
-   - Bob / Team Lead / APC (everywhere, own-notes mode): their OWN notes only
-     — the floating counterpart of the /my-notes board. Loads owner-scoped
-     (Bob's read-all RLS would otherwise include everyone's notes) and pins
-     to the brand on Brand Detail pages like the Ads Manager view. */
+/* Floating notes button — mounted app-wide (Layout). Two loading modes:
+   - Normal (Ads Manager everywhere; Bob / Team Lead / APC own-notes mode): the
+     viewer's OWN notes + notes SHARED with them, via list_visible_notes(). Cards
+     are tinted by the sharer's role; own notes are white. Internal staff can
+     share their own notes with role groups (+ Everyone / a specific team for the
+     Super Boss). On a Brand Detail page the drawer pins to THAT brand.
+   - Super Boss oversight (Brand Detail, GMV Max tab ONLY): every Ads Manager's
+     notes + his own (owner chip per note) via the "superbob ads all" policy —
+     this is management, not the sharing path. He can add + edit them here. */
 
 function thisMonthKey() {
   const d = new Date();
@@ -126,58 +122,63 @@ export default function AdsNotesFab() {
   const [open, setOpen] = useState(false);
   const [notes, setNotes] = useState<any[]>([]);
   const [brands, setBrands] = useState<any[]>([]);
+  const [teamLeads, setTeamLeads] = useState<any[]>([]);
+  const [labelCatalog, setLabelCatalog] = useState<any[]>([]);
 
   const reload = useCallback(async () => {
     try {
-      if (isOwnView) {
-        // Own notes only — Bob's read-all RLS would otherwise include everyone's.
-        setNotes(profile?.id ? await store.loadNotes(profile.id) : []);
+      if (isBossView) {
+        // Super Boss oversight (GMV-Max tab): every ads_manager's notes PLUS his
+        // own — coloured by the owner's role. This is NOT the sharing path.
+        const { data: mgrs, error: mErr } = await supabase
+          .from('profiles').select('id, full_name, email, role, is_superbob').eq('role', 'ads_manager');
+        if (mErr) throw mErr;
+        const list = (mgrs as any[]) ?? [];
+        const meta: Record<string, any> = {};
+        list.forEach(m => { meta[m.id] = { name: m.full_name || m.email || 'Ads Manager', role: m.role, super: !!m.is_superbob }; });
+        const ownerIds = list.map(m => m.id);
+        if (profile?.id) { ownerIds.push(profile.id); meta[profile.id] = { name: 'My note', role: profile.role, super: !!profile.is_superbob }; }
+        if (!ownerIds.length) { setNotes([]); return; }
+        const { data, error } = await supabase.from('handler_notes').select('*')
+          .in('owner_id', ownerIds)
+          .order('pinned', { ascending: false })
+          .order('updated_at', { ascending: false });
+        if (error) throw error;
+        setNotes(((data as any[]) ?? []).map(n => ({
+          ...n,
+          owner_name: meta[n.owner_id]?.name,
+          owner_role: meta[n.owner_id]?.role,
+          owner_is_superbob: meta[n.owner_id]?.super,
+          is_owner: n.owner_id === profile?.id,
+        })));
         return;
       }
-      if (isAdsManager) {
-        // Own notes + shared Super Boss notes (read-only). Tag foreign notes
-        // with the sharer's name so the drawer shows who they came from.
-        const list = await store.loadNotes();
-        const foreign = [...new Set(list.map(n => n.owner_id)
-          .filter(oid => oid && oid !== profile?.id))];
-        let nameById: Record<string, string> = {};
-        if (foreign.length) {
-          const { data } = await supabase.from('profiles')
-            .select('id, full_name, email').in('id', foreign);
-          nameById = Object.fromEntries(((data as any[]) ?? [])
-            .map(p => [p.id, p.full_name || p.email || 'Super Boss']));
-        }
-        setNotes(list.map(n => n.owner_id === profile?.id
-          ? n : { ...n, owner_name: nameById[n.owner_id] || 'Super Boss' }));
-        return;
-      }
-      // Super Boss: every ads_manager's notes (tagged with the owner's name)
-      // PLUS his own notes (he can create new ones — owned by him).
-      const { data: mgrs, error: mErr } = await supabase
-        .from('profiles').select('id, full_name, email').eq('role', 'ads_manager');
-      if (mErr) throw mErr;
-      const list = (mgrs as any[]) ?? [];
-      const nameById: Record<string, string> = Object.fromEntries(
-        list.map(m => [m.id, m.full_name || m.email || 'Ads Manager']));
-      const ownerIds = list.map(m => m.id);
-      if (profile?.id) { ownerIds.push(profile.id); nameById[profile.id] = 'My note'; }
-      if (!ownerIds.length) { setNotes([]); return; }
-      const { data, error } = await supabase.from('handler_notes').select('*')
-        .in('owner_id', ownerIds)
-        .order('pinned', { ascending: false })
-        .order('updated_at', { ascending: false });
-      if (error) throw error;
-      setNotes(((data as any[]) ?? []).map(n => ({ ...n, owner_name: nameById[n.owner_id] })));
+      // Everyone else (ads_manager / bob / team_lead / apc): own + shared-to-me,
+      // with owner role/name folded in by list_visible_notes.
+      setNotes(await store.loadVisibleNotes());
     } catch { /* ignore */ }
-  }, [isAdsManager, isOwnView, profile?.id]);
+  }, [isBossView, profile?.id, profile?.role, profile?.is_superbob]);
 
-  // Initial load: notes + brands (for the brand link/chips + brand-wise filter).
+  const reloadLabels = useCallback(async () => {
+    if (!profile?.id) return;
+    try { setLabelCatalog(await store.loadNoteLabels(profile.id)); } catch { /* ignore */ }
+  }, [profile?.id]);
+  const onCreateLabel = useCallback(async (name: string) => {
+    try { await store.upsertNoteLabel(name); reloadLabels(); } catch { /* ignore */ }
+  }, [reloadLabels]);
+
+  // Initial load: notes + brands + label catalogue (+ team leads for Super Boss).
   useEffect(() => {
     if (!active) { setOpen(false); return; }
     reload();
+    reloadLabels();
     supabase.from('brands').select('id,name').order('name')
       .then(({ data }) => setBrands((data as any[]) ?? []));
-  }, [active, reload]);
+    if (profile?.is_superbob) {
+      supabase.from('profiles').select('id, full_name, email').eq('role', 'team_lead').order('full_name')
+        .then(({ data }) => setTeamLeads(((data as any[]) ?? []).map(p => ({ id: p.id, name: p.full_name || p.email || 'Team Lead' }))));
+    }
+  }, [active, reload, reloadLabels, profile?.is_superbob]);
 
   // Fire due reminders in-app (like the handler workspace) so they surface even
   // without pg_cron, and refresh the badge when any fire. Owners only.
@@ -215,9 +216,10 @@ export default function AdsNotesFab() {
     !n.archived && inScope(n)
     && n.reminder_at && !n.reminder_done && new Date(n.reminder_at) <= new Date()).length;
 
-  const canEditNote = (n: any) => isBossView || !n?.owner_id || n.owner_id === profile?.id;
-  // Only the Super Boss shares, and only his OWN notes (new notes have no owner yet).
-  const canShareNote = (n: any) => isBossView && (!n?.owner_id || n.owner_id === profile?.id);
+  // Own notes editable; shared-in notes read-only. Super Boss oversight also
+  // edits ads_manager notes (his GMV-Max tab), but the editor suppresses the
+  // Share section on notes he doesn't own.
+  const canEditNote = (n: any) => isBossView || (n?.is_owner ?? (!n?.owner_id || n.owner_id === profile?.id));
 
   const title = fixedBrand
     ? `${fixedBrand.name} — notes`
@@ -235,8 +237,9 @@ export default function AdsNotesFab() {
       </button>
       {open && (
         <AllNotesDrawer notes={notes} brands={brands} brandById={brandById} month={thisMonthKey()}
-          title={title} fixedBrand={fixedBrand}
-          canEditNote={canEditNote} canShareNote={canShareNote}
+          title={title} fixedBrand={fixedBrand} canEditNote={canEditNote}
+          viewerRole={profile?.role} viewerIsSuperbob={!!profile?.is_superbob}
+          teamLeads={teamLeads} labelCatalog={labelCatalog} onCreateLabel={onCreateLabel}
           onClose={() => setOpen(false)} onChanged={reload} />
       )}
     </div>

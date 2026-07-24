@@ -1235,6 +1235,26 @@ a.pc-vx-prod:hover{ text-decoration:none; filter:brightness(.97); }
 .pc-npin-toggle{ display:inline-flex; align-items:center; gap:7px; font-size:13px; font-weight:600; color:var(--pc-text-2); cursor:pointer; }
 .pc-nstatus{ display:inline-flex; align-items:center; gap:4px; margin-left:14px; font-size:12px; font-weight:600; color:var(--pc-success-fg); min-width:54px; }
 
+/* reusable saved-label quick-pick (composer) */
+.pc-nlabel-pick{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:0 0 10px; }
+.pc-nlabel-pick-hd{ font-size:11px; font-weight:800; letter-spacing:.4px; text-transform:uppercase; color:var(--pc-text-3); margin-right:2px; }
+.pc-nchip-pick{ border:1px dashed var(--pc-divider); background:transparent; color:var(--pc-text-2); cursor:pointer; transition:border .14s, color .14s, background .14s; }
+.pc-nchip-pick:hover{ border-style:solid; border-color:var(--pc-accent); color:var(--pc-accent); background:var(--pc-accent-light); }
+
+/* share-with role/team picker (composer) */
+.pc-nshare{ margin:14px 0 4px; padding-top:12px; border-top:1px solid var(--pc-divider); }
+.pc-field-label{ display:flex; align-items:center; gap:6px; font-size:12px; font-weight:800; letter-spacing:.2px; color:var(--pc-text-2); margin-bottom:8px; }
+.pc-nshare-chips{ display:flex; flex-wrap:wrap; gap:7px; }
+.pc-nshare-chip{ display:inline-flex; align-items:center; gap:5px; padding:5px 11px; border-radius:999px; border:1px solid var(--pc-divider); background:var(--pc-card); color:var(--pc-text-2); font-size:12.5px; font-weight:700; cursor:pointer; transition:border .14s, color .14s, background .14s, transform .1s var(--pc-ease); }
+.pc-nshare-chip:hover{ border-color:var(--pc-accent); color:var(--pc-accent); }
+.pc-nshare-chip:active{ transform:scale(.95); }
+.pc-nshare-chip.on{ background:var(--pc-accent); border-color:var(--pc-accent); color:#fff; }
+
+/* colour legend (notes sidebar) */
+.pc-nlegend{ display:flex; flex-direction:column; gap:6px; padding:4px 10px 6px; }
+.pc-nlegend-row{ display:flex; align-items:center; gap:8px; font-size:12px; font-weight:600; color:var(--pc-text-2); }
+.pc-nlegend-dot{ width:14px; height:14px; border-radius:5px; border:1px solid rgba(0,0,0,.12); flex:0 0 auto; }
+
 /* brand-row Keep-notes indicator (Brands tab, next to brand name) */
 .pc-keepnote-btn{ flex:0 0 auto; height:32px; min-width:32px; padding:0 8px; margin-left:auto; border-radius:9px; border:1px solid var(--pc-divider); background:var(--pc-card); color:var(--pc-text-2); display:inline-flex; align-items:center; justify-content:center; gap:5px; cursor:pointer; transition:border .15s, color .15s, background .15s, transform .12s var(--pc-ease); }
 .pc-keepnote-btn:hover{ border-color:var(--pc-accent); color:var(--pc-accent); }
