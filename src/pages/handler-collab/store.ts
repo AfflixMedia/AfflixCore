@@ -561,6 +561,8 @@ export interface HandlerNote {
   owner_is_superbob?: boolean;
   owner_name?: string;
   is_owner?: boolean;
+  // For the caller's OWN notes: who it's shared with (empty otherwise).
+  shares?: { kind: string; role?: string | null; team?: string | null; team_name?: string | null }[];
 }
 
 export type NotePatch = Partial<Omit<HandlerNote, 'id' | 'owner_id' | 'created_at' | 'updated_at'>>;

@@ -1190,6 +1190,7 @@ a.pc-vx-prod:hover{ text-decoration:none; filter:brightness(.97); }
 .pc-nchip-brand{ background:var(--pc-accent-light); color:var(--pc-accent); }
 .pc-nchip-creator{ background:var(--pc-warn-bg); color:var(--pc-warn-fg); }
 .pc-nchip-prog{ background:var(--pc-info-bg); color:var(--pc-info-fg); }
+.pc-nchip-shared{ background:var(--pc-success-bg); color:var(--pc-success-fg); }
 /* label chips (rail tone = purple) */
 .pc-nchip .bi-tag{ color:#7C3AED; }
 .pc-nchip-brand .bi-shop, .pc-nchip-prog .bi-calendar3, .pc-nchip-creator .bi-person{ color:inherit; }
