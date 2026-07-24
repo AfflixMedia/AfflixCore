@@ -35,6 +35,7 @@ interface MonthRow {
   month: string;
   allocated_budget: number;
   spend_to_date: number;
+  target_roi: number;
 }
 interface WeekRow {
   id?: string;
@@ -62,7 +63,7 @@ interface ProductRow {
 }
 
 const emptyMonth = (brandId: string, month: string): MonthRow => ({
-  brand_id: brandId, month, allocated_budget: 0, spend_to_date: 0,
+  brand_id: brandId, month, allocated_budget: 0, spend_to_date: 0, target_roi: 0,
 });
 
 export default function BrandGmvMaxTab({ brandId, canEdit, currency }: { brandId: string; canEdit: boolean; currency?: string | null }) {
@@ -169,6 +170,7 @@ export default function BrandGmvMaxTab({ brandId, canEdit, currency }: { brandId
       month,
       allocated_budget: monthRow.allocated_budget,
       spend_to_date: spendToDate,
+      target_roi: monthRow.target_roi,
     };
     const res = await supabase.from('brand_gmv_max_monthly')
       .upsert(payload, { onConflict: 'brand_id,month' }).select().single();
@@ -298,6 +300,12 @@ export default function BrandGmvMaxTab({ brandId, canEdit, currency }: { brandId
   const totalSpend = weeks.reduce((s, w) => s + n(w.ad_spend), 0);
   const totalGmv   = weeks.reduce((s, w) => s + n(w.gmv), 0);
   const remaining  = (monthRow.allocated_budget ?? 0) - totalSpend;
+  // Achieved blended ROI for the month = total GMV / total ad spend.
+  const targetRoi   = n(monthRow.target_roi);
+  const achievedRoi = totalSpend > 0 ? totalGmv / totalSpend : 0;
+  // How much of the ROI goal is met (null = no goal set).
+  const roiPct = targetRoi > 0 ? (achievedRoi / targetRoi) * 100 : null;
+  const roiMet = roiPct != null && roiPct >= 100;
   // Allocated budget is read-only once the month row is saved, until Update.
   const budgetLocked = !!monthRow.id && !editBudget;
   // Period covered by the spend — first week start to last week end.
@@ -333,20 +341,26 @@ export default function BrandGmvMaxTab({ brandId, canEdit, currency }: { brandId
                 ))}
               </div>
             </Col>
-            <Col md={3}>
-              <Form.Label className="fw-bold">Allocated budget ($)</Form.Label>
+            <Col md={2}>
+              <Form.Label className="fw-bold">Allocated budget ({sym})</Form.Label>
               <NumberInput step="0.01" disabled={!canEdit || budgetLocked} value={monthRow.allocated_budget}
                 onChange={n => setMonthRow({ ...monthRow, allocated_budget: n })} />
             </Col>
+            <Col md={2}>
+              <Form.Label className="fw-bold">Target ROI</Form.Label>
+              <NumberInput step="0.01" disabled={!canEdit || budgetLocked} value={monthRow.target_roi}
+                onChange={n => setMonthRow({ ...monthRow, target_roi: n })} />
+              <Form.Text className="text-muted">Goal (e.g. 3.5).</Form.Text>
+            </Col>
             <Col md={3}>
               <Form.Label className="fw-bold d-flex justify-content-between align-items-baseline">
-                <span>Spend to date ($)</span>
+                <span>Spend to date ({sym})</span>
                 {spendPeriod && <small className="fw-normal text-muted">{spendPeriod}</small>}
               </Form.Label>
               <NumberInput step="0.01" disabled value={totalSpend} onChange={() => {}} />
               <Form.Text className="text-muted">Auto-calculated from weekly entries.</Form.Text>
             </Col>
-            <Col md={3} className="d-flex flex-column">
+            <Col md={2} className="d-flex flex-column">
               {/* spacer keeps the button level with the inputs above */}
               <div className="invisible d-none d-md-block" aria-hidden>
                 <Form.Label className="fw-bold">&nbsp;</Form.Label>
@@ -358,7 +372,7 @@ export default function BrandGmvMaxTab({ brandId, canEdit, currency }: { brandId
                 </Button>
               ) : (
                 <Button className="w-100" disabled={!canEdit || savingMonth} onClick={saveMonth}>
-                  {savingMonth ? 'Saving…' : 'Save monthly budget'}
+                  {savingMonth ? 'Saving…' : 'Save budget & target'}
                 </Button>
               )}
             </Col>
@@ -368,6 +382,11 @@ export default function BrandGmvMaxTab({ brandId, canEdit, currency }: { brandId
             <Col md={3}><MiniStat label="Spend" value={`${sym}${totalSpend.toLocaleString()}`} /></Col>
             <Col md={3}><MiniStat label="Remaining" value={`${sym}${remaining.toLocaleString()}`} variant={remaining < 0 ? 'danger' : 'success'} /></Col>
             <Col md={3}><MiniStat label="GMV (sum of weeks)" value={`${sym}${totalGmv.toLocaleString()}`} /></Col>
+          </Row>
+          <Row className="g-3 mt-1">
+            <Col md={12}>
+              <RoiGoalTile target={targetRoi} achieved={achievedRoi} pct={roiPct} met={roiMet} />
+            </Col>
           </Row>
         </Card.Body>
       </Card>
@@ -542,6 +561,35 @@ function MiniStat({ label, value, variant }: { label: string; value: string; var
     <div className="p-3 rounded h-100" style={{ background: '#f8fafc', border: '1px solid #e5e7eb' }}>
       <div className="text-muted fw-bold text-uppercase" style={{ letterSpacing: '.5px', fontSize: '.8rem' }}>{label}</div>
       <div className={`fs-5 fw-semibold mt-1 ${variant === 'danger' ? 'text-danger' : variant === 'success' ? 'text-success' : ''}`}>{value}</div>
+    </div>
+  );
+}
+
+/** ROI goal vs achieved, with a progress bar showing how much of the target is met. */
+function RoiGoalTile({ target, achieved, pct, met }: { target: number; achieved: number; pct: number | null; met: boolean }) {
+  const barPct = pct == null ? 0 : Math.max(0, Math.min(100, pct));
+  return (
+    <div className="p-3 rounded h-100" style={{ background: '#f8fafc', border: '1px solid #e5e7eb' }}>
+      <div className="d-flex justify-content-between align-items-baseline mb-1">
+        <span className="text-muted fw-bold text-uppercase" style={{ letterSpacing: '.5px', fontSize: '.8rem' }}>ROI goal</span>
+        {pct != null && (
+          <span className={`fw-semibold ${met ? 'text-success' : 'text-danger'}`}>
+            {pct.toFixed(0)}% of target
+          </span>
+        )}
+      </div>
+      <div className="d-flex align-items-baseline gap-2 flex-wrap">
+        <span className={`fs-4 fw-semibold ${pct == null ? '' : met ? 'text-success' : 'text-danger'}`}>{achieved.toFixed(2)}</span>
+        <span className="text-muted">achieved</span>
+        <span className="text-muted ms-auto">Target {target > 0 ? target.toFixed(2) : '—'}</span>
+      </div>
+      <div className="progress mt-2" style={{ height: 8 }}>
+        <div className={`progress-bar ${met ? 'bg-success' : 'bg-warning'}`} role="progressbar"
+          style={{ width: `${barPct}%` }} aria-valuenow={barPct} aria-valuemin={0} aria-valuemax={100} />
+      </div>
+      {target <= 0 && (
+        <div className="text-muted small mt-2">Set a Target ROI above to track attainment. Achieved = total GMV ÷ total ad spend.</div>
+      )}
     </div>
   );
 }

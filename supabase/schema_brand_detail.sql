@@ -24,6 +24,7 @@ create table if not exists public.brand_gmv_max_monthly (
   month text not null,                          -- 'YYYY-MM'
   allocated_budget numeric(14,2) not null default 0,
   spend_to_date numeric(14,2) not null default 0,
+  target_roi numeric(10,4) not null default 0,  -- monthly ROI goal (0 = none)
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique(brand_id, month)
